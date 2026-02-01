@@ -1,0 +1,248 @@
+											( Our Graduation System AI Architecture )
+
+
+	General System :-
+		0 ) Analyze button : (Summary for case and Final Ruling)
+
+	Multi-Agent System :-
+		0 ) Overview : 
+			1- Approach or Way : رسمي قانوني كما طلبت.
+			2- System : نظام دعم قرار قضائي جنائي مصري (أداة مساندة - لا بديل للقاضي).
+			3- Our Knowledge : قوانين مصرية، أحكام محكمة النقض المصرية، سوابق قضائية جنائية مصرية، مستندات القضية المرفوعة. منع تام لاستخدام مصادر غير مصرية أو معرفة عامة للـLLM خارج الرسم البياني.
+			4- TechStack : Graph RAG + Neo4j لتمثيل المعرفة والوقائع.
+			5- أي غموض أذكره صراحة في كل قسم.
+
+		1 ) Layers : 
+			1- Ingestion & Preprocessing
+			2- Knowledge Graph (Neo4j)
+			3- Multi-Agent Orchestrator،
+			4- LLM Reasoning Layer
+			5- Audit / Logging / UI
+
+		2 ) Agnets Communications :
+			1- مراجع غير قابلة للتحريف إلى عقد Neo4j (node IDs)
+			2- رسائل JSON متسلسلة تحمل قائمة مراجع (no free-text summaries كمرجع وحيد)
+			3- سجل إثبات provenance في Neo4j و ـWORM audit log.
+
+		3 ) System Architecture :
+			1- Orchestrator :
+				1- Rule 
+				    -  -> استلام ملفات القضية (وقائع – تحقيقات – أحراز – تقارير – أحكام سابقة – مستندات دفاع).
+				    -  -> توزيع المهام على الـAgents وفق Workflow محدد.
+					-  -> تجميع المخرجات المرحلية.
+					-  -> إدارة دورة حياة القضية (Case State).
+					-  -> منع أي Agent من العمل خارج السياق المصرّح به.
+				2- Context 
+				    -  -> يحتفظ بـ Global Context (ملخص القضية الحالي).
+					-  -> معرف القضية
+					-  -> التهم الحالية
+					-  -> قائمة المستندات المدخلة
+					-  -> قائمة المسائل محل النزاع (Issues)
+					-  -> Snapshot Hash لآخر Graph State
+				3- outputs
+					-  -> Task Dispatch Plan
+					-  -> Approved Context Windows لكل Agent
+					-  -> تجميع التقارير النهائية لعرضها على Judge Agent
+
+			2- Data Ingestion & Graph Builder Agent :
+				1- Rule 
+				    -  -> تحويل النصوص غير المهيكلة إلى Knowledge Graph قانوني.
+					-  -> لا تفسير، لا ترجيح، لا استنتاج.
+				2- inputs 
+				    -  -> ملفات PDF/Text (أمر إحالة، محاضر شرطة، تقارير طب شرعي,تحقيقات نيابة,أحراز,أحكام سابقة).
+				3- Processing
+				    -  -> OCR + Chunking
+					-  -> Extract .. (وقائع,إجراءات,أدلة,أشخاص,تهم)
+					-  -> Convert to .. Nodes + Relationships في Neo4j
+					-  -> Each input link with (docID,Page,Span)
+				4- outputs
+				    -  -> Cypher Queries منفذة
+					-  -> Neo4j Graph محدث
+					-  -> Provenance Metadata
+
+			3- Procedural Auditor Agent :
+				1- Rule 
+				    -  -> مراجعة سلامة الإجراءات وفق قانون الإجراءات الجنائية فقط.
+					-  -> تطبيق مبادئ النقض الخاصة بالبطلان (نسبي / مطلق).
+				2- inputs 
+				    -  -> إجراءات القبض , التفتيش , الاستجواب
+					-  -> مواد قانون الإجراءات الجنائية
+					-  -> مبادئ النقض الإجرائية
+				3- Processing
+				    -  -> مطابقة كل إجراء بشرطه القانوني
+					-  -> Determine .. (صحة الإجراء,بطلان الإجراء,أثر البطلان على الدليل (ثمرة فاسدة أم لا))
+				4- outputs 
+				    -  -> تقرير بصحة أو بطلان الإجراءات (Deduction of Nullity).
+					-  -> Procedural Audit Report ...
+					{
+						"procedure": "تفتيش",
+						"status": "باطل",
+						"nullity_type": "بطلان مطلق",
+						"affected_evidence": ["E12","E15"],
+						"legal_basis": ["م 45 إجراءات","نقض 12/3/1998"]
+					}
+
+			4 - Legal Researcher Agent :
+				1- Rule 
+				    -  -> البحث القانوني المنضبط فقط.
+					-  -> لا تحليل وقائع، لا ترجيح أدلة.
+				2- inputs 
+				    -  -> التهم من Graph
+					-  -> Keywords للوقائع
+					-  -> عناصر الجريمة المستخلصة
+
+				3- Processing
+					-  -> Graph RAG: (Vector Search على المواد والمبادئ) + (Cypher Expansion (مواد ← مبادئ ← سوابق))
+					-  -> استبعاد أي مصدر غير مصري تلقائيًا
+				4- outputs 
+					-  ->  Legal Reference Package ...
+					{
+						"charge": "ضرب أفضى إلى موت",
+						"statutes": ["م 236 عقوبات"],
+						"principles": ["العبرة بثبوت القصد الجنائي..."],
+						"precedents": ["نقض 5/6/2003","نقض 14/2/1999"]
+					}
+			5- Evidence Analyst Agent :
+				1- Rule 
+					-  -> تحليل الثبوت دون ترجيح نهائي.
+					-  -> لا يصدر حكمًا، فقط تقييم قوة.
+				2- inputs 
+					-  -> Evidence Nodes - Witness Nodes - Fact Nodes
+				3- Processing
+					-  -> Link : الدليل المادي ↔ الواقعة  ,  الشهادة ↔ الواقعة
+					-  -> Evaluate : الاتساق , التعاضد , التناقض
+					-  -> Separate : الثبوت , النفي
+				4- outputs 
+					-  Evidence Strength Matrix ...
+					{
+						"fact": "واقعة الاعتداء",
+						"supports": [
+							{"evidence":"سلاح","strength":0.85},
+							{"evidence":"شهادة X","strength":0.7}
+						],
+						"contradictions": [
+							{"evidence":"شهادة Y","issue":"تناقض زمني"}
+						]
+					}
+
+			6-  Defense Analysis Agent :
+				1- Rule 
+					-  -> تحليل دفوع المتهم شكلًا وموضوعًا.
+					-  -> لا اختراع دفوع غير موجودة.
+				2- inputs 
+					-  -> Graph Subset: (دفوع,إجراءات,مبادئ نقض)
+					-  -> مستندات الدفاع المضافة
+				3- Processing
+					-  -> تصنيف الدفوع: (بطلان,قصور أدلة,تناقض,انتفاء ركن)
+					-  -> ربط كل دفع بسنده القانوني
+				4- outputs 
+					-  Structured Defense Argument ...
+					{
+						"formal_defenses": ["بطلان تفتيش"],
+						"substantive_defenses": ["انتفاء القصد الجنائي"],
+						"supporting_principles": ["نقض 21/1/1982"]
+					}
+
+			7 - The Judge Agent :
+				1- Rule 
+					-  -> الموازنة فقط.
+					-  -> لا حكم بلا تسبيب.
+					-  -> لا ترجيح بلا سند.
+				2- inputs 
+					-  -> تقرير المراقب الإجرائي
+					-  -> البحث القانوني
+					-  -> تحليل الأدلة
+					-  -> دفوع الدفاع
+				3- Processing
+					-  -> عرض الوقائع الثابتة
+					-  -> تحديد التهمة وعناصرها
+					-  -> مناقشة الأدلة عنصرًا عنصرًا
+					-  -> الرد على دفوع الدفاع
+					-  -> بحث الإجراءات
+					-  -> الوصول للنتيجة
+				4- outputs 
+					-  -> مسودة حكم مسببة ...
+							- إدانة
+							- براءة
+							- عدم اختصاص
+							- أو عدم كفاية الأدلة
+					-  -> مع التصريح الصريح بأي ...
+					        - نقص
+							- شك
+							- قصور
+
+		4 ) Pipeline :
+			1- Data Cleaning & Normalization :
+				- إزالة التكرار
+				- توحيد التواريخ (Hijri ↔ Gregorian – صيغة واحدة)
+				- فصل الوقائع عن الآراء / التكييف / الاستنتاجات - (تُعزل ولا تُغذّى للـ Graph)
+			2- Converts to Knowledge Graph :
+				- كل واقعة مستقلة = Fact Node
+				- كل دليل = Evidence Node
+				- كل إجراء = Procedure Node
+				- كل مادة قانونية = LegalArticle Node
+				- كل مبدأ نقض = CassationPrinciple Node
+				- ❌ الـ LLM لا يرى النصوص الأصلية :
+				- ✅ يرى فقط ...
+				- Nodes + Properties + Relationships + IDs
+			3- Graph RAG using Neo4j :
+				- الاسترجاع يتم عبر:- (Cypher Queries + Subgraph Expansion)
+				- الـ LLM لا يرى إلا نتائج الاستعلام
+			4- Merging between Cypher and Reasoning : 
+				- Query → Legal Subgraph → Structured Context (JSON / Schema) → LLM Reasoning (مقيد) → Output (مُسبب + مُستند)
+			5- Hallicenation Prevention : 
+				- Disable free-text generation
+				- Citation Required لكل استنتاج
+				- Any Missing Data ⇒ Explicit Warning ---> ❗ Explicit Warning - ❗ Suspension of judgment
+
+		5 ) Graph Schema : 
+			1- Nodes : 
+				- Case 
+				- Fact
+				- Charge
+				- Leagal Article
+				- Evidence
+				- Procedure
+				- Defense Argument
+				- Cassation Principle
+				- Judgment
+			2- RelationShips : 
+				- (Case)-[:HAS_FACT]->(Fact)
+				- (Case)-[:HAS_CHARGE]->(Charge)
+				- (Charge)-[:APPLIES_TO]->(LegalArticle)
+				- (Evidence)-[:PROVES]->(Fact)
+				- (Evidence)-[:NEGATES]->(Fact)
+				- (Procedure)-[:AFFECTS]->(Evidence)
+				- (Procedure)-[:DEFECTIVE_BY]->(CassationPrinciple)
+				- (DefenseArgument)-[:REFUTES]->(Evidence)
+				- (DefenseArgument)-[:BASED_ON]->(CassationPrinciple)
+				- (Judgment)-[:BASED_ON]->(CassationPrinciple)
+				- (Judgment)-[:EVALUATES]->(Evidence)
+
+		6 ) Judge Agent : 
+			1- يبدأ بـ عرض الوقائع الثابتة فقط (وقائع مدعومة بدليل سليم إجرائيًا)
+			2- Then عرض مواقف الخصوم :- 
+				- رأي الاتهام (وفق الأدلة المقبولة)
+				- رأي الدفاع (دفوع شكلية وموضوعية)
+			3- Then :-
+				- مناقشة قانونية ---> (صحة الإجراءات,كفاية الأدلة,انطباق المواد)
+				- الاستناد إلى ---> مبادئ محكمة النقض فقط 
+			4- Then :-
+				- النتيجة المقترحة (إدانة / براءة / عدم اختصاص)
+				- مع التحفظ إذا: (وُجد شك,نقص عنصر,تعارض أدلة)
+				- الشك يُفسَّر دائمًا لمصلحة المتهم (مبدأ مُشفَّر، لا اجتهاد)
+
+		7 ) القيود الأخلاقية والقانونية :
+			1- حظر أي مصدر غير مصري
+			2- حظر أي فرع قانوني غير الجنائي
+			3- لا أحكام قطعية دون (اكتمال الأركان,أدلة مشروعة)
+			4- لا معرفة عامة خارج Graph
+
+		8 ) Checklist for working Pipeline : 
+			1- Define Graph Schema
+			2- Setup Neo4j
+			3- Ingestion Pipeline (PDF → Nodes)
+			4- LangGraph Agents
+			5- Guardrails
+			6- Audit & Logging
+			7- Testing على قضايا نقض حقيقية
