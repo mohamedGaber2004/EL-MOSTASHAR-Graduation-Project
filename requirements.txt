@@ -5,3 +5,10 @@ langchain-groq
 dotenv
 fastapi
 neo4j
+langchain-neo4j
+pdfplumber
+fitz
+python-bidi
+arabic_reshaper
+PyPDF2
+pymupdf
