@@ -6,6 +6,8 @@ ARABIC_MODEL = "Qwen/Qwen3-32B"
 ARABIC_MODEL_TEMP = 0
 ASSISTANT_MODEL = "openai/gpt-oss-120b"
 ASSISTANT_MODEL_TEMP = 0
+
+EMBEDDING_MODEL = "silma-ai/silma-embeddding-sts-v0.1"
 # GraphRAG (Neo4j)
 
 NEO4J_URI = "neo4j+s://8e3595a2.databases.neo4j.io"

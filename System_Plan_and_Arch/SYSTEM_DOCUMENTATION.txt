@@ -1,12 +1,12 @@
 ================================================================================
-                    EGYPTIAN CRIMINAL JUSTICE AI SYSTEM
-             Decision Support System - Graduation Project Documentation
+                    EGYPTIAN CRIMINAL LAW KNOWLEDGE GRAPH
+             Legal Knowledge Base System - Graduation Project Documentation
 ================================================================================
 
-Project Title: Egyptian Criminal Justice Decision Support System
-Architecture: Multi-Agent AI with Graph RAG + Neo4j
-Purpose: Judicial decision support tool (assistive, not replacement)
-Knowledge Base: Egyptian law, Court of Cassation rulings, case precedents
+Project Title: Egyptian Criminal Law Knowledge Graph System
+Architecture: Graph RAG + Neo4j Knowledge Base
+Purpose: Structured representation of Egyptian criminal law
+Knowledge Base: Egyptian Penal Code, Criminal Procedure Code, Court of Cassation rulings
 
 ================================================================================
                               TABLE OF CONTENTS
@@ -15,54 +15,43 @@ Knowledge Base: Egyptian law, Court of Cassation rulings, case precedents
 1. EXECUTIVE SUMMARY
 2. SYSTEM OVERVIEW
 3. CORE ARCHITECTURE
-4. MULTI-AGENT SYSTEM
-   4.1 Orchestrator Agent
-   4.2 Data Ingestion & Graph Builder Agent
-   4.3 Procedural Auditor Agent
-   4.4 Legal Researcher Agent
-   4.5 Evidence Analyst Agent
-   4.6 Defense Analysis Agent
-   4.7 Judge Agent
-5. DATA PROCESSING PIPELINE
-6. KNOWLEDGE GRAPH SCHEMA
-7. AGENT COMMUNICATION PROTOCOL
-8. HALLUCINATION PREVENTION
-9. ETHICAL & LEGAL CONSTRAINTS
-10. TECHNICAL SPECIFICATIONS
-11. IMPLEMENTATION CHECKLIST
-12. TESTING STRATEGY
-13. FUTURE ENHANCEMENTS
+4. DATA PROCESSING PIPELINE
+5. KNOWLEDGE GRAPH SCHEMA
+6. GRAPH CONSTRUCTION WORKFLOW
+7. RETRIEVAL & QUERY SYSTEM
+8. QUALITY ASSURANCE
+9. TECHNICAL SPECIFICATIONS
+10. IMPLEMENTATION CHECKLIST
+11. TESTING STRATEGY
+12. FUTURE ENHANCEMENTS
 
 ================================================================================
                             1. EXECUTIVE SUMMARY
 ================================================================================
 
-This graduation project presents a comprehensive AI-powered Decision Support
-System designed specifically for the Egyptian criminal justice system. The
-system leverages cutting-edge technologies including:
+This graduation project presents a comprehensive Knowledge Graph system for
+Egyptian criminal law. The system leverages cutting-edge technologies including:
 
-• Multi-Agent Architecture for specialized legal tasks
-• Graph RAG (Retrieval-Augmented Generation) for knowledge retrieval
+• Graph RAG (Retrieval-Augmented Generation) for legal knowledge retrieval
 • Neo4j knowledge graphs for structured legal representation
-• Strict adherence to Egyptian criminal law
+• LLM-powered entity and relationship extraction
+• Semantic chunking for optimal legal text processing
 
 KEY FEATURES:
 -------------
-✓ Strictly adherent to Egyptian law and Court of Cassation principles
-✓ Multi-agent orchestration for specialized legal analysis
-✓ Knowledge graph-based representation with full provenance tracking
-✓ Procedural compliance auditing and evidence analysis
-✓ Comprehensive citation and audit trail for all conclusions
-✓ Explicit uncertainty flagging and reasoning transparency
-✓ Human-in-the-loop design (assistive tool, not replacement)
+✓ Structured representation of Egyptian criminal law
+✓ Automated extraction of legal entities and relationships
+✓ Graph-based retrieval for legal research
+✓ Complete provenance tracking for all legal articles
+✓ Semantic search capabilities
+✓ Relationship mapping between crimes, penalties, and conditions
 
 CRITICAL DESIGN PRINCIPLES:
 ---------------------------
-• NO external or non-Egyptian sources permitted
+• ONLY Egyptian criminal law sources
 • NO free-text generation without citation
-• NO judgments without complete reasoning
-• EXPLICIT warnings for missing data or uncertainty
-• DOUBT always interpreted in favor of defendant
+• EXPLICIT provenance for all extracted information
+• Complete relationship mapping between legal concepts
 
 ================================================================================
                             2. SYSTEM OVERVIEW
@@ -70,35 +59,30 @@ CRITICAL DESIGN PRINCIPLES:
 
 2.1 SYSTEM PURPOSE
 ------------------
-The system serves as a judicial decision support tool for Egyptian criminal
-cases. It provides:
+The system serves as a structured knowledge base for Egyptian criminal law,
+providing:
 
-• Structured legal analysis
-• Comprehensive legal research
-• Evidence evaluation
-• Procedural compliance checking
-• Reasoned draft judgments
-
-IMPORTANT: This is an assistive tool for judges, NOT a replacement.
+• Structured legal knowledge representation
+• Efficient legal research and retrieval
+• Relationship mapping between legal concepts
+• Foundation for future legal AI applications
 
 2.2 APPROACH
 ------------
-• Formal legal methodology (رسمي قانوني)
-• Strict adherence to Egyptian legal formalism
-• No interpretation outside statutory framework
-• Complete transparency in reasoning
+• Formal legal text processing
+• Automated entity and relationship extraction
+• Graph-based knowledge representation
+• Semantic search and retrieval
 
 2.3 KNOWLEDGE SOURCES (EXCLUSIVE)
 ---------------------------------
 ✓ Egyptian Penal Code (قانون العقوبات المصري)
 ✓ Egyptian Criminal Procedure Code (قانون الإجراءات الجنائية المصري)
 ✓ Court of Cassation rulings (أحكام محكمة النقض المصرية)
-✓ Egyptian judicial precedents (سوابق قضائية جنائية مصرية)
-✓ Case documents submitted
 
 ✗ NO foreign sources
-✗ NO general LLM knowledge outside the graph
-✗ NO analogies from other jurisdictions
+✗ NO general legal principles outside Egyptian law
+✗ NO case-specific data (this system is for laws only)
 
 2.4 TECHNOLOGY STACK
 --------------------
@@ -106,783 +90,659 @@ IMPORTANT: This is an assistive tool for judges, NOT a replacement.
 │ Component                   │ Technology                           │
 ├─────────────────────────────┼──────────────────────────────────────┤
 │ Knowledge Representation    │ Graph RAG + Neo4j                    │
-│ Agent Framework             │ LangGraph Multi-Agent System         │
-│ LLM Backend                 │ GPT-4, Claude, or equivalent         │
-│ Document Processing         │ OCR, NLP, Text Chunking              │
-│ Audit & Logging             │ WORM Storage + Neo4j Provenance      │
-│ Vector Search               │ Neo4j Vector Index / Pinecone        │
+│ Entity Extraction           │ LLM (LangChain Graph Transformer)    │
+│ Text Processing             │ Semantic Chunking                    │
+│ Embeddings                  │ Arabic Sentence Transformer          │
+│ Vector Search               │ FAISS / Neo4j Vector Index           │
+│ Document Processing         │ PyMuPDF, Text Extraction             │
 └─────────────────────────────┴──────────────────────────────────────┘
 
 ================================================================================
                          3. CORE ARCHITECTURE
 ================================================================================
 
-The system is organized into 5 distinct layers:
+The system is organized into 4 distinct layers:
 
-LAYER 1: INGESTION & PREPROCESSING
------------------------------------
+LAYER 1: DOCUMENT INGESTION & PREPROCESSING
+--------------------------------------------
 • Document intake (PDF, Text files)
-• OCR and text extraction
-• Data cleaning and normalization
-• Fact/opinion separation
-• Entity extraction
+• Text extraction and cleaning
+• Article-based chunking (preserving legal structure)
+• Semantic chunking for optimal graph construction
 
-LAYER 2: KNOWLEDGE GRAPH (Neo4j)
+LAYER 2: KNOWLEDGE GRAPH CONSTRUCTION
+--------------------------------------
+• LLM-based entity extraction
+• Relationship identification
+• Graph document generation
+• Neo4j database population
+
+LAYER 3: KNOWLEDGE GRAPH (Neo4j)
 ---------------------------------
 • Structured storage of legal knowledge
-• Node types: Case, Fact, Charge, Evidence, Procedure, LegalArticle,
-  CassationPrinciple, DefenseArgument, Judgment
-• Relationship types: HAS_FACT, PROVES, NEGATES, APPLIES_TO, etc.
+• Node types: مادة_قانونية, جريمة, عقوبة, شرط, باب, فصل
+• Relationship types: يُعاقب_بـ, يشترط, يُحيل_إلى, ينتمي_لـ, يُشدد_بـ, يُخفف_بـ
 • Full provenance tracking for all data
 
-LAYER 3: MULTI-AGENT ORCHESTRATOR
+LAYER 4: RETRIEVAL & QUERY SYSTEM
 ----------------------------------
-• Orchestrator Agent (workflow control)
-• Graph Builder Agent (document → graph)
-• Procedural Auditor Agent (compliance checking)
-• Legal Researcher Agent (law & precedent research)
-• Evidence Analyst Agent (evidence evaluation)
-• Defense Analysis Agent (defense argument analysis)
-• Judge Agent (final reasoning and balancing)
-
-LAYER 4: LLM REASONING LAYER
------------------------------
-• Constrained reasoning on structured data
-• Citation requirements for all outputs
-• Guardrails and validation
-• Egyptian law focus only
-
-LAYER 5: AUDIT / LOGGING / UI
-------------------------------
-• WORM (Write-Once-Read-Many) audit logs
-• Complete provenance tracking
-• User interface for case analysis
-• Draft judgment generation
+• Graph-based queries (Cypher)
+• Vector similarity search
+• Hybrid retrieval (graph + vector)
+• Relationship traversal
 
 ================================================================================
-                        4. MULTI-AGENT SYSTEM
+                      4. DATA PROCESSING PIPELINE
 ================================================================================
 
-4.1 ORCHESTRATOR AGENT
-----------------------
-ROLE: Central coordinator and workflow manager
+STAGE 1: DOCUMENT LOADING
+--------------------------
+INPUT FILES:
+• PDF files containing Egyptian criminal law
+• Text files with legal articles
 
-RESPONSIBILITIES:
-• Receive case files (facts, investigations, evidence, reports, precedents)
-• Distribute tasks to specialized agents
-• Aggregate intermediate outputs
-• Manage case state lifecycle
-• Prevent agents from operating outside authorized context
+PROCESSING:
+• PyMuPDF for PDF extraction
+• UTF-8 text file reading
+• Document metadata preservation
 
-GLOBAL CONTEXT MAINTAINED:
-• Case identifier
-• Current charges
-• List of input documents
-• List of disputed issues
-• Snapshot hash of latest graph state
-
-OUTPUTS:
-• Task dispatch plan
-• Approved context windows for each agent
-• Aggregated final reports for Judge Agent
+OUTPUT:
+• Raw text content
+• Document metadata (source, filename)
 
 ---
 
-4.2 DATA INGESTION & GRAPH BUILDER AGENT
------------------------------------------
-ROLE: Convert unstructured documents to knowledge graph
+STAGE 2: LEGAL ARTICLE EXTRACTION
+----------------------------------
+PURPOSE: Preserve legal structure by extracting individual articles
 
-CORE RULES:
-• Transform text to structured graph representation
-• NO interpretation, NO weighing, NO inference
-• Extract facts ONLY (not opinions or characterizations)
+EXTRACTION PATTERN:
+• Detect article headers: "المادة X", "مادة X"
+• Extract article number
+• Preserve article content
+• Maintain source attribution
 
-INPUTS:
-• PDF/Text files:
-  - Referral orders (أوامر الإحالة)
-  - Police reports (محاضر الشرطة)
-  - Forensic reports (تقارير الطب الشرعي)
-  - Prosecution investigations (تحقيقات النيابة)
-  - Evidence items (أحراز)
-  - Previous rulings (أحكام سابقة)
-
-PROCESSING:
-1. OCR and text chunking
-2. Extract: facts, procedures, evidence, persons, charges
-3. Convert to Neo4j nodes and relationships
-4. Link each input with (docID, page, text span)
-
-OUTPUTS:
-• Executed Cypher queries
-• Updated Neo4j graph database
-• Provenance metadata for all extracted information
-
----
-
-4.3 PROCEDURAL AUDITOR AGENT
------------------------------
-ROLE: Review procedural compliance
-
-CORE RULES:
-• Review procedures per Egyptian Criminal Procedure Code ONLY
-• Apply Court of Cassation principles on nullity (relative vs. absolute)
-• NO interpretation beyond statutory requirements
-
-INPUTS:
-• Arrest procedures (إجراءات القبض)
-• Search procedures (إجراءات التفتيش)
-• Interrogation procedures (إجراءات الاستجواب)
-• Criminal Procedure Code articles
-• Court of Cassation procedural principles
-
-PROCESSING:
-1. Match each procedure against legal requirements
-2. Determine procedure validity
-3. Identify procedural nullity (if applicable)
-4. Assess impact on evidence (fruit of poisonous tree doctrine)
-
-OUTPUT FORMAT (JSON):
+OUTPUT FORMAT:
 {
-  "procedure": "تفتيش (Search)",
-  "status": "باطل (Null)",
-  "nullity_type": "بطلان مطلق (Absolute Nullity)",
-  "affected_evidence": ["E12", "E15"],
-  "legal_basis": ["Article 45 - Procedure Code", "Cassation 12/3/1998"]
+  "text": "المادة 123\n[article content]",
+  "metadata": {
+    "source": "قانون_العقوبات.pdf",
+    "article_title": "المادة 123",
+    "article_number": 123,
+    "type": "legal_article"
+  }
 }
 
 ---
 
-4.4 LEGAL RESEARCHER AGENT
----------------------------
-ROLE: Disciplined legal research
-
-CORE RULES:
-• Legal research ONLY (no fact analysis, no evidence weighing)
-• Automatic exclusion of all non-Egyptian sources
-
-INPUTS:
-• Charges from knowledge graph
-• Keywords from case facts
-• Extracted crime elements
-
-PROCESSING (Graph RAG):
-1. Vector search on legal articles and principles
-2. Cypher expansion: articles → principles → precedents
-3. Filter: Egyptian sources ONLY
-
-OUTPUT FORMAT (JSON):
-{
-  "charge": "ضرب أفضى إلى موت (Battery resulting in death)",
-  "statutes": ["Article 236 - Penal Code"],
-  "principles": ["The criterion is proving criminal intent..."],
-  "precedents": ["Cassation 5/6/2003", "Cassation 14/2/1999"]
-}
-
----
-
-4.5 EVIDENCE ANALYST AGENT
----------------------------
-ROLE: Analyze probative value without final judgment
-
-CORE RULES:
-• Analyze evidence strength (NOT issue verdicts)
-• Assess consistency, corroboration, contradictions
-
-INPUTS:
-• Evidence nodes, witness nodes, fact nodes from graph
-
-PROCESSING:
-LINKING:
-• Physical evidence ↔ Facts
-• Testimony ↔ Facts
-
-EVALUATION:
-• Internal consistency
-• Corroboration across sources
-• Contradictions
-
-SEPARATION:
-• Supporting evidence
-• Contradicting evidence
-
-OUTPUT FORMAT (JSON):
-{
-  "fact": "واقعة الاعتداء (Assault incident)",
-  "supports": [
-    {"evidence": "سلاح (Weapon)", "strength": 0.85},
-    {"evidence": "شهادة X (Witness X)", "strength": 0.7}
-  ],
-  "contradictions": [
-    {"evidence": "شهادة Y (Witness Y)", 
-     "issue": "تناقض زمني (Temporal contradiction)"}
-  ]
-}
-
----
-
-4.6 DEFENSE ANALYSIS AGENT
----------------------------
-ROLE: Analyze defendant's defenses
-
-CORE RULES:
-• Analyze defenses (formal and substantive)
-• NO fabrication of defenses not present in case
-
-INPUTS:
-• Graph subset: defenses, procedures, cassation principles
-• Defense documents submitted
-
-PROCESSING:
-DEFENSE CLASSIFICATION:
-• Procedural nullity (بطلان إجرائي)
-• Insufficient evidence (قصور الأدلة)
-• Internal contradictions (تناقض)
-• Absence of criminal element (انتفاء ركن)
-
-LINKING:
-• Each defense → its legal basis
-
-OUTPUT FORMAT (JSON):
-{
-  "formal_defenses": ["بطلان تفتيش (Nullity of search)"],
-  "substantive_defenses": ["انتفاء القصد الجنائي (Absence of intent)"],
-  "supporting_principles": ["Cassation 21/1/1982"]
-}
-
----
-
-4.7 JUDGE AGENT
----------------
-ROLE: Final balancing and reasoning
-
-CORE RULES:
-• Balancing ONLY (no judgment without reasoning)
-• NO weighing without legal basis
-• EXPLICIT uncertainty declaration when applicable
-
-INPUTS:
-• Procedural auditor report
-• Legal research findings
-• Evidence analysis
-• Defense arguments
-
-REASONING PROCESS:
-1. Present established facts ONLY
-   (facts supported by procedurally sound evidence)
-
-2. Present positions of parties:
-   • Prosecution view (based on admitted evidence)
-   • Defense (formal and substantive arguments)
-
-3. Legal discussion:
-   • Procedural validity
-   • Evidence sufficiency
-   • Statutory application
-
-4. Rely EXCLUSIVELY on Court of Cassation principles
-
-5. Reach suggested conclusion:
-   • Conviction (إدانة)
-   • Acquittal (براءة)
-   • Lack of jurisdiction (عدم اختصاص)
-   • Insufficient evidence (عدم كفاية الأدلة)
-
-UNCERTAINTY HANDLING:
-The Judge Agent includes EXPLICIT reservations when:
-• Doubt exists
-• Element is missing
-• Evidence conflicts
-
-HARDCODED PRINCIPLE:
-"Doubt is ALWAYS interpreted in favor of the defendant"
-(الشك يُفسَّر لمصلحة المتهم)
-
-OUTPUTS:
-• Reasoned draft judgment
-• Explicit declaration of any deficiencies, doubts, or gaps
-
-================================================================================
-                      5. DATA PROCESSING PIPELINE
-================================================================================
-
-STAGE 1: DATA CLEANING & NORMALIZATION
----------------------------------------
-• Deduplication
-• Date unification (Hijri ↔ Gregorian to single format)
-• Fact/opinion separation
-  → Opinions, characterizations, inferences are ISOLATED
-  → NOT fed to the graph
-
-STAGE 2: KNOWLEDGE GRAPH CONVERSION
-------------------------------------
-GRAPH STRUCTURE:
-• Each independent fact = Fact Node
-• Each piece of evidence = Evidence Node
-• Each procedure = Procedure Node
-• Each legal article = LegalArticle Node
-• Each cassation principle = CassationPrinciple Node
-
-CRITICAL RESTRICTION:
-✗ LLM does NOT see original text documents
-✓ LLM sees ONLY: Nodes + Properties + Relationships + IDs
-
-STAGE 3: GRAPH RAG USING Neo4j
--------------------------------
-RETRIEVAL MECHANISMS:
-• Cypher Queries (precise graph traversal)
-• Subgraph Expansion (contextual information)
-• Vector similarity search (semantic matching)
-
-The LLM only sees query results, NEVER raw documents
-
-STAGE 4: MERGING CYPHER AND REASONING
+STAGE 3: SEMANTIC CHUNKING (OPTIONAL)
 --------------------------------------
-PROCESSING FLOW:
-1. Query → 2. Legal Subgraph → 3. Structured Context (JSON) →
-4. LLM Reasoning (constrained) → 5. Output (cited + reasoned)
+For very long articles, apply semantic chunking to create optimal chunks
+for graph construction while preserving legal meaning.
 
-STAGE 5: HALLUCINATION PREVENTION
-----------------------------------
-CRITICAL SAFEGUARDS:
-• Disable free-text generation
-• Citation REQUIRED for every inference
-• Missing data → EXPLICIT WARNING + Suspension of judgment
+PARAMETERS:
+• Chunk size: 1000-1500 characters
+• Overlap: minimal (to avoid breaking legal meaning)
+• Similarity threshold: 0.65-0.75
 
-WARNING TRIGGERS:
-❗ Missing evidence
-❗ Incomplete procedural record
-❗ Conflicting information
-❗ Gap in legal basis
+---
+
+STAGE 4: EMBEDDING GENERATION
+------------------------------
+MODEL: Arabic Sentence Transformer
+• Model: Omartificial-Intelligence-Space/Semantic-Ar-Qwen-Embed-0.6B
+• Device: CPU (for stability) or CUDA (with small batch size)
+• Normalization: Enabled
+
+BATCH PROCESSING:
+• Small batch sizes (4-8) to avoid memory issues
+• Progressive processing with memory clearing
+• Text truncation for very long articles
+
+OUTPUT:
+• Embedding vectors for each legal chunk
+• Vector index for semantic search
+
+---
+
+STAGE 5: GRAPH CONSTRUCTION
+----------------------------
+TOOL: LangChain LLMGraphTransformer
+
+ALLOWED NODES:
+• مادة_قانونية (Legal Article)
+• جريمة (Crime)
+• عقوبة (Penalty)
+• شرط (Condition)
+• باب (Chapter)
+• فصل (Section)
+
+ALLOWED RELATIONSHIPS:
+• يُعاقب_بـ (is_punished_by): جريمة → عقوبة
+• يشترط (requires): مادة_قانونية → شرط
+• يُحيل_إلى (refers_to): مادة_قانونية → مادة_قانونية
+• ينتمي_لـ (belongs_to): مادة_قانونية → باب/فصل
+• يُشدد_بـ (aggravated_by): عقوبة → شرط
+• يُخفف_بـ (mitigated_by): عقوبة → شرط
+
+PROCESSING:
+1. LLM analyzes each legal chunk
+2. Extracts entities (nodes)
+3. Identifies relationships
+4. Generates graph document
+
+OUTPUT:
+• Graph documents with nodes and relationships
+• Provenance linking to source text
+
+---
+
+STAGE 6: NEO4J POPULATION
+--------------------------
+• Convert graph documents to Cypher queries
+• Create nodes with properties
+• Create relationships
+• Add provenance metadata
+• Create indexes for efficient querying
 
 ================================================================================
-                       6. KNOWLEDGE GRAPH SCHEMA
+                       5. KNOWLEDGE GRAPH SCHEMA
 ================================================================================
 
 NODE TYPES:
 -----------
-• Case                  - Root node for criminal case
-• Fact                  - Individual factual claim or event
-• Charge                - Criminal charge against defendant
-• LegalArticle          - Article from Egyptian Penal Code
-• Evidence              - Physical evidence, testimony, documentation
-• Procedure             - Procedural step (arrest, search, etc.)
-• DefenseArgument       - Defense claim or argument
-• CassationPrinciple    - Principle from Court of Cassation
-• Judgment              - Final or intermediate ruling
+• مادة_قانونية (Legal Article)
+  Properties:
+    - رقم_المادة (article_number): Integer
+    - نص_المادة (article_text): String
+    - المصدر (source): String
+    - الباب (chapter): String (optional)
+    - الفصل (section): String (optional)
+
+• جريمة (Crime)
+  Properties:
+    - اسم_الجريمة (crime_name): String
+    - وصف (description): String
+    - المصدر (source): String
+
+• عقوبة (Penalty)
+  Properties:
+    - نوع_العقوبة (penalty_type): String (e.g., "السجن", "الغرامة")
+    - المدة (duration): String (e.g., "5 سنوات")
+    - المبلغ (amount): String (for fines)
+    - المصدر (source): String
+
+• شرط (Condition)
+  Properties:
+    - نص_الشرط (condition_text): String
+    - النوع (type): String (e.g., "مشدد", "مخفف")
+    - المصدر (source): String
+
+• باب (Chapter)
+  Properties:
+    - رقم_الباب (chapter_number): Integer
+    - عنوان_الباب (chapter_title): String
+    - المصدر (source): String
+
+• فصل (Section)
+  Properties:
+    - رقم_الفصل (section_number): Integer
+    - عنوان_الفصل (section_title): String
+    - المصدر (source): String
+
+---
 
 RELATIONSHIP TYPES:
 -------------------
-(Case)-[:HAS_FACT]->(Fact)
-    Case contains this fact
 
-(Case)-[:HAS_CHARGE]->(Charge)
-    Case includes this charge
+(جريمة)-[:يُعاقب_بـ]->(عقوبة)
+    Crime is punished by this penalty
 
-(Charge)-[:APPLIES_TO]->(LegalArticle)
-    Charge based on this legal article
+(مادة_قانونية)-[:يشترط]->(شرط)
+    Legal article requires this condition
 
-(Evidence)-[:PROVES]->(Fact)
-    Evidence supports/proves this fact
+(مادة_قانونية)-[:يُحيل_إلى]->(مادة_قانونية)
+    Legal article refers to another article
 
-(Evidence)-[:NEGATES]->(Fact)
-    Evidence contradicts this fact
+(مادة_قانونية)-[:ينتمي_لـ]->(باب)
+    Legal article belongs to chapter
 
-(Procedure)-[:AFFECTS]->(Evidence)
-    Procedure impacts evidence validity
+(مادة_قانونية)-[:ينتمي_لـ]->(فصل)
+    Legal article belongs to section
 
-(Procedure)-[:DEFECTIVE_BY]->(CassationPrinciple)
-    Procedure violates this principle
+(عقوبة)-[:يُشدد_بـ]->(شرط)
+    Penalty is aggravated by condition
 
-(DefenseArgument)-[:REFUTES]->(Evidence)
-    Defense challenges this evidence
+(عقوبة)-[:يُخفف_بـ]->(شرط)
+    Penalty is mitigated by condition
 
-(DefenseArgument)-[:BASED_ON]->(CassationPrinciple)
-    Defense cites this principle
+---
 
-(Judgment)-[:BASED_ON]->(CassationPrinciple)
-    Judgment relies on this principle
+EXAMPLE GRAPH STRUCTURE:
+------------------------
 
-(Judgment)-[:EVALUATES]->(Evidence)
-    Judgment weighs this evidence
-
-GRAPH VISUALIZATION:
---------------------
-See: graph_schema_diagram.png
-
-================================================================================
-                   7. AGENT COMMUNICATION PROTOCOL
-================================================================================
-
-COMMUNICATION RULES:
---------------------
-All inter-agent communication follows STRICT protocol to ensure
-traceability and prevent hallucination:
-
-1. IMMUTABLE REFERENCES
-   • All claims must reference Neo4j node IDs
-   • No free-text summaries as sole references
-
-2. STRUCTURED MESSAGES
-   • JSON-serialized messages
-   • Contains reference lists (node IDs)
-
-3. PROVENANCE LOGGING
-   • Complete audit trail in Neo4j
-   • WORM (Write-Once-Read-Many) logs
-
-MESSAGE FORMAT (JSON):
-----------------------
-{
-  "task": "analyze_evidence",
-  "sender": "evidence_analyst_agent",
-  "receiver": "judge_agent",
-  "references": [
-    "node:E001",  // Evidence node
-    "node:F042"   // Fact node
-  ],
-  "context_hash": "abc123...",
-  "timestamp": "2024-02-01T10:30:00Z"
-}
-
-VERIFICATION FLOW:
-------------------
-1. Agent A queries Neo4j for relevant nodes
-2. Neo4j returns node IDs
-3. Agent A creates JSON message with node references
-4. Agent A sends message to Agent B
-5. Agent B verifies references against Neo4j
-6. Both agents log operation to audit trail
-
-DIAGRAM:
---------
-See: agent_communication_diagram.png
+(باب_1:باب {عنوان: "الجرائم الواقعة على الأشخاص"})
+    ↓ [:ينتمي_لـ]
+(مادة_234:مادة_قانونية {رقم: 234, نص: "من ضرب شخصاً..."})
+    ↓ [:يتضمن]
+(السرقة:جريمة {اسم: "السرقة بالإكراه"})
+    ↓ [:يُعاقب_بـ]
+(السجن:عقوبة {نوع: "السجن المشدد", مدة: "3-7 سنوات"})
+    ↓ [:يُشدد_بـ]
+(الإكراه:شرط {نص: "إذا وقعت بالإكراه"})
 
 ================================================================================
-                     8. HALLUCINATION PREVENTION
+                   6. GRAPH CONSTRUCTION WORKFLOW
 ================================================================================
 
-STRATEGY 1: DISABLE FREE-TEXT GENERATION
------------------------------------------
-• All outputs must be structured (JSON)
-• All outputs must include source references
-• No narrative without citations
+STEP 1: PREPARE DOCUMENTS
+--------------------------
+```python
+from langchain_core.documents import Document
 
-STRATEGY 2: CITATION REQUIREMENTS
-----------------------------------
-RULE: Every inference MUST cite source node IDs
+graph_input_docs = [
+    Document(
+        page_content=chunk["text"],
+        metadata=chunk["metadata"]
+    )
+    for chunk in all_legal_chunks
+]
+```
 
-Example:
-✓ CORRECT:
-  "The defendant was at the scene [node:F012, node:W003]"
+---
 
-✗ INCORRECT:
-  "The defendant was at the scene"
-
-STRATEGY 3: MISSING DATA HANDLING
-----------------------------------
-Any missing data triggers:
-1. EXPLICIT WARNING in output
-2. SUSPENSION of judgment on affected elements
-
-Example Warning:
-"⚠️ WARNING: Forensic report on weapon (E015) is missing.
- Cannot determine cause of death with certainty.
- Judgment on murder charge SUSPENDED pending report."
-
-STRATEGY 4: KNOWLEDGE BOUNDARY ENFORCEMENT
--------------------------------------------
-• LLM cannot access information outside knowledge graph
-• All queries pass through Graph RAG layer
-• No general knowledge or analogies permitted
-
-STRATEGY 5: VALIDATION CHECKPOINTS
------------------------------------
-Before final output, system validates:
-✓ All facts cited to source documents
-✓ All legal principles cited to statutes or precedents
-✓ All procedures verified against legal requirements
-✓ All conclusions supported by evidence chain
-
-================================================================================
-                  9. ETHICAL & LEGAL CONSTRAINTS
-================================================================================
-
-CONSTRAINT 1: SOURCE RESTRICTION
----------------------------------
-• ABSOLUTE prohibition on non-Egyptian sources
-• NO foreign law, NO international precedents
-• NO general legal principles outside Egyptian system
-
-CONSTRAINT 2: JURISDICTIONAL LIMITATION
-----------------------------------------
-• Prohibition on any legal branch other than Egyptian criminal law
-• NO civil law, NO administrative law, NO Sharia (except as codified)
-
-CONSTRAINT 3: EVIDENCE REQUIREMENTS
+STEP 2: CONFIGURE GRAPH TRANSFORMER
 ------------------------------------
-• NO definitive judgments without complete criminal elements
-• NO convictions without lawful evidence
-• Evidence must be procedurally sound
+```python
+from langchain_experimental.graph_transformers import LLMGraphTransformer
+from src.LLMs.Qwen_Model import ArabicModel
 
-CONSTRAINT 4: KNOWLEDGE BOUNDARY
+llm_ar = ArabicModel()
+llm = llm_ar.get_ar_llm()
+
+llm_transformer = LLMGraphTransformer(
+    llm=llm,
+    allowed_nodes=["مادة_قانونية", "جريمة", "عقوبة", "شرط", "باب", "فصل"],
+    allowed_relationships=["يُعاقب_بـ", "يشترط", "يُحيل_إلى", "ينتمي_لـ", "يُشدد_بـ", "يُخفف_بـ"]
+)
+```
+
+---
+
+STEP 3: EXTRACT GRAPH DOCUMENTS
+--------------------------------
+```python
+print("⏳ استخراج Knowledge Graph...")
+graph_documents = llm_transformer.convert_to_graph_documents(graph_input_docs)
+print(f"✅ تم إنشاء {len(graph_documents)} graph document")
+```
+
+---
+
+STEP 4: SAVE TO NEO4J
+----------------------
+```python
+from langchain_community.graphs import Neo4jGraph
+
+graph_db = Neo4jGraph(
+    url="bolt://localhost:7687",
+    username="neo4j",
+    password="your_password"
+)
+
+graph_db.add_graph_documents(graph_documents)
+print("✅ تم حفظ الـ Knowledge Graph في Neo4j")
+```
+
+---
+
+STEP 5: CREATE INDEXES
+-----------------------
+```cypher
+// Create indexes for efficient querying
+CREATE INDEX article_number IF NOT EXISTS FOR (n:مادة_قانونية) ON (n.رقم_المادة);
+CREATE INDEX crime_name IF NOT EXISTS FOR (n:جريمة) ON (n.اسم_الجريمة);
+CREATE INDEX penalty_type IF NOT EXISTS FOR (n:عقوبة) ON (n.نوع_العقوبة);
+```
+
+================================================================================
+                     7. RETRIEVAL & QUERY SYSTEM
+================================================================================
+
+7.1 GRAPH-BASED QUERIES (CYPHER)
 ---------------------------------
-• NO general knowledge outside knowledge graph
-• NO assumptions or inferences beyond statutory basis
 
-CONSTRAINT 5: TRANSPARENCY MANDATE
------------------------------------
-• ALL limitations must be explicitly stated
-• ALL uncertainties must be flagged
-• ALL gaps must be disclosed
+EXAMPLE 1: Find all crimes and their penalties
+```cypher
+MATCH (crime:جريمة)-[:يُعاقب_بـ]->(penalty:عقوبة)
+RETURN crime.اسم_الجريمة, penalty.نوع_العقوبة, penalty.المدة
+```
 
-CONSTRAINT 6: PRESUMPTION OF INNOCENCE
----------------------------------------
-• Doubt is ALWAYS interpreted in favor of defendant
-• This is hardcoded, non-negotiable principle
-• NO discretion permitted on this rule
+EXAMPLE 2: Find articles in a specific chapter
+```cypher
+MATCH (article:مادة_قانونية)-[:ينتمي_لـ]->(chapter:باب {رقم_الباب: 2})
+RETURN article.رقم_المادة, article.نص_المادة
+ORDER BY article.رقم_المادة
+```
 
-CONSTRAINT 7: HUMAN OVERSIGHT
-------------------------------
-• System is assistive tool ONLY
-• Final decisions remain with human judges
-• NO automated decision-making
+EXAMPLE 3: Find aggravating conditions for penalties
+```cypher
+MATCH (penalty:عقوبة)-[:يُشدد_بـ]->(condition:شرط)
+RETURN penalty.نوع_العقوبة, condition.نص_الشرط
+```
+
+EXAMPLE 4: Find articles that refer to other articles
+```cypher
+MATCH (article1:مادة_قانونية)-[:يُحيل_إلى]->(article2:مادة_قانونية)
+RETURN article1.رقم_المادة, article2.رقم_المادة
+```
+
+---
+
+7.2 VECTOR SIMILARITY SEARCH
+-----------------------------
+
+Using FAISS vector store:
+```python
+from langchain_community.vectorstores import FAISS
+
+# Load vector store
+vectorstore = FAISS.load_local("legal_vectorstore", embedding_function)
+
+# Search
+query = "ما هي عقوبة السرقة بالإكراه؟"
+results = vectorstore.similarity_search(query, k=5)
+
+for doc in results:
+    print(f"المادة: {doc.metadata['article_title']}")
+    print(f"النص: {doc.page_content[:200]}...")
+```
+
+---
+
+7.3 HYBRID RETRIEVAL (GRAPH + VECTOR)
+--------------------------------------
+
+Combine vector search with graph traversal:
+
+1. Use vector search to find relevant articles
+2. Use Cypher to expand context (related crimes, penalties, conditions)
+3. Return enriched results
+
+```python
+def hybrid_search(query, k=3):
+    # Step 1: Vector search
+    vector_results = vectorstore.similarity_search(query, k=k)
+    
+    # Step 2: Graph expansion
+    enriched_results = []
+    for doc in vector_results:
+        article_num = doc.metadata.get('article_number')
+        
+        # Query Neo4j for related entities
+        cypher = f"""
+        MATCH (article:مادة_قانونية {{رقم_المادة: {article_num}}})
+        OPTIONAL MATCH (article)-[:يتضمن]->(crime:جريمة)-[:يُعاقب_بـ]->(penalty:عقوبة)
+        RETURN article, crime, penalty
+        """
+        
+        graph_result = graph_db.query(cypher)
+        enriched_results.append({
+            'article': doc,
+            'related_entities': graph_result
+        })
+    
+    return enriched_results
+```
 
 ================================================================================
-                    10. TECHNICAL SPECIFICATIONS
+                        8. QUALITY ASSURANCE
 ================================================================================
 
-10.1 INFRASTRUCTURE REQUIREMENTS
+8.1 ENTITY EXTRACTION VALIDATION
+---------------------------------
+• Manual review of extracted entities
+• Comparison with legal text
+• Verification of node types
+• Accuracy metrics
+
+8.2 RELATIONSHIP VALIDATION
+----------------------------
+• Verify relationship correctness
+• Check for missing relationships
+• Validate relationship types
+• Ensure bidirectional consistency
+
+8.3 PROVENANCE VERIFICATION
+----------------------------
+• Verify all nodes link to source documents
+• Check metadata completeness
+• Validate article numbers
+• Ensure proper attribution
+
+8.4 GRAPH COMPLETENESS
+----------------------
+• Verify all articles are represented
+• Check for orphan nodes
+• Ensure proper graph connectivity
+• Validate chapter/section hierarchy
+
+================================================================================
+                    9. TECHNICAL SPECIFICATIONS
+================================================================================
+
+9.1 INFRASTRUCTURE REQUIREMENTS
 ---------------------------------
 Database:
-• Neo4j Enterprise Edition (minimum version 5.0)
-• Minimum 32GB RAM for production
-• SSD storage for graph database
+• Neo4j Community/Enterprise Edition (version 5.0+)
+• Minimum 16GB RAM for development
+• 32GB RAM for production
+• SSD storage recommended
 
-Agent Framework:
-• LangGraph for multi-agent orchestration
+Python Environment:
 • Python 3.10+
+• LangChain
+• sentence-transformers
+• PyMuPDF
+• FAISS (or Neo4j vector index)
 
 LLM Backend:
-• OpenAI GPT-4 / Anthropic Claude / Azure OpenAI
-• Or self-hosted models (LLaMA, Mistral)
-• Minimum context window: 32K tokens
+• Arabic-capable LLM (GPT-4, Claude, or Arabic fine-tuned model)
+• Minimum context window: 8K tokens
+• API access or local deployment
 
 Vector Search:
-• Neo4j native vector index
-• OR separate vector DB (Pinecone, Weaviate, Qdrant)
+• FAISS for local deployment
+• Neo4j vector index for integrated solution
+• Embedding dimension: 768 or 1024
 
-10.2 SECURITY & COMPLIANCE
----------------------------
-Data Privacy:
-• End-to-end encryption for case data
-• Encryption at rest and in transit
-• No data retention beyond case closure
-
-Audit Logs:
-• WORM (Write-Once-Read-Many) storage
-• Complete audit trail for all operations
-• Tamper-proof logging
-
-Access Control:
-• Role-based access control (RBAC)
-• Multi-factor authentication
-• Audit log for all access attempts
-
-Data Residency:
-• All data must remain within Egyptian jurisdiction
-• No cloud services outside Egypt
-• Local deployment preferred
-
-10.3 PERFORMANCE METRICS
+9.2 PERFORMANCE METRICS
 -------------------------
 Processing Time:
-• Complete case analysis: 15-30 minutes (standard cases)
-• Complex cases: 45-90 minutes
+• Article extraction: 1-2 seconds per document
+• Graph construction: 5-10 seconds per article (LLM-dependent)
+• Vector embedding: Variable (CPU: slow, GPU: fast)
 
-Accuracy Targets:
-• Procedural compliance detection: 95%+
-• Citation coverage: 100% (mandatory)
-• Hallucination rate: <1%
+Storage:
+• Graph database: ~100MB per 1000 articles
+• Vector index: ~500MB per 1000 articles
+• Raw documents: Variable
 
-Scalability:
-• Support for 100+ concurrent cases
-• Graph database: 10M+ nodes
-• Response time: <5 seconds for queries
+Query Performance:
+• Cypher queries: <100ms
+• Vector search: <500ms
+• Hybrid search: <1 second
+
+9.3 SCALABILITY
+---------------
+• Support for 10,000+ legal articles
+• Graph database: 100K+ nodes
+• Concurrent queries: 50+
+• Batch processing for large corpora
 
 ================================================================================
-                   11. IMPLEMENTATION CHECKLIST
+                   10. IMPLEMENTATION CHECKLIST
 ================================================================================
 
 PHASE 1: FOUNDATION
 -------------------
-☐ 1. Define complete Graph Schema
-     • All node types
-     • All relationship types
-     • Property schemas
+☐ 1. Setup Python environment
+     • Install dependencies
+     • Configure LLM access
+     • Test embedding model
 
-☐ 2. Setup and configure Neo4j
-     • Install Neo4j Enterprise
-     • Create indexes
-     • Configure vector search
+☐ 2. Setup Neo4j database
+     • Install Neo4j
+     • Create database
+     • Configure authentication
 
-PHASE 2: DATA PIPELINE
-----------------------
-☐ 3. Build Ingestion Pipeline
-     • PDF processing (OCR)
-     • Text extraction
-     • Entity recognition
-     • Graph construction
-
-☐ 4. Populate legal knowledge base
+PHASE 2: DATA PREPARATION
+--------------------------
+☐ 3. Collect legal documents
      • Egyptian Penal Code
      • Criminal Procedure Code
      • Court of Cassation rulings
 
-PHASE 3: AGENT SYSTEM
----------------------
-☐ 5. Implement LangGraph Agents
-     • Orchestrator Agent
-     • Graph Builder Agent
-     • Procedural Auditor Agent
-     • Legal Researcher Agent
-     • Evidence Analyst Agent
-     • Defense Analysis Agent
-     • Judge Agent
+☐ 4. Extract and clean text
+     • PDF to text conversion
+     • Article extraction
+     • Metadata preparation
 
-☐ 6. Configure Agent Communication
-     • JSON message protocol
-     • Node reference validation
-     • Provenance logging
+PHASE 3: GRAPH CONSTRUCTION
+----------------------------
+☐ 5. Generate embeddings
+     • Configure embedding model
+     • Process all articles
+     • Save vector store
 
-PHASE 4: SAFEGUARDS
+☐ 6. Build knowledge graph
+     • Configure LLMGraphTransformer
+     • Extract entities and relationships
+     • Populate Neo4j database
+
+☐ 7. Create indexes
+     • Node property indexes
+     • Relationship indexes
+     • Vector indexes (if using Neo4j)
+
+PHASE 4: VALIDATION
 -------------------
-☐ 7. Configure Guardrails
-     • Citation requirements
-     • Source validation
-     • Hallucination prevention
+☐ 8. Validate graph quality
+     • Check entity extraction accuracy
+     • Verify relationships
+     • Test provenance links
 
-☐ 8. Implement Audit & Logging
-     • WORM audit logs
-     • Provenance tracking
-     • Access control
+☐ 9. Test retrieval system
+     • Cypher query testing
+     • Vector search testing
+     • Hybrid retrieval testing
 
-PHASE 5: TESTING
-----------------
-☐ 9. Test on real Court of Cassation cases
-     • Historical cases (known outcomes)
-     • Edge cases (complex procedures)
-     • Validation against actual judgments
-
+PHASE 5: OPTIMIZATION
+---------------------
 ☐ 10. Performance optimization
       • Query optimization
-      • Caching strategy
-      • Load testing
+      • Index tuning
+      • Cache configuration
 
-PHASE 6: DEPLOYMENT
--------------------
-☐ 11. User Interface development
-      • Case input interface
-      • Analysis dashboard
-      • Judgment review interface
-
-☐ 12. Documentation and training
-      • User manual
-      • Judge training program
-      • Technical documentation
-
-☐ 13. Pilot deployment
-      • Select test courts
-      • Monitor performance
-      • Gather feedback
+☐ 11. Documentation
+      • API documentation
+      • Query examples
+      • User guide
 
 ================================================================================
-                         12. TESTING STRATEGY
+                         11. TESTING STRATEGY
 ================================================================================
 
-12.1 UNIT TESTING
+11.1 UNIT TESTING
 -----------------
-• Test each agent independently
-• Verify correct graph queries
-• Validate output formats
-• Check citation completeness
+• Test document loading functions
+• Validate article extraction
+• Test embedding generation
+• Verify graph construction
 
-12.2 INTEGRATION TESTING
+11.2 INTEGRATION TESTING
 ------------------------
-• Test agent communication protocol
-• Verify data flow through pipeline
-• Validate end-to-end case processing
+• Test end-to-end pipeline
+• Validate data flow
+• Check Neo4j integration
+• Test vector store integration
 
-12.3 VALIDATION AGAINST REAL CASES
------------------------------------
-• Use historical Court of Cassation cases
-• Compare system output to actual judgments
-• Measure accuracy on:
-  - Procedural compliance detection
-  - Legal research completeness
-  - Evidence analysis correctness
+11.3 QUALITY TESTING
+--------------------
+• Manual review of extracted entities
+• Relationship accuracy assessment
+• Provenance verification
+• Graph completeness check
 
-12.4 STRESS TESTING
--------------------
-• Large case files (1000+ pages)
-• Complex multi-defendant cases
-• Cases with extensive evidence
-• Performance under load
-
-12.5 ADVERSARIAL TESTING
+11.4 PERFORMANCE TESTING
 ------------------------
-• Attempt to induce hallucinations
-• Test with conflicting evidence
-• Provide incomplete information
-• Test edge cases and corner cases
+• Query response time
+• Batch processing speed
+• Memory usage
+• Concurrent query handling
+
+11.5 VALIDATION AGAINST LEGAL EXPERTS
+--------------------------------------
+• Expert review of entity extraction
+• Relationship validation
+• Legal accuracy assessment
+• Usability feedback
 
 ================================================================================
-                       13. FUTURE ENHANCEMENTS
+                       12. FUTURE ENHANCEMENTS
 ================================================================================
 
-13.1 PLANNED FEATURES
+12.1 PLANNED FEATURES
 ---------------------
-• Multi-language support (enhanced Arabic NLP, English interface)
-• Case similarity search (find similar historical cases)
-• Predictive analytics (estimate likely outcomes with disclaimers)
-• Integration with court case management systems
-• Continuous learning (automated incorporation of new rulings)
+• Multi-document integration (civil law, administrative law)
+• Temporal versioning (track law changes over time)
+• Cross-reference validation
+• Automated consistency checking
+• Visual graph exploration interface
 
-13.2 RESEARCH DIRECTIONS
+12.2 ADVANCED RETRIEVAL
+-----------------------
+• Multi-hop reasoning
+• Analogical reasoning (within Egyptian law)
+• Precedent similarity matching
+• Context-aware retrieval
+
+12.3 INTEGRATION CAPABILITIES
+------------------------------
+• API for external applications
+• Integration with case management systems
+• Export to legal research tools
+• Mobile application support
+
+12.4 KNOWLEDGE EXPANSION
 ------------------------
-• Explainable AI (enhanced visualization of reasoning chains)
-• Bias detection (automated detection of potential biases)
-• Multi-modal evidence (audio, video, image analysis)
-• Cross-jurisdictional learning (comparative analysis with
-  other civil law systems while maintaining Egyptian primacy)
-
-13.3 SCALABILITY ENHANCEMENTS
------------------------------
-• Distributed graph database
-• Horizontal scaling of agent system
-• Edge computing for local courts
-• Mobile interface for judges
+• Continuous updates with new rulings
+• Automated incorporation of amendments
+• Commentary integration
+• Legal doctrine linkage
 
 ================================================================================
                               CONCLUSION
 ================================================================================
 
-This graduation project represents a significant advancement in applying
-artificial intelligence to the Egyptian criminal justice system. By combining
-Graph RAG technology, multi-agent architecture, and strict adherence to
-Egyptian legal principles, the system provides a robust, transparent, and
-accountable decision support tool.
+This Knowledge Graph system provides a robust, structured foundation for
+Egyptian criminal law research and analysis. By combining semantic text
+processing, LLM-powered entity extraction, and graph database technology,
+the system enables:
+
+• Efficient legal research
+• Relationship discovery
+• Semantic search
+• Foundation for AI-powered legal applications
 
 The system prioritizes:
-• Legal Fidelity: Strict compliance with Egyptian criminal law
-• Transparency: Complete provenance tracking and explicit uncertainty
-• Accountability: Full audit trails and citation requirements
-• Human Oversight: Recognition as assistive tool, not replacement
+• Legal Accuracy: Strict adherence to source texts
+• Provenance: Complete traceability to source documents
+• Flexibility: Support for various query types
+• Scalability: Handles large legal corpora
 
-Through careful implementation, testing with real cassation cases, and
-continuous refinement based on judicial feedback, this system has the
-potential to enhance the efficiency, consistency, and quality of criminal
-justice decision-making in Egypt while maintaining the essential human
-element of judicial wisdom and discretion.
+This knowledge graph serves as the foundation for future legal AI applications,
+including the case analysis system described in the companion documentation.
 
 ================================================================================
                             CONTACT & SUPPORT
@@ -902,5 +762,6 @@ License: [License information]
 Generated: February 2026
 Version: 1.0
 Status: Graduation Project - Implementation Ready
+Scope: Egyptian Criminal Law Knowledge Graph (Laws Only)
 
 ================================================================================

@@ -2,13 +2,16 @@ langchain
 langgraph
 langchain-community
 langchain-groq
+langchain-neo4j
+langchain-experimental
 dotenv
 fastapi
 neo4j
-langchain-neo4j
 pdfplumber
 fitz
 python-bidi
 arabic_reshaper
 PyPDF2
 pymupdf
+scikit-learn
+sentence_transformers

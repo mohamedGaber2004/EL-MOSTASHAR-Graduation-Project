@@ -13,6 +13,7 @@ dependencies = [
     "ipykernel>=7.1.0",
     "langchain>=1.2.7",
     "langchain-community>=0.4.1",
+    "langchain-experimental>=0.4.1",
     "langchain-groq>=1.1.1",
     "langchain-neo4j>=0.8.0",
     "langgraph>=1.0.7",
@@ -22,4 +23,6 @@ dependencies = [
     "pymupdf>=1.26.7",
     "pypdf2>=3.0.1",
     "python-bidi>=0.6.7",
+    "scikit-learn>=1.8.0",
+    "sentence-transformers>=5.2.2",
 ]

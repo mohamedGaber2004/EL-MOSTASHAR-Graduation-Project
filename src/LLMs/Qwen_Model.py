@@ -1,7 +1,7 @@
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
 
-from Config.config import ARABIC_MODEL
+from src.Config.config import ARABIC_MODEL
 load_dotenv()
 
 class ArabicModel: 
