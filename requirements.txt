@@ -15,3 +15,7 @@ PyPDF2
 pymupdf
 scikit-learn
 sentence_transformers
+pypdf
+pdfminer.six
+PyMuPDF
+pikepdf
