@@ -12,10 +12,14 @@ fitz
 python-bidi
 arabic_reshaper
 PyPDF2
-pymupdf
 scikit-learn
 sentence_transformers
 pypdf
 pdfminer.six
 PyMuPDF
 pikepdf
+pymupdf
+pytesseract 
+opencv-python 
+pillow 
+ocrmypdf 
