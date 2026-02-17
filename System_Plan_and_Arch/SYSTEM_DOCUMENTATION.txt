@@ -272,24 +272,6 @@ NODE TYPES:
     - المبلغ (amount): String (for fines)
     - المصدر (source): String
 
-• شرط (Condition)
-  Properties:
-    - نص_الشرط (condition_text): String
-    - النوع (type): String (e.g., "مشدد", "مخفف")
-    - المصدر (source): String
-
-• باب (Chapter)
-  Properties:
-    - رقم_الباب (chapter_number): Integer
-    - عنوان_الباب (chapter_title): String
-    - المصدر (source): String
-
-• فصل (Section)
-  Properties:
-    - رقم_الفصل (section_number): Integer
-    - عنوان_الفصل (section_title): String
-    - المصدر (source): String
-
 ---
 
 RELATIONSHIP TYPES:
@@ -298,38 +280,8 @@ RELATIONSHIP TYPES:
 (جريمة)-[:يُعاقب_بـ]->(عقوبة)
     Crime is punished by this penalty
 
-(مادة_قانونية)-[:يشترط]->(شرط)
-    Legal article requires this condition
-
 (مادة_قانونية)-[:يُحيل_إلى]->(مادة_قانونية)
     Legal article refers to another article
-
-(مادة_قانونية)-[:ينتمي_لـ]->(باب)
-    Legal article belongs to chapter
-
-(مادة_قانونية)-[:ينتمي_لـ]->(فصل)
-    Legal article belongs to section
-
-(عقوبة)-[:يُشدد_بـ]->(شرط)
-    Penalty is aggravated by condition
-
-(عقوبة)-[:يُخفف_بـ]->(شرط)
-    Penalty is mitigated by condition
-
----
-
-EXAMPLE GRAPH STRUCTURE:
-------------------------
-
-(باب_1:باب {عنوان: "الجرائم الواقعة على الأشخاص"})
-    ↓ [:ينتمي_لـ]
-(مادة_234:مادة_قانونية {رقم: 234, نص: "من ضرب شخصاً..."})
-    ↓ [:يتضمن]
-(السرقة:جريمة {اسم: "السرقة بالإكراه"})
-    ↓ [:يُعاقب_بـ]
-(السجن:عقوبة {نوع: "السجن المشدد", مدة: "3-7 سنوات"})
-    ↓ [:يُشدد_بـ]
-(الإكراه:شرط {نص: "إذا وقعت بالإكراه"})
 
 ================================================================================
                    6. GRAPH CONSTRUCTION WORKFLOW
