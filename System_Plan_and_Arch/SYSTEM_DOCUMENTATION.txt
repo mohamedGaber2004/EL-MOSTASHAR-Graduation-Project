@@ -213,17 +213,11 @@ ALLOWED NODES:
 • مادة_قانونية (Legal Article)
 • جريمة (Crime)
 • عقوبة (Penalty)
-• شرط (Condition)
-• باب (Chapter)
-• فصل (Section)
 
 ALLOWED RELATIONSHIPS:
 • يُعاقب_بـ (is_punished_by): جريمة → عقوبة
-• يشترط (requires): مادة_قانونية → شرط
 • يُحيل_إلى (refers_to): مادة_قانونية → مادة_قانونية
-• ينتمي_لـ (belongs_to): مادة_قانونية → باب/فصل
-• يُشدد_بـ (aggravated_by): عقوبة → شرط
-• يُخفف_بـ (mitigated_by): عقوبة → شرط
+
 
 PROCESSING:
 1. LLM analyzes each legal chunk

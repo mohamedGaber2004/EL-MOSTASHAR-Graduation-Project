@@ -24,3 +24,5 @@ opencv-python
 pillow 
 ocrmypdf 
 networkx
+langchain_huggingface
+faiss-cpu
