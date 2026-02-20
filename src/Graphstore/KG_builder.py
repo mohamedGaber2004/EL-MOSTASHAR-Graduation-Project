@@ -1,79 +1,27 @@
 from __future__ import annotations
 
-import fnmatch
-import logging
-import re , hashlib
+import logging , re , fnmatch
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any , Dict , List, Optional , Tuple
 
 import pandas as pd
 from langchain_core.documents import Document
 from neo4j import GraphDatabase
 
 from src.Config.config import DataPath
+from src.Chunking.chunking import FOLDER_TO_LAW_KEY
 from src.Utils.regex_utils import (
-    _to_western_digits,
-    ORIGINAL_LAW_RE , 
-    _DATE_RE , 
-    _MONTH_MAP
+    _to_western_digits, _normalize_article_no, _stable_id,
+    ORIGINAL_LAW_RE, _DATE_RE, _MONTH_MAP,
+    _ARTICLE_MARK_RE, _ANY_ARTICLE_RE, REF_RE, DEF_RE,
+    PENALTY_PATTERNS,
 )
+from src.Utils.text_loader import _read_file
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-ENCODINGS = ("utf-8", "utf-16", "cp1256", "windows-1256")
-
-# =============================================================================
-# REGEX
-# =============================================================================
-
-
-PENALTY_PATTERNS = {
-    'سجن': re.compile(
-        r'(?:السجن|بالسجن|سجن[اً]?)\s*(?:مدة|لمدة)?\s*(?:(?:من|لا\s+تقل\s+عن)\s*)?([0-9٠-٩]+)\s*(?:إلى|حتى|-)\s*([0-9٠-٩]+)\s*(سنة|سنوات|عام|أعوام)',
-        re.UNICODE),
-    'غرامة': re.compile(
-        r'(?:غرامة|بغرامة)\s*(?:مالية)?\s*(?:لا\s+)?(?:تقل\s+عن|من)\s*([0-9٠-٩,]+)\s*(?:جنيه|دولار|ريال)?(?:\s*(?:ولا\s+تزيد\s+على|إلى|حتى|-)\s*([0-9٠-٩,]+))?',
-        re.UNICODE),
-    'إعدام':       re.compile(r'(?:الإعدام|بالإعدام|القتل|قتل[اً]?|إعدام[اً]?)', re.UNICODE),
-    'أشغال_شاقة':  re.compile(r'الأشغال\s+الشاقة', re.UNICODE),
-}
-
-
-_ARTICLE_MARK_RE = re.compile(
-    r"""(?m)^\s*(?:المادة|مادة)\s*(?:\(\s*)?
-(?P<num>[0-9٠-٩]+(?:\s*(?:مكرر(?:[اأإآى])?)?)?(?:\s*\(\s*[اأإآA-Za-z]\s*\))?)
-(?:\s*\))?\s*[:：\-–\s](?P<rest>.*)$""",
-    re.VERBOSE,
-)
-_ANY_ARTICLE_RE = re.compile(
-    r'(?:المادة|مادة)\s*([٠-٩0-9]+(?:\s*مكرر[اًَُِّْأإآى]?)?\s*'
-    r'(?:/\s*[اأإآA-Za-zأ-ي])?\s*'
-    r'(?:\(\s*[اأإآA-Za-zأ-ي]\s*\))?)',
-    re.UNICODE,
-)
-REF_RE = re.compile(
-    r"(?:المادة|مادة|المواد)\s*(?:\(\s*)?(?P<num>[0-9٠-٩]+(?:\s*(?:مكرر(?:[اأإآى])?)?)?(?:\s*\(\s*[اأإآA-Za-z]\s*\))?)(?:\s*\))?(?:\s*(?:و|،|,)\s*(?:\(\s*)?(?P<num2>[0-9٠-٩]+(?:\s*مكرر(?:[اأإآى])?)?)(?:\s*\))?)?",
-    re.VERBOSE,
-)
-
-DEF_RE = re.compile(
-    r'(?:يُقصد|المقصود|يُراد|تعني|يعني|يُعرَّف)\s+(?:ب|من)?\s*["\']?([^"\'"]+)["\']?\s*[:،]\s*(.+?)(?:\.|$)',
-    re.UNICODE,
-)
-
-DEFAULT_FOLDER_TO_LAW_KEY: Dict[str, str] = {
-    "3okobat":         "penal_code",
-    "8asl_amwal":      "money_laundering",
-    "Asle7a":          "weapons_ammunition",
-    "dostor_gena2y":   "criminal_constitution",
-    "drugs":           "anti_drugs",
-    "egra2at_gena2ya": "criminal_procedure",
-    "erhab":           "anti_terror",
-    "taware2":         "emergency_law",
-    "technology":      "cybercrime",
-}
 
 # =============================================================================
 # DATA STRUCTURES
@@ -114,118 +62,24 @@ class ExtractedLaw:
     definitions: List[Dict[str, Any]]
     references:  List[Dict[str, Any]]
     topics:      List[Dict[str, Any]]
-    amendments:  List[Amendment]      = field(default_factory=list)
-    schedules:   List[Schedule]       = field(default_factory=list)
-
-
-# =============================================================================
-# HELPERS
-# =============================================================================
-
-def _normalize_article_no(token: str) -> str:
-    token = _to_western_digits(token.strip())
-    token = re.sub(r"\s+", " ", token)
-    token = re.sub(r"مكر(?:ر[اأإآىًٍَُِّْ]?)", "مكرر", token)
-    return token.strip()
-
-
-def _stable_id(*components) -> str:
-    combined = "|".join(str(c) for c in components)
-    return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:16]
-
-def _read_file(fp: Path) -> Optional[str]:
-    for enc in ENCODINGS:
-        try:
-            return fp.read_text(encoding=enc)
-        except Exception:
-            continue
-    return fp.read_bytes().decode("utf-8", errors="replace")
-
-
-def _dedup(items: List[Dict], keys: List[str]) -> List[Dict]:
-    seen, out = set(), []
-    for item in items:
-        k = tuple(item.get(f) for f in keys)
-        if k not in seen:
-            seen.add(k)
-            out.append(item)
-    return out
-
-
-def _normalize_arabic(text: str) -> str:
-    if not text:
-        return ""
-    text = re.sub(r"[\u0617-\u061A\u064B-\u0652\u0670]", "", text).replace("\u0640", "")
-    for old, new in [("أ","ا"),("إ","ا"),("آ","ا"),("ى","ي"),("ئ","ي"),("ة","ه"),("ؤ","و")]:
-        text = text.replace(old, new)
-    return re.sub(r"\s+", " ", text).strip()
-
-
-# =============================================================================
-# SCHEDULE EXTRACTORS
-# =============================================================================
-
-def _extract_schedule_entries_drug(text: str) -> List[ScheduleEntry]:
-    entries, sections = [], re.split(r'\n(\d+)\s*[–\-]\s*', text)
-    for i in range(1, len(sections), 2):
-        if i + 1 >= len(sections):
-            break
-        body = sections[i + 1].strip()
-        nm = re.match(r'^([^(]+)(?:\(([^)]+)\))?', body.split('\n')[0])
-        cm = re.search(r'الاسم الكيميائي:\s*(.+?)(?=\n|$)', body, re.UNICODE)
-        tm = re.search(r'الأسماء التجارية:\s*(.+?)(?=\n---|\n\d+|$)', body, re.UNICODE)
-        entries.append(ScheduleEntry(
-            entry_number = sections[i].strip(),
-            arabic_name  = nm.group(1).strip() if nm else None,
-            english_name = nm.group(2).strip() if nm and nm.group(2) else None,
-            chemical_name= cm.group(1).strip() if cm else None,
-            trade_names  = [n.strip() for n in re.split(r'[،,\-–]', tm.group(1)) if n.strip()] if tm else None,
-        ))
-    return entries
-
-
-def _extract_schedule_entries_weapon(text: str) -> List[ScheduleEntry]:
-    return [
-        ScheduleEntry(entry_number=m.group(1), arabic_name=m.group(2).strip(), description=m.group(2).strip())
-        for line in text.split('\n')
-        if (m := re.match(r'^(\d+)\s*[–\-]\s*(.+)$', line.strip()))
-    ]
-
-
-def _extract_schedules(text: str, prefix: str, entry_fn) -> List[Schedule]:
-    HEADER_RE = re.compile(r'(?:الجدول|جدول)\s+رقم\s*\(?([0-9٠-٩]+)\)?', re.UNICODE)
-    matches   = list(HEADER_RE.finditer(text))
-    schedules = []
-    for i, m in enumerate(matches):
-        num   = _to_western_digits(m.group(1))
-        start = m.end()
-        end   = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        chunk = text[start:end].strip()
-        lines = [l.strip() for l in chunk.split('\n') if l.strip()]
-        schedules.append(Schedule(
-            schedule_id     = f"{prefix}_schedule_{num}",
-            schedule_number = num,
-            title           = lines[0] if lines else f"جدول رقم {num}",
-            entries         = entry_fn(chunk),
-        ))
-    return schedules
+    amendments:  List[Amendment] = field(default_factory=list)
+    schedules:   List[Schedule]  = field(default_factory=list)
 
 
 # =============================================================================
 # LAW EXTRACTOR
 # =============================================================================
 
-# law_key → (title, promulgation_date, schedule_fn)
 _LAW_REGISTRY: Dict[str, Tuple[str, Optional[str], Optional[Any]]] = {
-    "penal_code":            ("قانون العقوبات",                              "1937-07-31", None),
-    "money_laundering":      ("قانون مكافحة غسل الأموال",                   "2002-05-15", None),
-    "weapons_ammunition":    ("قانون الأسلحة والذخيرة",                     "1954-09-22", lambda t: _extract_schedules(t, "weapon", _extract_schedule_entries_weapon)),
-    "criminal_constitution": ("الدستور الجنائي",                            None,         None),
-    "anti_drugs":            ("قانون مكافحة المخدرات",                      "1960-05-01", lambda t: _extract_schedules(t, "drug",   _extract_schedule_entries_drug)),
-    "criminal_procedure":    ("قانون الإجراءات الجنائية",                   "1950-10-18", None),
-    "anti_terror":           ("قانون مكافحة الإرهاب",                       "2015-08-16", None),
-    "emergency_law":         ("قانون الطوارئ",                              "1958-01-01", None),
-    "cybercrime":            ("قانون مكافحة جرائم تقنية المعلومات",         "2018-07-17", None),
+    "penal_code":            ("قانون العقوبات",                          "1937-07-31", None),
+    "money_laundering":      ("قانون مكافحة غسل الأموال",               "2002-05-15", None),
+    "weapons_ammunition":    ("قانون الأسلحة والذخيرة",                 "1954-09-22", "weapon"),
+    "criminal_constitution": ("الدستور الجنائي",                        None,         None),
+    "anti_drugs":            ("قانون مكافحة المخدرات",                  "1960-05-01", "drug"),
+    "criminal_procedure":    ("قانون الإجراءات الجنائية",               "1950-10-18", None),
+    "anti_terror":           ("قانون مكافحة الإرهاب",                   "2015-08-16", None),
+    "emergency_law":         ("قانون الطوارئ",                          "1958-01-01", None),
+    "cybercrime":            ("قانون مكافحة جرائم تقنية المعلومات",     "2018-07-17", None),
 }
 
 TOPICS_MAP = {
@@ -243,12 +97,79 @@ class LawExtractor:
     def __init__(self, law_key: str, raw_text: str):
         if law_key not in _LAW_REGISTRY:
             raise KeyError(f"Unknown law_key: '{law_key}'")
-        title, date, schedule_fn = _LAW_REGISTRY[law_key]
-        self.law_key     = law_key
-        self.raw_text    = raw_text or ""
-        self.title       = title
-        self.date        = date
-        self._schedule_fn = schedule_fn
+        title, date, schedule_type = _LAW_REGISTRY[law_key]
+        self.law_key       = law_key
+        self.raw_text      = raw_text or ""
+        self.title         = title
+        self.date          = date
+        self._schedule_type = schedule_type
+
+    # ── private helpers ───────────────────────────────────────────────────
+
+    def _dedup(self, items: List[Dict], keys: List[str]) -> List[Dict]:
+        seen, out = set(), []
+        for item in items:
+            k = tuple(item.get(f) for f in keys)
+            if k not in seen:
+                seen.add(k)
+                out.append(item)
+        return out
+
+    def _normalize_arabic(self, text: str) -> str:
+        if not text:
+            return ""
+        text = re.sub(r"[\u0617-\u061A\u064B-\u0652\u0670]", "", text).replace("\u0640", "")
+        for old, new in [("أ","ا"),("إ","ا"),("آ","ا"),("ى","ي"),("ئ","ي"),("ة","ه"),("ؤ","و")]:
+            text = text.replace(old, new)
+        return re.sub(r"\s+", " ", text).strip()
+
+    def _extract_schedule_entries_drug(self, text: str) -> List[ScheduleEntry]:
+        entries, sections = [], re.split(r'\n(\d+)\s*[–\-]\s*', text)
+        for i in range(1, len(sections), 2):
+            if i + 1 >= len(sections):
+                break
+            body = sections[i + 1].strip()
+            nm = re.match(r'^([^(]+)(?:\(([^)]+)\))?', body.split('\n')[0])
+            cm = re.search(r'الاسم الكيميائي:\s*(.+?)(?=\n|$)', body, re.UNICODE)
+            tm = re.search(r'الأسماء التجارية:\s*(.+?)(?=\n---|\n\d+|$)', body, re.UNICODE)
+            entries.append(ScheduleEntry(
+                entry_number  = sections[i].strip(),
+                arabic_name   = nm.group(1).strip() if nm else None,
+                english_name  = nm.group(2).strip() if nm and nm.group(2) else None,
+                chemical_name = cm.group(1).strip() if cm else None,
+                trade_names   = [n.strip() for n in re.split(r'[،,\-–]', tm.group(1)) if n.strip()] if tm else None,
+            ))
+        return entries
+
+    def _extract_schedule_entries_weapon(self, text: str) -> List[ScheduleEntry]:
+        return [
+            ScheduleEntry(entry_number=m.group(1), arabic_name=m.group(2).strip(), description=m.group(2).strip())
+            for line in text.split('\n')
+            if (m := re.match(r'^(\d+)\s*[–\-]\s*(.+)$', line.strip()))
+        ]
+
+    def _extract_schedules(self) -> List[Schedule]:
+        if not self._schedule_type:
+            return []
+        entry_fn  = self._extract_schedule_entries_drug if self._schedule_type == "drug" else self._extract_schedule_entries_weapon
+        HEADER_RE = re.compile(r'(?:الجدول|جدول)\s+رقم\s*\(?([0-9٠-٩]+)\)?', re.UNICODE)
+        matches   = list(HEADER_RE.finditer(self.raw_text))
+        schedules = []
+        for i, m in enumerate(matches):
+            num   = _to_western_digits(m.group(1))
+            start = m.end()
+            end   = matches[i + 1].start() if i + 1 < len(matches) else len(self.raw_text)
+            chunk = self.raw_text[start:end].strip()
+            lines = [l.strip() for l in chunk.split('\n') if l.strip()]
+            schedules.append(Schedule(
+                schedule_id     = f"{self._schedule_type}_schedule_{num}",
+                schedule_number = num,
+                title           = lines[0] if lines else f"جدول رقم {num}",
+                entries         = entry_fn(chunk),
+            ))
+        return schedules
+
+    # ── extraction methods ────────────────────────────────────────────────
 
     def _articles(self) -> List[Dict]:
         text    = self.raw_text
@@ -284,7 +205,7 @@ class LawExtractor:
                 out.append({"article_number": no, "penalty_type": "إعدام", "min_value": None, "max_value": None, "unit": None})
             if PENALTY_PATTERNS['أشغال_شاقة'].search(text):
                 out.append({"article_number": no, "penalty_type": "أشغال_شاقة", "min_value": None, "max_value": None, "unit": None})
-        return _dedup(out, ["article_number", "penalty_type", "min_value", "max_value"])
+        return self._dedup(out, ["article_number", "penalty_type", "min_value", "max_value"])
 
     def _definitions(self, articles: List[Dict]) -> List[Dict]:
         out = []
@@ -294,7 +215,7 @@ class LawExtractor:
                 continue
             for m in DEF_RE.finditer(a.get("text", "")):
                 out.append({"term": m.group(1).strip(), "definition_text": m.group(2).strip(), "defined_in_article": no})
-        return _dedup(out, ["term", "defined_in_article"])
+        return self._dedup(out, ["term", "defined_in_article"])
 
     def _references(self, articles: List[Dict]) -> List[Dict]:
         refs = set()
@@ -314,12 +235,12 @@ class LawExtractor:
             no = a.get("article_number")
             if not no:
                 continue
-            text = _normalize_arabic(a.get("text", ""))
+            text = self._normalize_arabic(a.get("text", ""))
             for topic, keywords in TOPICS_MAP.items():
-                if any(_normalize_arabic(kw) in text for kw in keywords):
+                if any(self._normalize_arabic(kw) in text for kw in keywords):
                     out.append({"article_number": no, "topic_name": topic, "confidence": 0.8})
                     break
-        return _dedup(out, ["article_number", "topic_name"])
+        return self._dedup(out, ["article_number", "topic_name"])
 
     def extract(self) -> ExtractedLaw:
         articles = self._articles()
@@ -332,7 +253,7 @@ class LawExtractor:
             definitions = self._definitions(articles),
             references  = self._references(articles),
             topics      = self._topics(articles),
-            schedules   = self._schedule_fn(self.raw_text) if self._schedule_fn else [],
+            schedules   = self._extract_schedules(),
         )
 
 
@@ -406,8 +327,9 @@ class AmendmentExtractor:
             effective_date          = adate,
         )
 
+
 # =============================================================================
-# INGESTION HELPERS
+# INGESTION HELPERS  (pipeline-level: used across classes → stay at module level)
 # =============================================================================
 
 def _read_law_folder(folder: Path) -> str:
@@ -680,7 +602,6 @@ class LegalKnowledgeGraph:
                 logger.error(f"  ✗ {am.amendment_id}: {e}")
 
     def build_from_documents(self, docs: List[Document]) -> Dict[str, int]:
-        """Import List[Document] from chunking.py into Neo4j."""
         stats = {"laws": 0, "articles": 0, "amendments": 0, "skipped": 0}
         seen_laws: set = set()
         for doc in docs:
@@ -701,17 +622,22 @@ class LegalKnowledgeGraph:
                     self.create_article(law_id, m.get("article_number"), text, pos)
                     stats["articles"] += 1
                 elif chunk_type == "amended_article":
-                    law_num, adate, atype = m.get("amendment_law_number"), m.get("amendment_date"), m.get("amendment_type", "modification")
+                    law_num = m.get("amendment_law_number")
+                    adate   = m.get("amendment_date")
+                    atype   = m.get("amendment_type", "modification")
                     if not law_num or not adate:
                         stats["skipped"] += 1
                         continue
                     year = adate.split("-")[0]
                     self.create_amendment(law_id, Amendment(
-                        amendment_id=_stable_id(law_id, law_num, year),
-                        amendment_law_number=law_num, amendment_date=adate,
-                        amendment_law_title=f"قانون رقم {law_num} لسنة {year}",
-                        amended_article_numbers=[m["article_number"]] if m.get("article_number") else [],
-                        amendment_type=atype, description=text[:500], effective_date=adate,
+                        amendment_id            = _stable_id(law_id, law_num, year),
+                        amendment_law_number    = law_num,
+                        amendment_date          = adate,
+                        amendment_law_title     = f"قانون رقم {law_num} لسنة {year}",
+                        amended_article_numbers = [m["article_number"]] if m.get("article_number") else [],
+                        amendment_type          = atype,
+                        description             = text[:500],
+                        effective_date          = adate,
                     ))
                     stats["amendments"] += 1
                 else:
@@ -754,8 +680,7 @@ def run_pipeline(
     folder_to_law_key: Optional[Dict[str, str]] = None,
     drop_existing:     bool = True,
 ) -> LegalKnowledgeGraph:
-
-    folder_to_law_key = folder_to_law_key or DEFAULT_FOLDER_TO_LAW_KEY
+    folder_to_law_key = folder_to_law_key or FOLDER_TO_LAW_KEY
 
     print("\nPHASE 1: EXTRACTION SUMMARY")
     summaries = ingest_dataset(root_dir, folder_to_law_key)
@@ -791,10 +716,6 @@ def build_knowledge_graph(
     graph.print_statistics()
     return graph
 
-
-# =============================================================================
-# ENTRY POINT
-# =============================================================================
 
 def run_KG():
     try:

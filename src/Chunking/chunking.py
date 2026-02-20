@@ -4,19 +4,14 @@ import fnmatch
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional , Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.documents import Document
 from langchain_text_splitters import CharacterTextSplitter, RecursiveCharacterTextSplitter
 
 from src.Config.config import DataPath, na2d_data_path
-from src.Utils.text_loader import MultiEncodingTextLoader
-from src.Utils.regex_utils import (
-    _to_western_digits,
-    ORIGINAL_LAW_RE , 
-    _DATE_RE , 
-    _MONTH_MAP
-)
+from src.Utils.regex_utils import ORIGINAL_LAW_RE, _DATE_RE, _MONTH_MAP, _to_western_digits
+from src.Utils.text_loader import MultiEncodingTextLoader, _read_file
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -55,98 +50,13 @@ BOOK_TITLE_MAP: Dict[str, str] = {
     "2019-2018_المستحدث":        "المستحدث من المبادئ 2018-2019",
 }
 
-ENCODINGS = ("utf-8", "utf-16", "cp1256", "windows-1256")
-
-_CASE_NUM_RE = re.compile(r"(?:الطعن|طعن)\s+رق[مم]\s+([٠-٩0-9]+(?:\s*[,،]\s*[٠-٩0-9]+)*)\s+لسنة\s+([٠-٩0-9]+)", re.UNICODE)
+_CASE_NUM_RE    = re.compile(r"(?:الطعن|طعن)\s+رق[مم]\s+([٠-٩0-9]+(?:\s*[,،]\s*[٠-٩0-9]+)*)\s+لسنة\s+([٠-٩0-9]+)", re.UNICODE)
 _RULING_DATE_RE = re.compile(r"جلسة\s+(?:[٠-٩0-9]+\s*/\s*[٠-٩0-9]+\s*/\s*[٠-٩0-9]{2,4}|[٠-٩0-9]+\s+(?:يناير|فبراير|مارس|أبريل|مايو|يونيو|يوليو|أغسطس|سبتمبر|أكتوبر|نوفمبر|ديسمبر)\s+[٠-٩0-9]{4})", re.UNICODE)
-_CHAMBER_RE = re.compile(r"(?:الدائرة|دائرة)\s+([^\n،,]+?)(?=\n|،|,|$)", re.UNICODE)
+_CHAMBER_RE     = re.compile(r"(?:الدائرة|دائرة)\s+([^\n،,]+?)(?=\n|،|,|$)", re.UNICODE)
 
 _article_splitter = CharacterTextSplitter(separator="\n\n", chunk_size=10_000, chunk_overlap=0)
 _table_splitter   = CharacterTextSplitter(separator="\n\n\n\n", chunk_size=500_000, chunk_overlap=0)
 
-# =============================================================================
-# HELPERS
-# =============================================================================
-
-def _amendment_type(raw_text: str) -> str:
-    sample = raw_text[:800]
-    if any(w in sample for w in ["تضاف","يضاف","أضيف","إضافة","جديدة","جديد"]):
-        return "addition"
-    if any(w in sample for w in ["يلغى","ألغي","يحذف","حذف","إلغاء"]):
-        return "deletion"
-    return "modification"
-
-
-def _amendment_date(raw_text: str, year: str) -> str:
-    m = _DATE_RE.search(raw_text)
-    if m:
-        day   = _to_western_digits(m.group(1) or "01").zfill(2)
-        month = _MONTH_MAP.get(m.group(2), "01")
-        yr    = _to_western_digits(m.group(3))
-        return f"{yr}-{month}-{day}"
-    return f"{year}-01-01"
-
-def _num_year_from_header(raw_text: str) -> Tuple[Optional[str], Optional[str]]:
-    for m in ORIGINAL_LAW_RE.finditer(raw_text):
-        try:
-            a, b = int(_to_western_digits(m.group(1))), int(_to_western_digits(m.group(2)))
-            year, num = (str(a), str(b)) if 1800 <= a <= 2100 else (str(b), str(a))
-            if 1800 <= int(year) <= 2100 and 0 < int(num) < 10000:
-                return num, year
-        except Exception:
-            continue
-    return None, None
-
-def _get_amendment_metadata(raw_text: str, filename: str) -> Optional[Dict[str, str]]:
-    law_num, year = _num_year_from_header(raw_text)
-    if not law_num or not year:
-        return None
-    return {
-        "law_num":        law_num,
-        "year":           year,
-        "amendment_date": _amendment_date(raw_text, year),
-        "amendment_type": _amendment_type(raw_text),
-    }
-
-def _read_file(fp: Path) -> Optional[str]:
-    for enc in ENCODINGS:
-        try:
-            return fp.read_text(encoding=enc)
-        except Exception:
-            continue
-    return fp.read_bytes().decode("utf-8", errors="replace")
-
-
-def _book_title(stem: str) -> str:
-    for key, title in BOOK_TITLE_MAP.items():
-        if key in stem:
-            return title
-    return stem
-
-
-def _ruling_metadata(text: str, folder: str, filename: str) -> Dict[str, Any]:
-    header = text[:1000]
-    meta   = {"doc_type": "ruling", "crime_category": folder, "source_file": filename}
-    m = _CASE_NUM_RE.search(header)
-    if m:
-        meta["case_number"] = _to_western_digits(m.group(1).replace(" ", ""))
-        meta["case_year"]   = _to_western_digits(m.group(2))
-    m = _RULING_DATE_RE.search(header)
-    if m:
-        meta["ruling_date"] = m.group(0).replace("جلسة", "").strip()
-    m = _CHAMBER_RE.search(header)
-    if m:
-        meta["chamber"] = m.group(1).strip()
-    return meta
-
-
-def _make_splitter(max_words: int, overlap: int) -> RecursiveCharacterTextSplitter:
-    return RecursiveCharacterTextSplitter(
-        chunk_size     = max_words,
-        chunk_overlap  = overlap,
-        length_function= lambda t: len(t.split()),
-        separators     = ["\n\n", "\n", ".", " ", ""],
-    )
 
 # =============================================================================
 # CORPUS CHUNKER
@@ -172,11 +82,78 @@ class CorpusChunker:
     ) -> None:
         self.laws_dir         = Path(laws_dir)
         self.na2d_dir         = Path(na2d_dir)
-        self._book_splitter   = _make_splitter(max_words_book, overlap_book)
-        self._ruling_splitter = _make_splitter(max_words_rule, overlap_rule)
+        self._book_splitter   = self._make_splitter(max_words_book, overlap_book)
+        self._ruling_splitter = self._make_splitter(max_words_rule, overlap_rule)
+
+
+
+    def _book_title(self, stem: str) -> str:
+        for key, title in BOOK_TITLE_MAP.items():
+            if key in stem:
+                return title
+        return stem
+
+
+    def _ruling_metadata(self,text: str, folder: str, filename: str) -> Dict[str, Any]:
+        header = text[:1000]
+        meta   = {"doc_type": "ruling", "crime_category": folder, "source_file": filename}
+        m = _CASE_NUM_RE.search(header)
+        if m:
+            meta["case_number"] = _to_western_digits(m.group(1).replace(" ", ""))
+            meta["case_year"]   = _to_western_digits(m.group(2))
+        m = _RULING_DATE_RE.search(header)
+        if m:
+            meta["ruling_date"] = m.group(0).replace("جلسة", "").strip()
+        m = _CHAMBER_RE.search(header)
+        if m:
+            meta["chamber"] = m.group(1).strip()
+        return meta
+
+
+    def _get_amendment_metadata(self,raw_text: str, filename: str) -> Optional[Dict[str, str]]:
+        law_num, year = None, None
+        for m in ORIGINAL_LAW_RE.finditer(raw_text):
+            try:
+                a, b = int(_to_western_digits(m.group(1))), int(_to_western_digits(m.group(2)))
+                year, num = (str(a), str(b)) if 1800 <= a <= 2100 else (str(b), str(a))
+                if 1800 <= int(year) <= 2100 and 0 < int(num) < 10000:
+                    law_num = num
+                    break
+            except Exception:
+                continue
+        if not law_num or not year:
+            return None
+
+        date_m = _DATE_RE.search(raw_text)
+        if date_m:
+            day   = _to_western_digits(date_m.group(1) or "01").zfill(2)
+            month = _MONTH_MAP.get(date_m.group(2), "01")
+            yr    = _to_western_digits(date_m.group(3))
+            adate = f"{yr}-{month}-{day}"
+        else:
+            adate = f"{year}-01-01"
+
+        sample = raw_text[:800]
+        if any(w in sample for w in ["تضاف","يضاف","أضيف","إضافة","جديدة","جديد"]):
+            atype = "addition"
+        elif any(w in sample for w in ["يلغى","ألغي","يحذف","حذف","إلغاء"]):
+            atype = "deletion"
+        else:
+            atype = "modification"
+
+        return {"law_num": law_num, "year": year, "amendment_date": adate, "amendment_type": atype}
+
+
+    def _make_splitter(self,max_words: int, overlap: int) -> RecursiveCharacterTextSplitter:
+        return RecursiveCharacterTextSplitter(
+            chunk_size     = max_words,
+            chunk_overlap  = overlap,
+            length_function= lambda t: len(t.split()),
+            separators     = ["\n\n", "\n", ".", " ", ""],
+        )
+
 
     def get_chunks(self) -> List[Document]:
-        """One Document per article or table block for all law files."""
         all_docs: List[Document] = []
 
         for folder in sorted(p for p in self.laws_dir.iterdir() if p.is_dir()):
@@ -203,7 +180,7 @@ class CorpusChunker:
                 raw = MultiEncodingTextLoader(af).load()
                 if not raw:
                     continue
-                meta = _get_amendment_metadata(raw[0].page_content, af.name)
+                meta = self._get_amendment_metadata(raw[0].page_content, af.name)
                 if not meta:
                     logger.warning(f"  [SKIP] {af.name} — no amendment metadata")
                     continue
@@ -222,7 +199,6 @@ class CorpusChunker:
         return all_docs
 
     def get_na2d_chunks(self) -> Dict[str, List[Document]]:
-        """Rulings and principles chunks from the na2d corpus."""
         ruling_docs:    List[Document] = []
         principle_docs: List[Document] = []
 
@@ -233,7 +209,7 @@ class CorpusChunker:
                     continue
                 chunks = self._book_splitter.create_documents(
                     texts     = [text.strip()],
-                    metadatas = [{"doc_type": "principle", "book_title": _book_title(item.stem), "source_file": item.name}],
+                    metadatas = [{"doc_type": "principle", "book_title": self._book_title(item.stem), "source_file": item.name}],
                 )
                 principle_docs.extend(chunks)
                 logger.info(f"  [BOOK] {item.name} → {len(chunks)} chunks")
@@ -246,7 +222,7 @@ class CorpusChunker:
                         continue
                     chunks = self._ruling_splitter.create_documents(
                         texts     = [text.strip()],
-                        metadatas = [_ruling_metadata(text, item.name, fp.name)],
+                        metadatas = [self._ruling_metadata(text, item.name, fp.name)],
                     )
                     ruling_docs.extend(chunks)
                     folder_count += len(chunks)
