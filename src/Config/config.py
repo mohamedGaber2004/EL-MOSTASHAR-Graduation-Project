@@ -1,3 +1,21 @@
+from pydantic_settings import BaseSettings , SettingsConfigDict
+
+
+
+class Settings(BaseSettings):
+    APP_NAME : str
+    APP_VERSION : str
+    GROQ_API_KEY : str
+
+    class Config:
+        env_file = ".env"
+
+
+def get_settings():
+    return Settings()
+
+
+
 # Data path
 DataPath = "Datasets/Unstructured_Data"
 na2d_data_path = "Datasets/Unstructured_Data/na2d"
