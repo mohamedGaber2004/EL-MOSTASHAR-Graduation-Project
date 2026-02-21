@@ -9,7 +9,7 @@ import pandas as pd
 from langchain_core.documents import Document
 from neo4j import GraphDatabase
 
-from src.Config.config import DataPath
+from src.Config.config import get_settings
 from src.Chunking.chunking import FOLDER_TO_LAW_KEY
 from src.Utils.regex_utils import (
     _to_western_digits, _normalize_article_no, _stable_id,
@@ -723,4 +723,4 @@ def run_KG():
     except Exception as e:
         print(e)
         return
-    run_pipeline(DataPath, NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD, drop_existing=True).close()
+    run_pipeline(get_settings().DataPath, NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD, drop_existing=True).close()

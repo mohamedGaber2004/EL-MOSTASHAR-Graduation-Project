@@ -4,12 +4,12 @@ import fnmatch
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from langchain_core.documents import Document
 from langchain_text_splitters import CharacterTextSplitter, RecursiveCharacterTextSplitter
 
-from src.Config.config import DataPath, na2d_data_path
+from src.Config.config import get_settings
 from src.Utils.regex_utils import ORIGINAL_LAW_RE, _DATE_RE, _MONTH_MAP, _to_western_digits
 from src.Utils.text_loader import MultiEncodingTextLoader, _read_file
 
@@ -73,8 +73,8 @@ class CorpusChunker:
 
     def __init__(
         self,
-        laws_dir:       str | Path = DataPath,
-        na2d_dir:       str | Path = na2d_data_path,
+        laws_dir:       str | Path = get_settings().DataPath,
+        na2d_dir:       str | Path = get_settings().na2d_data_path,
         max_words_book: int        = 400,
         overlap_book:   int        = 50,
         max_words_rule: int        = 300,

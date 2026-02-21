@@ -14,12 +14,12 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from pydantic import Field
 
 from src.Chunking.chunking import CorpusChunker
-from src.Config.config import DataPath, EMBEDDING_MODEL
+from src.Config.config import get_settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-VECTORSTORE_ROOT = Path(DataPath).parent / "VectorStores"
+VECTORSTORE_ROOT = Path(get_settings().DataPath).parent / "VectorStores"
 
 
 # =============================================================================
@@ -83,7 +83,7 @@ class LegalVectorStore:
         retriever = lv.na2d_retriever()
     """
 
-    def __init__(self, embedding_model: str = EMBEDDING_MODEL, force_rebuild: bool = False):
+    def __init__(self, embedding_model: str = get_settings().EMBEDDING_MODEL, force_rebuild: bool = False):
         self.force_rebuild  = force_rebuild
         self._embeddings    = HuggingFaceEmbeddings(
             model_name    = embedding_model,

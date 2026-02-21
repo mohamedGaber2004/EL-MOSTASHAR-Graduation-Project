@@ -6,6 +6,22 @@ class Settings(BaseSettings):
     APP_NAME : str
     APP_VERSION : str
     GROQ_API_KEY : str
+    TAVILY_API_KEY : str
+    LANGSMITH_API_KEY : str
+    HUGGINGFACE_API_TOKEN : str
+    LANGCHAIN_API_KEY : str
+    DataPath : str
+    na2d_data_path : str
+    REASONING_MODEL : str
+    REASONING_MODEL_TEMP : float
+    ARABIC_MODEL : str
+    ARABIC_MODEL_TEMP : float
+    ASSISTANT_MODEL : str
+    ASSISTANT_MODEL_TEMP : float
+    EMBEDDING_MODEL : str
+    NEO4J_URI : str
+    NEO4J_USERNAME : str
+    NEO4J_PASSWORD : str
 
     class Config:
         env_file = ".env"
@@ -13,30 +29,3 @@ class Settings(BaseSettings):
 
 def get_settings():
     return Settings()
-
-
-
-# Data path
-DataPath = "Datasets/Unstructured_Data"
-na2d_data_path = "Datasets/Unstructured_Data/na2d"
-
-# LLMs
-REASONING_MODEL = "llama-3.3-70b-versatile"
-REASONING_MODEL_TEMP = 0
-ARABIC_MODEL = "Qwen/Qwen3-32B"
-ARABIC_MODEL_TEMP = 0
-ASSISTANT_MODEL = "openai/gpt-oss-120b"
-ASSISTANT_MODEL_TEMP = 0
-EMBEDDING_MODEL = "silma-ai/silma-embeddding-sts-v0.1"
-
-# GraphRAG (Neo4j)
-NEO4J_URI = "neo4j+s://8e3595a2.databases.neo4j.io"
-NEO4J_USERNAME = "neo4j"
-NEO4J_PASSWORD = "c0YDMesZnyxWNgxLyJjzwBa8_gf3PKzCR-F29aiWLqA"
-
-# RAG
-# Chunking ...
-
-
-
-
