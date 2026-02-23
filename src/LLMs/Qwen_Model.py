@@ -1,12 +1,12 @@
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
 
-from src.Config.config import ARABIC_MODEL , ARABIC_MODEL_TEMP
+from src.Config.config import get_settings
 
 load_dotenv()
 
 class ArabicModel: 
-    def __init__(self, model_name: str = ARABIC_MODEL, temperature: float = ARABIC_MODEL_TEMP):
+    def __init__(self, model_name: str = get_settings().ARABIC_MODEL, temperature: float = get_settings().ARABIC_MODEL_TEMP):
         self.model_name = model_name
         self.temperature = temperature
         self.ar_llm = ChatGroq(
