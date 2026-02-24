@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import logging
-import time
+import logging , time
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -13,8 +12,8 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_huggingface import HuggingFaceEmbeddings
 from pydantic import Field
 
-from src.Chunking.chunking import CorpusChunker
-from src.Config.config import get_settings
+from src.Chunking import CorpusChunker
+from src.Config import get_settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)

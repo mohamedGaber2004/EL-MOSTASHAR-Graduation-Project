@@ -8,10 +8,14 @@ from typing import Any, Dict, List, Optional
 from langchain_core.documents import Document
 from langchain_text_splitters import CharacterTextSplitter, RecursiveCharacterTextSplitter
 
-from src.Config.config import get_settings
-from src.Utils.regex_utils import _to_western_digits , reg
-from src.Utils.norm_and_regu import norm_regu
-from src.Utils.text_loader import MultiEncodingTextLoader, _read_file
+from src.Config import get_settings
+from src.Utils import (
+    _read_file , 
+    _to_western_digits ,
+    reg ,
+    norm_regu ,
+    MultiEncodingTextLoader
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)

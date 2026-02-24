@@ -2,9 +2,20 @@ from __future__ import annotations
 
 import logging , re 
 from dataclasses import dataclass, field
-from typing import Any , Dict , List, Optional , Tuple
-from src.Utils.regex_utils import _to_western_digits, _normalize_article_no, _stable_id,reg
-from src.Utils.norm_and_regu import norm_regu
+from typing import (
+    Any , 
+    Dict , 
+    List, 
+    Optional , 
+    Tuple
+)
+from src.Utils import (
+    _to_western_digits,
+    _normalize_article_no, 
+    _stable_id,
+    reg,
+    norm_regu
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)

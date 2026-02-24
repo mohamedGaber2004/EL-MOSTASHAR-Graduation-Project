@@ -1,7 +1,7 @@
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
 
-from src.Config.config import get_settings
+from src.Config import get_settings
 
 load_dotenv()
 

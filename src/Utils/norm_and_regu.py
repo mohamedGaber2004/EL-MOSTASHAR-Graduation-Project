@@ -1,5 +1,10 @@
 from enum import Enum
-from typing import Any , Dict , Optional , Tuple
+from typing import (
+    Any , 
+    Dict ,  
+    Optional , 
+    Tuple
+)
 
 class norm_regu(Enum) : 
     TOPICS_MAP = {

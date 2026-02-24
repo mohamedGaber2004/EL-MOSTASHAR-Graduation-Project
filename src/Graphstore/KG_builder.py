@@ -1,22 +1,23 @@
 from __future__ import annotations
 
+import pandas as pd
 import logging , fnmatch
 from pathlib import Path
-from typing import Any , Dict , List, Optional
-import pandas as pd
-from langchain_core.documents import Document
 from neo4j import GraphDatabase
-from src.Config.config import get_settings
-from src.Utils.regex_utils import _stable_id
-from src.Utils.norm_and_regu import norm_regu
-from src.Utils.text_loader import _read_file
-from src.Utils.files_extractors import (
+from langchain_core.documents import Document
+from typing import Any , Dict , List, Optional
+
+from src.Config import get_settings
+from src.Utils import (
     LawExtractor , 
     AmendmentExtractor , 
     Amendment , 
     Schedule , 
     ScheduleEntry , 
-    ExtractedLaw
+    ExtractedLaw , 
+    _stable_id ,
+    _read_file ,
+    norm_regu
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
