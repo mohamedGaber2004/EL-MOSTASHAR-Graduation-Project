@@ -65,23 +65,6 @@ class Na2dRetriever(BaseRetriever):
 # =============================================================================
 
 class LegalVectorStore:
-    """
-    Unified vector store for both law corpus and na2d corpus.
-
-    Usage::
-
-        lv = LegalVectorStore()
-
-        # Laws
-        lv.build_laws()
-        results = lv.search_laws("عقوبة السرقة", k=5)
-        retriever = lv.laws_retriever()
-
-        # Na2d
-        lv.build_na2d()
-        results = lv.search_na2d("مبدأ شخصية العقوبة", k=5)
-        retriever = lv.na2d_retriever()
-    """
 
     def __init__(self, embedding_model: str = get_settings().EMBEDDING_MODEL, force_rebuild: bool = False):
         self.force_rebuild  = force_rebuild
@@ -100,10 +83,7 @@ class LegalVectorStore:
     # ------------------------------------------------------------------ build
 
     def build_laws(self, docs_filter: str = "latest") -> "LegalVectorStore":
-        """
-        Build FAISS index for law corpus.
-        docs_filter: 'all' | 'latest' | 'original'
-        """
+        
         if self._laws_path.exists() and not self.force_rebuild:
             logger.info("Loading laws index from disk …")
             self._laws_store = self._load(self._laws_path)

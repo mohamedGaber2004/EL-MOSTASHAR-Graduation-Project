@@ -3,12 +3,8 @@ from __future__ import annotations
 import logging , re 
 from dataclasses import dataclass, field
 from typing import Any , Dict , List, Optional , Tuple
-from src.Utils.regex_utils import (
-    _to_western_digits, _normalize_article_no, _stable_id,
-    ORIGINAL_LAW_RE, _DATE_RE, _MONTH_MAP,
-    _ARTICLE_MARK_RE, _ANY_ARTICLE_RE, REF_RE, DEF_RE,
-    PENALTY_PATTERNS,
-)
+from src.Utils.regex_utils import _to_western_digits, _normalize_article_no, _stable_id,reg
+from src.Utils.norm_and_regu import norm_regu
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -61,34 +57,14 @@ class ExtractedLaw:
 # LAW EXTRACTOR
 # =============================================================================
 
-_LAW_REGISTRY: Dict[str, Tuple[str, Optional[str], Optional[Any]]] = {
-    "penal_code":            ("قانون العقوبات",                          "1937-07-31", None),
-    "money_laundering":      ("قانون مكافحة غسل الأموال",               "2002-05-15", None),
-    "weapons_ammunition":    ("قانون الأسلحة والذخيرة",                 "1954-09-22", "weapon"),
-    "criminal_constitution": ("الدستور الجنائي",                        None,         None),
-    "anti_drugs":            ("قانون مكافحة المخدرات",                  "1960-05-01", "drug"),
-    "criminal_procedure":    ("قانون الإجراءات الجنائية",               "1950-10-18", None),
-    "anti_terror":           ("قانون مكافحة الإرهاب",                   "2015-08-16", None),
-    "emergency_law":         ("قانون الطوارئ",                          "1958-01-01", None),
-    "cybercrime":            ("قانون مكافحة جرائم تقنية المعلومات",     "2018-07-17", None),
-}
 
-TOPICS_MAP = {
-    "قتل":    ["قتل", "قاتل"],
-    "سرقة":   ["سرقة", "سارق"],
-    "مخدرات": ["مخدر", "مخدرات"],
-    "أسلحة":  ["سلاح", "أسلحة"],
-    "إرهاب":  ["إرهاب", "إرهابي"],
-}
-
-
-class LawExtractor:
+class LawExtractor: 
     """Extract all structured data from a single law text."""
 
     def __init__(self, law_key: str, raw_text: str):
-        if law_key not in _LAW_REGISTRY:
+        if law_key not in norm_regu._LAW_REGISTRY.value:
             raise KeyError(f"Unknown law_key: '{law_key}'")
-        title, date, schedule_type = _LAW_REGISTRY[law_key]
+        title, date, schedule_type = norm_regu._LAW_REGISTRY.value[law_key]
         self.law_key       = law_key
         self.raw_text      = raw_text or ""
         self.title         = title
@@ -109,20 +85,20 @@ class LawExtractor:
     def _normalize_arabic(self, text: str) -> str:
         if not text:
             return ""
-        text = re.sub(r"[\u0617-\u061A\u064B-\u0652\u0670]", "", text).replace("\u0640", "")
-        for old, new in [("أ","ا"),("إ","ا"),("آ","ا"),("ى","ي"),("ئ","ي"),("ة","ه"),("ؤ","و")]:
+        text = re.sub(reg.PDF_UNICODES_REG.value, "", text).replace("\u0640", "")
+        for old, new in norm_regu.NORMALIZING_ARABIC_LITTERS.value:
             text = text.replace(old, new)
         return re.sub(r"\s+", " ", text).strip()
 
     def _extract_schedule_entries_drug(self, text: str) -> List[ScheduleEntry]:
-        entries, sections = [], re.split(r'\n(\d+)\s*[–\-]\s*', text)
+        entries, sections = [], re.split(reg.DRUGS_ENTRIES_SECTIONS_REG.value, text)
         for i in range(1, len(sections), 2):
             if i + 1 >= len(sections):
                 break
             body = sections[i + 1].strip()
-            nm = re.match(r'^([^(]+)(?:\(([^)]+)\))?', body.split('\n')[0])
-            cm = re.search(r'الاسم الكيميائي:\s*(.+?)(?=\n|$)', body, re.UNICODE)
-            tm = re.search(r'الأسماء التجارية:\s*(.+?)(?=\n---|\n\d+|$)', body, re.UNICODE)
+            nm = re.match(reg.DRUGS_TABLE_HEADER_NAME_REG.value, body.split('\n')[0])
+            cm = re.search(reg.DRUGS_TABLE_CHEMICAL_NAME_REG.value, body, re.UNICODE)
+            tm = re.search(reg.DRUGS_TABLE_TRADING_NAME_REG.value, body, re.UNICODE)
             entries.append(ScheduleEntry(
                 entry_number  = sections[i].strip(),
                 arabic_name   = nm.group(1).strip() if nm else None,
@@ -136,14 +112,14 @@ class LawExtractor:
         return [
             ScheduleEntry(entry_number=m.group(1), arabic_name=m.group(2).strip(), description=m.group(2).strip())
             for line in text.split('\n')
-            if (m := re.match(r'^(\d+)\s*[–\-]\s*(.+)$', line.strip()))
+            if (m := re.match(reg.WEAPON_TABLE_SCHEDUAL_ENTRIES_REG.value, line.strip()))
         ]
 
     def _extract_schedules(self) -> List[Schedule]:
         if not self._schedule_type:
             return []
         entry_fn  = self._extract_schedule_entries_drug if self._schedule_type == "drug" else self._extract_schedule_entries_weapon
-        HEADER_RE = re.compile(r'(?:الجدول|جدول)\s+رقم\s*\(?([0-9٠-٩]+)\)?', re.UNICODE)
+        HEADER_RE = re.compile(reg.TBALE_DETECTION_REG.value, re.UNICODE)
         matches   = list(HEADER_RE.finditer(self.raw_text))
         schedules = []
         for i, m in enumerate(matches):
@@ -164,7 +140,7 @@ class LawExtractor:
 
     def _articles(self) -> List[Dict]:
         text    = self.raw_text
-        matches = list(_ARTICLE_MARK_RE.finditer(text))
+        matches = list(reg._ARTICLE_MARK_RE.value.finditer(text))
         if not matches:
             return [{"article_number": None, "text": text.strip()}]
         articles = []
@@ -183,18 +159,18 @@ class LawExtractor:
             no, text = a.get("article_number"), a.get("text", "")
             if not no:
                 continue
-            for m in PENALTY_PATTERNS['سجن'].finditer(text):
+            for m in reg.PENALTY_PATTERNS.value['سجن'].finditer(text):
                 out.append({"article_number": no, "penalty_type": "سجن",
                             "min_value": int(_to_western_digits(m.group(1))),
                             "max_value": int(_to_western_digits(m.group(2))), "unit": "سنة"})
-            for m in PENALTY_PATTERNS['غرامة'].finditer(text):
+            for m in reg.PENALTY_PATTERNS.value['غرامة'].finditer(text):
                 out.append({"article_number": no, "penalty_type": "غرامة",
                             "min_value": int(_to_western_digits(m.group(1).replace(',', ''))) if m.group(1) else None,
                             "max_value": int(_to_western_digits(m.group(2).replace(',', ''))) if m.group(2) else None,
                             "unit": "جنيه"})
-            if PENALTY_PATTERNS['إعدام'].search(text):
+            if reg.PENALTY_PATTERNS.value['إعدام'].search(text):
                 out.append({"article_number": no, "penalty_type": "إعدام", "min_value": None, "max_value": None, "unit": None})
-            if PENALTY_PATTERNS['أشغال_شاقة'].search(text):
+            if reg.PENALTY_PATTERNS.value['أشغال_شاقة'].search(text):
                 out.append({"article_number": no, "penalty_type": "أشغال_شاقة", "min_value": None, "max_value": None, "unit": None})
         return self._dedup(out, ["article_number", "penalty_type", "min_value", "max_value"])
 
@@ -204,7 +180,7 @@ class LawExtractor:
             no = a.get("article_number")
             if not no:
                 continue
-            for m in DEF_RE.finditer(a.get("text", "")):
+            for m in reg.DEF_RE.value.finditer(a.get("text", "")):
                 out.append({"term": m.group(1).strip(), "definition_text": m.group(2).strip(), "defined_in_article": no})
         return self._dedup(out, ["term", "defined_in_article"])
 
@@ -214,7 +190,7 @@ class LawExtractor:
             from_no = str(a.get("article_number", "")).strip()
             if not from_no or from_no == "None":
                 continue
-            for m in REF_RE.finditer(a.get("text", "")):
+            for m in reg.REF_RE.value.finditer(a.get("text", "")):
                 for to_no in [m.group("num"), m.group("num2")]:
                     if to_no and (to_no := _normalize_article_no(to_no)) and to_no != from_no:
                         refs.add((from_no, to_no))
@@ -227,7 +203,7 @@ class LawExtractor:
             if not no:
                 continue
             text = self._normalize_arabic(a.get("text", ""))
-            for topic, keywords in TOPICS_MAP.items():
+            for topic, keywords in norm_regu.TOPICS_MAP.value.items():
                 if any(self._normalize_arabic(kw) in text for kw in keywords):
                     out.append({"article_number": no, "topic_name": topic, "confidence": 0.8})
                     break
@@ -259,7 +235,7 @@ class AmendmentExtractor:
         self.filename = filename
 
     def _law_num_year(self) -> Tuple[Optional[str], Optional[str]]:
-        for m in ORIGINAL_LAW_RE.finditer(self.raw_text):
+        for m in reg.ORIGINAL_LAW_RE.value.finditer(self.raw_text):
             try:
                 a, b = int(_to_western_digits(m.group(1))), int(_to_western_digits(m.group(2)))
                 year, num = (str(a), str(b)) if 1800 <= a <= 2100 else (str(b), str(a))
@@ -271,7 +247,7 @@ class AmendmentExtractor:
 
     def _article_numbers(self) -> List[str]:
         seen, ordered = set(), []
-        for m in _ANY_ARTICLE_RE.finditer(self.raw_text):
+        for m in reg._ANY_ARTICLE_RE.value.finditer(self.raw_text):
             norm = _normalize_article_no(m.group(1))
             if norm and norm not in seen:
                 seen.add(norm)
@@ -280,17 +256,17 @@ class AmendmentExtractor:
 
     def _amendment_type(self) -> str:
         sample = self.raw_text[:800]
-        if any(w in sample for w in ['تضاف','يضاف','أضيف','إضافة','جديدة','جديد']):
+        if any(w in sample for w in norm_regu.ADDITION_KEYWORDS.value):
             return 'addition'
-        if any(w in sample for w in ['يلغى','ألغي','يحذف','حذف','إلغاء']):
+        if any(w in sample for w in norm_regu.DELETION_KEYWORDS.value):
             return 'deletion'
         return 'modification'
 
     def _amendment_date(self, year: str) -> str:
-        m = _DATE_RE.search(self.raw_text)
+        m = reg._DATE_RE.value.search(self.raw_text)
         if m:
             day   = _to_western_digits(m.group(1) or '01').zfill(2)
-            month = _MONTH_MAP.get(m.group(2), '01')
+            month = reg._MONTH_MAP.value.get(m.group(2), '01')
             yr    = _to_western_digits(m.group(3))
             return f"{yr}-{month}-{day}"
         return f"{year}-01-01"
@@ -306,7 +282,7 @@ class AmendmentExtractor:
             return None
         atype  = self._amendment_type()
         adate  = self._amendment_date(year)
-        desc_m = re.search(r'المادة الأولى\s*[:：]?\s*(.*?)(?=المادة الثانية|$)', self.raw_text, re.DOTALL)
+        desc_m = re.search(reg.ARTICLE_1_2_ONLY_REG.value, self.raw_text, re.DOTALL)
         return Amendment(
             amendment_id            = _stable_id(target_law_id, law_num, year),
             amendment_law_number    = law_num,

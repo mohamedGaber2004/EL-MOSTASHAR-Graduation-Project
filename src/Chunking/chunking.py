@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import fnmatch
 import logging
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -10,49 +9,13 @@ from langchain_core.documents import Document
 from langchain_text_splitters import CharacterTextSplitter, RecursiveCharacterTextSplitter
 
 from src.Config.config import get_settings
-from src.Utils.regex_utils import ORIGINAL_LAW_RE, _DATE_RE, _MONTH_MAP, _to_western_digits
+from src.Utils.regex_utils import _to_western_digits , reg
+from src.Utils.norm_and_regu import norm_regu
 from src.Utils.text_loader import MultiEncodingTextLoader, _read_file
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# =============================================================================
-# CONSTANTS
-# =============================================================================
-
-FOLDER_TO_LAW_KEY: Dict[str, str] = {
-    "3okobat":         "penal_code",
-    "8asl_amwal":      "money_laundering",
-    "Asle7a":          "weapons_ammunition",
-    "dostor_gena2y":   "criminal_constitution",
-    "drugs":           "anti_drugs",
-    "egra2at_gena2ya": "criminal_procedure",
-    "erhab":           "anti_terror",
-    "taware2":         "emergency_law",
-    "technology":      "cybercrime",
-}
-
-LAW_KEY_TO_TITLE: Dict[str, str] = {
-    "penal_code":            "قانون العقوبات",
-    "money_laundering":      "قانون مكافحة غسل الأموال",
-    "weapons_ammunition":    "قانون الأسلحة والذخيرة",
-    "criminal_constitution": "الدستور الجنائي",
-    "anti_drugs":            "قانون مكافحة المخدرات",
-    "criminal_procedure":    "قانون الإجراءات الجنائية",
-    "anti_terror":           "قانون مكافحة الإرهاب",
-    "emergency_law":         "قانون الطوارئ",
-    "cybercrime":            "قانون مكافحة جرائم تقنية المعلومات",
-}
-
-BOOK_TITLE_MAP: Dict[str, str] = {
-    "mbade2_ultra_clean":        "مبادئ محكمة النقض",
-    "1762919079675_ultra_clean": "مبادئ محكمة النقض - المجلد الثاني",
-    "2019-2018_المستحدث":        "المستحدث من المبادئ 2018-2019",
-}
-
-_CASE_NUM_RE    = re.compile(r"(?:الطعن|طعن)\s+رق[مم]\s+([٠-٩0-9]+(?:\s*[,،]\s*[٠-٩0-9]+)*)\s+لسنة\s+([٠-٩0-9]+)", re.UNICODE)
-_RULING_DATE_RE = re.compile(r"جلسة\s+(?:[٠-٩0-9]+\s*/\s*[٠-٩0-9]+\s*/\s*[٠-٩0-9]{2,4}|[٠-٩0-9]+\s+(?:يناير|فبراير|مارس|أبريل|مايو|يونيو|يوليو|أغسطس|سبتمبر|أكتوبر|نوفمبر|ديسمبر)\s+[٠-٩0-9]{4})", re.UNICODE)
-_CHAMBER_RE     = re.compile(r"(?:الدائرة|دائرة)\s+([^\n،,]+?)(?=\n|،|,|$)", re.UNICODE)
 
 _article_splitter = CharacterTextSplitter(separator="\n\n", chunk_size=10_000, chunk_overlap=0)
 _table_splitter   = CharacterTextSplitter(separator="\n\n\n\n", chunk_size=500_000, chunk_overlap=0)
@@ -88,7 +51,7 @@ class CorpusChunker:
 
 
     def _book_title(self, stem: str) -> str:
-        for key, title in BOOK_TITLE_MAP.items():
+        for key, title in norm_regu.BOOK_TITLE_MAP.value.items():
             if key in stem:
                 return title
         return stem
@@ -97,14 +60,14 @@ class CorpusChunker:
     def _ruling_metadata(self,text: str, folder: str, filename: str) -> Dict[str, Any]:
         header = text[:1000]
         meta   = {"doc_type": "ruling", "crime_category": folder, "source_file": filename}
-        m = _CASE_NUM_RE.search(header)
+        m = reg._CASE_NUM_RE.value.search(header)
         if m:
             meta["case_number"] = _to_western_digits(m.group(1).replace(" ", ""))
             meta["case_year"]   = _to_western_digits(m.group(2))
-        m = _RULING_DATE_RE.search(header)
+        m = reg._RULING_DATE_RE.value.search(header)
         if m:
             meta["ruling_date"] = m.group(0).replace("جلسة", "").strip()
-        m = _CHAMBER_RE.search(header)
+        m = reg._CHAMBER_RE.value.search(header)
         if m:
             meta["chamber"] = m.group(1).strip()
         return meta
@@ -112,7 +75,7 @@ class CorpusChunker:
 
     def _get_amendment_metadata(self,raw_text: str, filename: str) -> Optional[Dict[str, str]]:
         law_num, year = None, None
-        for m in ORIGINAL_LAW_RE.finditer(raw_text):
+        for m in reg.ORIGINAL_LAW_RE.value.finditer(raw_text):
             try:
                 a, b = int(_to_western_digits(m.group(1))), int(_to_western_digits(m.group(2)))
                 year, num = (str(a), str(b)) if 1800 <= a <= 2100 else (str(b), str(a))
@@ -124,19 +87,19 @@ class CorpusChunker:
         if not law_num or not year:
             return None
 
-        date_m = _DATE_RE.search(raw_text)
+        date_m = reg._DATE_RE.value.search(raw_text)
         if date_m:
             day   = _to_western_digits(date_m.group(1) or "01").zfill(2)
-            month = _MONTH_MAP.get(date_m.group(2), "01")
+            month = reg._MONTH_MAP.value.get(date_m.group(2), "01")
             yr    = _to_western_digits(date_m.group(3))
             adate = f"{yr}-{month}-{day}"
         else:
             adate = f"{year}-01-01"
 
         sample = raw_text[:800]
-        if any(w in sample for w in ["تضاف","يضاف","أضيف","إضافة","جديدة","جديد"]):
+        if any(w in sample for w in norm_regu.ADDITION_KEYWORDS.value):
             atype = "addition"
-        elif any(w in sample for w in ["يلغى","ألغي","يحذف","حذف","إلغاء"]):
+        elif any(w in sample for w in norm_regu.DELETION_KEYWORDS.value):
             atype = "deletion"
         else:
             atype = "modification"
@@ -157,10 +120,10 @@ class CorpusChunker:
         all_docs: List[Document] = []
 
         for folder in sorted(p for p in self.laws_dir.iterdir() if p.is_dir()):
-            if folder.name not in FOLDER_TO_LAW_KEY:
+            if folder.name not in norm_regu.FOLDER_TO_LAW_KEY.value:
                 continue
-            law_key   = FOLDER_TO_LAW_KEY[folder.name]
-            law_title = LAW_KEY_TO_TITLE.get(law_key, law_key)
+            law_key   = norm_regu.FOLDER_TO_LAW_KEY.value[folder.name]
+            law_title = norm_regu.LAW_KEY_TO_TITLE.value.get(law_key, law_key)
 
             for fp in sorted(f for f in folder.glob("*.txt") if not fnmatch.fnmatch(f.name.lower(), "new*")):
                 is_table   = "tables" in fp.name.lower()

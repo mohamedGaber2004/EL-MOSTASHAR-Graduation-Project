@@ -3,14 +3,12 @@ from __future__ import annotations
 import logging , fnmatch
 from pathlib import Path
 from typing import Any , Dict , List, Optional
-
 import pandas as pd
 from langchain_core.documents import Document
 from neo4j import GraphDatabase
-
 from src.Config.config import get_settings
-from src.Chunking.chunking import FOLDER_TO_LAW_KEY
 from src.Utils.regex_utils import _stable_id
+from src.Utils.norm_and_regu import norm_regu
 from src.Utils.text_loader import _read_file
 from src.Utils.files_extractors import (
     LawExtractor , 
@@ -90,18 +88,7 @@ class LegalKnowledgeGraph:
         with self.driver.session() as s:
             if drop_existing:
                 s.run("MATCH (n) DETACH DELETE n")
-            for stmt in [
-                "CREATE CONSTRAINT law_id_unique        IF NOT EXISTS FOR (l:Law)          REQUIRE l.law_id IS UNIQUE",
-                "CREATE CONSTRAINT article_id_unique    IF NOT EXISTS FOR (a:Article)       REQUIRE a.article_id IS UNIQUE",
-                "CREATE CONSTRAINT penalty_id_unique    IF NOT EXISTS FOR (p:Penalty)       REQUIRE p.penalty_id IS UNIQUE",
-                "CREATE CONSTRAINT definition_id_unique IF NOT EXISTS FOR (d:Definition)    REQUIRE d.definition_id IS UNIQUE",
-                "CREATE CONSTRAINT topic_id_unique      IF NOT EXISTS FOR (t:Topic)         REQUIRE t.topic_id IS UNIQUE",
-                "CREATE CONSTRAINT schedule_id_unique   IF NOT EXISTS FOR (s:Schedule)      REQUIRE s.schedule_id IS UNIQUE",
-                "CREATE CONSTRAINT entry_id_unique      IF NOT EXISTS FOR (e:ScheduleEntry) REQUIRE e.entry_id IS UNIQUE",
-                "CREATE CONSTRAINT substance_id_unique  IF NOT EXISTS FOR (sub:Substance)   REQUIRE sub.substance_id IS UNIQUE",
-                "CREATE CONSTRAINT amendment_id_unique  IF NOT EXISTS FOR (am:Amendment)    REQUIRE am.amendment_id IS UNIQUE",
-                "CREATE INDEX supersedes_date_idx IF NOT EXISTS FOR ()-[r:SUPERSEDES]-() ON (r.amendment_date)",
-            ]:
+            for stmt in norm_regu.CREATION_OF_SCHEMA.value:
                 try:
                     s.run(stmt)
                 except Exception:
@@ -342,9 +329,9 @@ class LegalKnowledgeGraph:
     def get_statistics(self) -> Dict[str, Any]:
         stats: Dict[str, Any] = {"nodes": {}, "relationships": {}}
         with self.driver.session() as s:
-            for label in ["Law","Article","Penalty","Definition","Topic","Schedule","ScheduleEntry","Substance","Amendment"]:
+            for label in norm_regu.NODE_LABELS.value:
                 stats["nodes"][label] = s.run(f"MATCH (n:{label}) RETURN count(n) AS c").single()["c"]
-            for rel in ["CONTAINS","REFERENCES","HAS_PENALTY","DEFINES","TAGGED_WITH","HAS_SCHEDULE","CONTAINS_ENTRY","DEFINES_SUBSTANCE","HAS_AMENDMENT","AMENDED_BY","SUPERSEDES"]:
+            for rel in norm_regu.RELATIONSHIPS.value:
                 stats["relationships"][rel] = s.run(f"MATCH ()-[r:{rel}]->() RETURN count(r) AS c").single()["c"]
         return stats
 
@@ -371,7 +358,7 @@ def run_pipeline(
     folder_to_law_key: Optional[Dict[str, str]] = None,
     drop_existing:     bool = True,
 ) -> LegalKnowledgeGraph:
-    folder_to_law_key = folder_to_law_key or FOLDER_TO_LAW_KEY
+    folder_to_law_key = folder_to_law_key or norm_regu.FOLDER_TO_LAW_KEY.value
 
 
     graph = LegalKnowledgeGraph(neo4j_uri, neo4j_user, neo4j_password)
@@ -410,9 +397,4 @@ def build_knowledge_graph(
 
 
 def run_KG():
-    try:
-        from src.Config.config import NEO4J_PASSWORD, NEO4J_USERNAME, NEO4J_URI
-    except Exception as e:
-        print(e)
-        return
-    run_pipeline(get_settings().DataPath, NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD, drop_existing=True).close()
+    run_pipeline(get_settings().DataPath, get_settings().NEO4J_URI, get_settings().NEO4J_USERNAME, get_settings().NEO4J_PASSWORD, drop_existing=True).close()
