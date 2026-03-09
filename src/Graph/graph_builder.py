@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Dict
 from IPython.display import display , Image
 from langgraph.graph import END, START, StateGraph
+
 from src.Utils import (
     Defendant,
     Charge,
@@ -17,10 +18,7 @@ from src.Utils import (
     ProceduralIssue,
     DefenseDocument,
     PriorJudgment,
-    CaseIncident
-)
-
-from src.Utils import (
+    CaseIncident , 
     LawCode,
     EvidenceType,
     CourtLevel,
@@ -29,9 +27,7 @@ from src.Utils import (
     WitnessType,
     ProcedureType,
     NullityType,
-    IncidentType
-)
-from src.Utils import (
+    IncidentType,
     CourtLevel,
     VerdictType
 )
@@ -50,16 +46,11 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-
 # =============================================================================
 #  AGENT STATE  (الحالة الكاملة للقضية)
 # =============================================================================
 
 class AgentState(BaseModel):
-    """
-    الحالة الكاملة للقضية — تجمع كل المعطيات المستخلصة من الوثائق.
-    تُمرَّر بين الـ Agents عبر LangGraph.
-    """
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         extra="ignore"

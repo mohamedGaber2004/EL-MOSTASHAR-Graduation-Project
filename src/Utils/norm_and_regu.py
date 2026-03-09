@@ -1,4 +1,5 @@
 from enum import Enum
+import re
 from typing import (
     Any , 
     Dict ,  
@@ -75,3 +76,4 @@ class norm_regu(Enum) :
 
     NODE_LABELS = ["Law","Article","Penalty","Definition","Topic","Schedule","ScheduleEntry","Substance","Amendment"]
     RELATIONSHIPS = ["CONTAINS","REFERENCES","HAS_PENALTY","DEFINES","TAGGED_WITH","HAS_SCHEDULE","CONTAINS_ENTRY","DEFINES_SUBSTANCE","HAS_AMENDMENT","AMENDED_BY","SUPERSEDES"]
+

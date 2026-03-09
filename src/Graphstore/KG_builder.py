@@ -6,7 +6,7 @@ from pathlib import Path
 from neo4j import GraphDatabase
 from langchain_core.documents import Document
 from typing import Any , Dict , List, Optional
-
+from src.Chunking import get_chunks
 from src.Config import get_settings
 from src.Utils import (
     LawExtractor , 

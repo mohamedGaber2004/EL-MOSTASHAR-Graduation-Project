@@ -23,12 +23,3 @@ from .graph_helpers import (
     _state_summary,
     _agent_context,
 )
-from .graph_routers import (
-    route_after_defense,
-    route_after_evidence,
-    route_after_ingestion,
-    route_after_judge,
-    route_after_legal_research,
-    route_after_orchestrator,
-    route_after_procedural,
-)

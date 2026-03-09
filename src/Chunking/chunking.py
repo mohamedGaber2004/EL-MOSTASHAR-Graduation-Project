@@ -2,42 +2,66 @@ from __future__ import annotations
 
 import fnmatch
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from langchain_core.documents import Document
-from langchain_text_splitters import CharacterTextSplitter, RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter,CharacterTextSplitter
 
 from src.Config import get_settings
 from src.Utils import (
-    _read_file , 
-    _to_western_digits ,
-    reg ,
-    norm_regu ,
-    MultiEncodingTextLoader
+    MultiEncodingTextLoader,
+    _read_file,
+    _to_western_digits,
+    norm_regu,
+    reg,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-
-_article_splitter = CharacterTextSplitter(separator="\n\n", chunk_size=10_000, chunk_overlap=0)
-_table_splitter   = CharacterTextSplitter(separator="\n\n\n\n", chunk_size=500_000, chunk_overlap=0)
-
-
 # =============================================================================
 # CORPUS CHUNKER
 # =============================================================================
 
+def _split_into_articles(full_text: str) -> List[Dict[str, Optional[str]]]:
+    """
+    Split raw law text into per-article dicts::
+
+        {"article_number": "5", "text": "..."}
+
+    Text before the first article header gets ``article_number=None``
+    and is tagged as a preamble by the caller.
+    """
+    matches  = list(reg._ARTICLE_BOUNDARY_RE.finditer(full_text))
+    articles: List[Dict[str, Optional[str]]] = []
+
+    if not matches:
+        # No article markers found → treat entire text as one chunk
+        return [{"article_number": None, "text": full_text.strip()}]
+
+    # Preamble before first article
+    if matches[0].start() > 0:
+        preamble = full_text[: matches[0].start()].strip()
+        if preamble:
+            articles.append({"article_number": None, "text": preamble})
+
+    for i, m in enumerate(matches):
+        start      = m.end()
+        end        = matches[i + 1].start() if i + 1 < len(matches) else len(full_text)
+        body       = full_text[start:end].strip()
+        article_no = norm_regu._normalize_article_no(m.group("num") or "")
+        if body:
+            articles.append({"article_number": article_no, "text": body})
+
+    return articles
+
+_table_splitter = CharacterTextSplitter(
+    separator="\n\n\n\n", chunk_size=500_000, chunk_overlap=0
+)
+
 class CorpusChunker:
-    """
-    Unified chunker for both corpora.
-
-        chunker   = CorpusChunker()
-        law_docs  = chunker.get_chunks()
-        na2d_docs = chunker.get_na2d_chunks()  # {"rulings": [...], "principles": [...]}
-    """
-
     def __init__(
         self,
         laws_dir:       str | Path = get_settings().DataPath,
@@ -52,18 +76,32 @@ class CorpusChunker:
         self._book_splitter   = self._make_splitter(max_words_book, overlap_book)
         self._ruling_splitter = self._make_splitter(max_words_rule, overlap_rule)
 
+    # ── internal utilities ────────────────────────────────────────────────
 
+    @staticmethod
+    def _make_splitter(max_words: int, overlap: int) -> RecursiveCharacterTextSplitter:
+        return RecursiveCharacterTextSplitter(
+            chunk_size      = max_words,
+            chunk_overlap   = overlap,
+            length_function = lambda t: len(t.split()),
+            separators      = ["\n\n", "\n", ".", " ", ""],
+        )
 
-    def _book_title(self, stem: str) -> str:
+    @staticmethod
+    def _book_title(stem: str) -> str:
         for key, title in norm_regu.BOOK_TITLE_MAP.value.items():
             if key in stem:
                 return title
         return stem
 
-
-    def _ruling_metadata(self,text: str, folder: str, filename: str) -> Dict[str, Any]:
+    @staticmethod
+    def _ruling_metadata(text: str, folder: str, filename: str) -> Dict[str, Any]:
         header = text[:1000]
-        meta   = {"doc_type": "ruling", "crime_category": folder, "source_file": filename}
+        meta: Dict[str, Any] = {
+            "doc_type":       "ruling",
+            "crime_category": folder,
+            "source_file":    filename,
+        }
         m = reg._CASE_NUM_RE.value.search(header)
         if m:
             meta["case_number"] = _to_western_digits(m.group(1).replace(" ", ""))
@@ -76,21 +114,57 @@ class CorpusChunker:
             meta["chamber"] = m.group(1).strip()
         return meta
 
+    def _get_amendment_metadata(
+        self, raw_text: str, filename: str
+    ) -> Optional[Dict[str, str]]:
+        """
+        Extract amendment law number, year, date, and type.
 
-    def _get_amendment_metadata(self,raw_text: str, filename: str) -> Optional[Dict[str, str]]:
-        law_num, year = None, None
-        for m in reg.ORIGINAL_LAW_RE.value.finditer(raw_text):
-            try:
-                a, b = int(_to_western_digits(m.group(1))), int(_to_western_digits(m.group(2)))
-                year, num = (str(a), str(b)) if 1800 <= a <= 2100 else (str(b), str(a))
-                if 1800 <= int(year) <= 2100 and 0 < int(num) < 10000:
-                    law_num = num
-                    break
-            except Exception:
-                continue
+        **Filename is the primary source** for law number + year (same logic as
+        :class:`AmendmentLawExtractor`).  The text header is used only as a
+        fallback because it refers to the *original* law being amended, not
+        the amending law.
+        """
+        law_num: Optional[str] = None
+        year:    Optional[str] = None
+
+        # ── Primary: filename ─────────────────────────────────────────────
+        # Pattern 1: ..._num{N}_{YYYY}.txt
+        m = re.search(r'_num([0-9]+)_([0-9]{4})\.txt$', filename, re.IGNORECASE)
+        if m:
+            law_num, year = m.group(1), m.group(2)
+
+        # Pattern 2: ..._{N}_{YYYY}.txt
+        if not law_num or not year:
+            m = re.search(r'_([0-9]+)_([0-9]{4})\.txt$', filename, re.IGNORECASE)
+            if m:
+                law_num, year = m.group(1), m.group(2)
+
+        # Pattern 3: any 4-digit year + any other number in filename
+        if not law_num or not year:
+            years = re.findall(r'((?:19|20)\d{2})', filename)
+            nums  = [n for n in re.findall(r'(\d+)', filename) if n not in years]
+            law_num = nums[-1] if nums else None
+            year    = years[-1] if years else None
+
+        # ── Fallback: scan text header ────────────────────────────────────
+        if not law_num or not year:
+            for m in reg.ORIGINAL_LAW_RE.value.finditer(raw_text):
+                try:
+                    a = int(_to_western_digits(m.group(1)))
+                    b = int(_to_western_digits(m.group(2)))
+                    year, law_num = (
+                        (str(a), str(b)) if 1800 <= a <= 2100 else (str(b), str(a))
+                    )
+                    if 1800 <= int(year) <= 2100 and 0 < int(law_num) < 10000:
+                        break
+                except Exception:
+                    continue
+
         if not law_num or not year:
             return None
 
+        # ── Date ──────────────────────────────────────────────────────────
         date_m = reg._DATE_RE.value.search(raw_text)
         if date_m:
             day   = _to_western_digits(date_m.group(1) or "01").zfill(2)
@@ -100,6 +174,7 @@ class CorpusChunker:
         else:
             adate = f"{year}-01-01"
 
+        # ── Amendment type ─────────────────────────────────────────────────
         sample = raw_text[:800]
         if any(w in sample for w in norm_regu.ADDITION_KEYWORDS.value):
             atype = "addition"
@@ -108,80 +183,136 @@ class CorpusChunker:
         else:
             atype = "modification"
 
-        return {"law_num": law_num, "year": year, "amendment_date": adate, "amendment_type": atype}
+        return {
+            "law_num":        law_num,
+            "year":           year,
+            "amendment_date": adate,
+            "amendment_type": atype,
+        }
 
-
-    def _make_splitter(self,max_words: int, overlap: int) -> RecursiveCharacterTextSplitter:
-        return RecursiveCharacterTextSplitter(
-            chunk_size     = max_words,
-            chunk_overlap  = overlap,
-            length_function= lambda t: len(t.split()),
-            separators     = ["\n\n", "\n", ".", " ", ""],
-        )
-
+    # ── public API ────────────────────────────────────────────────────────
 
     def get_chunks(self) -> List[Document]:
+        """
+        Return one :class:`Document` per article / preamble / amended-article
+        / table row for every law folder in ``laws_dir``.
+        """
         all_docs: List[Document] = []
 
         for folder in sorted(p for p in self.laws_dir.iterdir() if p.is_dir()):
             if folder.name not in norm_regu.FOLDER_TO_LAW_KEY.value:
                 continue
+
             law_key   = norm_regu.FOLDER_TO_LAW_KEY.value[folder.name]
             law_title = norm_regu.LAW_KEY_TO_TITLE.value.get(law_key, law_key)
 
-            for fp in sorted(f for f in folder.glob("*.txt") if not fnmatch.fnmatch(f.name.lower(), "new*")):
-                is_table   = "tables" in fp.name.lower()
-                splitter   = _table_splitter if is_table else _article_splitter
-                chunk_type = "table" if is_table else "article"
+            # ── main law files (non-amendment) ────────────────────────────
+            for fp in sorted(
+                f for f in folder.glob("*.txt")
+                if not fnmatch.fnmatch(f.name.lower(), "new*")
+            ):
                 raw = MultiEncodingTextLoader(fp).load()
                 if not raw:
                     continue
-                docs = splitter.create_documents(
-                    texts     = [raw[0].page_content],
-                    metadatas = [{"law_id": law_key, "law_title": law_title, "chunk_type": chunk_type}],
-                )
-                all_docs.extend(docs)
-                logger.info(f"  {fp.name} [{chunk_type}] → {len(docs)} chunks")
+                full_text = raw[0].page_content
 
+                if "tables" in fp.name.lower():
+                    # Tables: one large chunk per logical table block
+                    docs = _table_splitter.create_documents(
+                        texts     = [full_text],
+                        metadatas = [{
+                            "law_id":         law_key,
+                            "law_title":      law_title,
+                            "chunk_type":     "table",
+                            "article_number": None,
+                            "source_file":    fp.name,
+                        }],
+                    )
+                    all_docs.extend(docs)
+                    logger.info(f"  {fp.name} [table] → {len(docs)} chunks")
+
+                else:
+                    # Articles: exactly one Document per article
+                    articles = _split_into_articles(full_text)
+                    for art in articles:
+                        chunk_type = (
+                            "preamble" if art["article_number"] is None else "article"
+                        )
+                        all_docs.append(Document(
+                            page_content = art["text"],
+                            metadata     = {
+                                "law_id":         law_key,
+                                "law_title":      law_title,
+                                "chunk_type":     chunk_type,
+                                "article_number": art["article_number"],
+                                "source_file":    fp.name,
+                            },
+                        ))
+                    logger.info(f"  {fp.name} [article] → {len(articles)} chunks")
+
+            # ── amendment files (new*) ─────────────────────────────────────
             for af in sorted(folder.glob("new*.txt")):
                 raw = MultiEncodingTextLoader(af).load()
                 if not raw:
                     continue
-                meta = self._get_amendment_metadata(raw[0].page_content, af.name)
+                full_text = raw[0].page_content
+                meta      = self._get_amendment_metadata(full_text, af.name)
                 if not meta:
                     logger.warning(f"  [SKIP] {af.name} — no amendment metadata")
                     continue
-                docs = _article_splitter.create_documents(
-                    texts     = [raw[0].page_content],
-                    metadatas = [{"law_id": law_key, "law_title": law_title,
-                                  "chunk_type":           "amended_article",
-                                  "amendment_law_number": meta["law_num"],
-                                  "amendment_date":       meta["amendment_date"],
-                                  "amendment_type":       meta["amendment_type"]}],
-                )
-                all_docs.extend(docs)
-                logger.info(f"  {af.name} [amendment] → {len(docs)} chunks")
+
+                articles = _split_into_articles(full_text)
+                for art in articles:
+                    all_docs.append(Document(
+                        page_content = art["text"],
+                        metadata     = {
+                            "law_id":                law_key,
+                            "law_title":             law_title,
+                            "chunk_type":            "amended_article",
+                            "article_number":        art["article_number"],
+                            "amendment_law_number":  meta["law_num"],
+                            "amendment_date":        meta["amendment_date"],
+                            "amendment_type":        meta["amendment_type"],
+                            "source_file":           af.name,
+                        },
+                    ))
+                logger.info(f"  {af.name} [amendment] → {len(articles)} chunks")
 
         logger.info(f"✓ laws total: {len(all_docs)} chunks")
         return all_docs
 
     def get_na2d_chunks(self) -> Dict[str, List[Document]]:
+        """
+        Return ruling and legal-principle chunks from the Na2d corpus.
+
+        Returns a dict with two keys:
+
+        * ``"rulings"``    — court rulings, split by ``_ruling_splitter``
+        * ``"principles"`` — legal-principle books, split by ``_book_splitter``
+        """
         ruling_docs:    List[Document] = []
         principle_docs: List[Document] = []
 
         for item in sorted(self.na2d_dir.iterdir()):
+
             if item.is_file() and item.suffix.lower() == ".txt":
+                # Legal-principle book
                 text = _read_file(item)
                 if not text:
                     continue
                 chunks = self._book_splitter.create_documents(
                     texts     = [text.strip()],
-                    metadatas = [{"doc_type": "principle", "book_title": self._book_title(item.stem), "source_file": item.name}],
+                    metadatas = [{
+                        "doc_type":   "principle",
+                        "book_title": self._book_title(item.stem),
+                        "source_file": item.name,
+                    }],
                 )
                 principle_docs.extend(chunks)
                 logger.info(f"  [BOOK] {item.name} → {len(chunks)} chunks")
 
             elif item.is_dir():
+                # Court rulings folder
                 folder_count = 0
                 for fp in sorted(item.glob("*.txt")):
                     text = _read_file(fp)
@@ -195,7 +326,9 @@ class CorpusChunker:
                     folder_count += len(chunks)
                 logger.info(f"  [RULINGS] {item.name} → {folder_count} chunks")
 
-        logger.info(f"✓ na2d: rulings={len(ruling_docs)} | principles={len(principle_docs)}")
+        logger.info(
+            f"✓ na2d: rulings={len(ruling_docs)} | principles={len(principle_docs)}"
+        )
         return {"rulings": ruling_docs, "principles": principle_docs}
 
 
@@ -204,7 +337,10 @@ class CorpusChunker:
 # =============================================================================
 
 def get_chunks() -> List[Document]:
+    """Convenience wrapper — returns law chunks from a default :class:`CorpusChunker`."""
     return CorpusChunker().get_chunks()
 
+
 def get_na2d_chunks() -> Dict[str, List[Document]]:
+    """Convenience wrapper — returns Na2d chunks from a default :class:`CorpusChunker`."""
     return CorpusChunker().get_na2d_chunks()

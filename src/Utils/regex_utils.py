@@ -11,7 +11,6 @@ import re
 def _to_western_digits(s: str) -> str:
     return s.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
 
-
 def _normalize_article_no(token: str) -> str:
     token = _to_western_digits(token.strip())
     token = re.sub(r"\s+", " ", token)
@@ -41,6 +40,15 @@ class reg(Enum) :
         r'(?:القانون|قانون)\s+رقم\s+([٠-٩0-9]+)\s+لسنة\s+([٠-٩0-9]+)',
         re.UNICODE,
     )
+
+    _ARTICLE_BOUNDARY_RE = re.compile(
+        r"""(?m)^\s*(?:المادة|مادة)\s*(?:\(\s*)?"""
+        r"""(?P<num>[0-9٠-٩]+(?:\s*(?:مكرر(?:[اأإآى])?)?)?"""
+        r"""(?:\s*\(\s*[اأإآA-Za-z]\s*\))?)(?:\s*\))?"""
+        r"""\s*[:：\-–\s]""",
+        re.VERBOSE,
+    )
+
 
     ARTICLE_1_2_ONLY_REG = r'المادة الأولى\s*[:：]?\s*(.*?)(?=المادة الثانية|$)'
 
@@ -92,6 +100,6 @@ class reg(Enum) :
         'أشغال_شاقة': re.compile(r'الأشغال\s+الشاقة', re.UNICODE),
     }
 
-    _CASE_NUM_RE    = re.compile(r"(?:الطعن|طعن)\s+رق[مم]\s+([٠-٩0-9]+(?:\s*[,،]\s*[٠-٩0-9]+)*)\s+لسنة\s+([٠-٩0-9]+)", re.UNICODE)
+    _CASE_NUM_RE    = re.compile(r"(?:الطعن|طعن)\s+رق[مم]\s+([٠-٩0-9]+(?:\s*[,،]\s*[٠-٩0-9]+)*)\s+لسنة\s+([٠-٩0-9]+)",re.UNICODE)
     _RULING_DATE_RE = re.compile(r"جلسة\s+(?:[٠-٩0-9]+\s*/\s*[٠-٩0-9]+\s*/\s*[٠-٩0-9]{2,4}|[٠-٩0-9]+\s+(?:يناير|فبراير|مارس|أبريل|مايو|يونيو|يوليو|أغسطس|سبتمبر|أكتوبر|نوفمبر|ديسمبر)\s+[٠-٩0-9]{4})", re.UNICODE)
     _CHAMBER_RE     = re.compile(r"(?:الدائرة|دائرة)\s+([^\n،,]+?)(?=\n|،|,|$)", re.UNICODE)
