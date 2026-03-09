@@ -1,212 +1,300 @@
 from __future__ import annotations
 
-import logging , time
+# =============================================================================
+# IMPORTS
+# =============================================================================
+
+import logging
 from collections import defaultdict
-from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from langchain_community.vectorstores import FAISS
-from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_core.documents import Document
-from langchain_core.retrievers import BaseRetriever
 from langchain_huggingface import HuggingFaceEmbeddings
-from pydantic import Field
 
-from src.Chunking import CorpusChunker
+from src.Chunking.chunking import get_chunks, get_na2d_chunks
 from src.Config import get_settings
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
-VECTORSTORE_ROOT = Path(get_settings().DataPath).parent / "VectorStores"
+
+# =============================================================================
+# FILTER HELPERS
+# =============================================================================
+
+def filter_latest_versions(docs: List[Document]) -> List[Document]:
+    """
+    For each (law_id, article_number) pair keep only the most recent version.
+
+    Priority:
+        1. amended_article with the latest amendment_date
+        2. original article (if no amendment exists)
+
+    Chunks with no article_number (preambles, tables, rulings, principles)
+    are always passed through unchanged.
+
+    Use this at search-time to deduplicate results, NOT at index-build time.
+    """
+    no_number: List[Document] = [
+        d for d in docs if not d.metadata.get("article_number")
+    ]
+
+    groups: Dict[tuple, List[Document]] = defaultdict(list)
+    for doc in docs:
+        article_no = doc.metadata.get("article_number")
+        if not article_no:
+            continue
+        key = (doc.metadata.get("law_id"), article_no)
+        groups[key].append(doc)
+
+    latest: List[Document] = []
+    for _, group in groups.items():
+        amended = [
+            d for d in group
+            if d.metadata.get("chunk_type") == "amended_article"
+            and d.metadata.get("amendment_date")
+        ]
+        if amended:
+            amended.sort(key=lambda d: d.metadata["amendment_date"], reverse=True)
+            latest.append(amended[0])
+        else:
+            originals = [d for d in group if d.metadata.get("chunk_type") == "article"]
+            latest.extend(originals[:1] if originals else group[:1])
+
+    return no_number + latest
 
 
 # =============================================================================
-# RETRIEVER
-# =============================================================================
-
-class Na2dRetriever(BaseRetriever):
-    """Unified retriever over rulings and/or principles stores."""
-
-    stores:             Dict[str, FAISS] = Field(...)
-    k:                  int              = Field(default=5)
-    search_rulings:     bool             = Field(default=True)
-    search_principles:  bool             = Field(default=True)
-    crime_category:     Optional[str]    = Field(default=None)
-
-    class Config:
-        arbitrary_types_allowed = True
-
-    def _get_relevant_documents(self, query: str, *, run_manager: CallbackManagerForRetrieverRun) -> List[Document]:
-        collected: List[Document] = []
-
-        if self.search_rulings and "rulings" in self.stores:
-            results = self.stores["rulings"].similarity_search(query, k=self.k * 3)
-            if self.crime_category:
-                results = [d for d in results if d.metadata.get("crime_category") == self.crime_category]
-            collected.extend(results)
-
-        if self.search_principles and "principles" in self.stores:
-            collected.extend(self.stores["principles"].similarity_search(query, k=self.k * 3))
-
-        seen, unique = set(), []
-        for doc in collected:
-            cid = doc.metadata.get("chunk_id", id(doc))
-            if cid not in seen:
-                seen.add(cid)
-                unique.append(doc)
-
-        return unique[:self.k]
-
-
-# =============================================================================
-# VECTOR STORE MANAGER
+# VECTOR STORE
 # =============================================================================
 
 class LegalVectorStore:
+    """
+    Wraps any LangChain vector store with legal-specific helpers.
 
-    def __init__(self, embedding_model: str = get_settings().EMBEDDING_MODEL, force_rebuild: bool = False):
-        self.force_rebuild  = force_rebuild
-        self._embeddings    = HuggingFaceEmbeddings(
-            model_name    = embedding_model,
-            model_kwargs  = {"device": "cpu"},
-            encode_kwargs = {"normalize_embeddings": True, "batch_size": 64},
-        )
-        self._laws_store:       Optional[FAISS]             = None
-        self._na2d_stores:      Dict[str, FAISS]            = {}
-        self._laws_docs:        List[Document]               = []
-        self._laws_path         = VECTORSTORE_ROOT / "laws"
-        self._rulings_path      = VECTORSTORE_ROOT / "na2d" / "rulings"
-        self._principles_path   = VECTORSTORE_ROOT / "na2d" / "principles"
+    Supported backends: ``'faiss'``, ``'chroma'``
 
-    # ------------------------------------------------------------------ build
+    Metadata keys — law chunks
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    ``law_id``               e.g. ``'penal_code'``
+    ``law_title``            human-readable Arabic title
+    ``chunk_type``           ``'article'`` | ``'amended_article'`` |
+                             ``'preamble'`` | ``'table'``
+    ``article_number``       Western-digit string, e.g. ``'45'``
+    ``source_file``          original filename
+    ``amendment_date``       ISO date string  (amended_article only)
+    ``amendment_law_number`` (amended_article only)
+    ``amendment_type``       ``'modification'`` | ``'addition'`` | ``'deletion'``
 
-    def build_laws(self, docs_filter: str = "latest") -> "LegalVectorStore":
-        
-        if self._laws_path.exists() and not self.force_rebuild:
-            logger.info("Loading laws index from disk …")
-            self._laws_store = self._load(self._laws_path)
-            return self
+    Metadata keys — Na2d chunks
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    ``doc_type``             ``'ruling'`` | ``'principle'``
+    ``crime_category``       folder name  (rulings only)
+    ``book_title``           Arabic title (principles only)
+    ``case_number``          (rulings only)
+    ``case_year``            (rulings only)
+    ``ruling_date``          (rulings only)
+    ``chamber``              (rulings only)
+    ``source_file``          original filename
+    """
 
-        docs = CorpusChunker().get_chunks()
-        docs = self._filter(docs, docs_filter)
-        logger.info(f"Indexing {len(docs):,} law documents …")
-        self._laws_docs  = docs
-        self._laws_store = self._build(docs, "laws")
-        self._save(self._laws_store, self._laws_path)
-        return self
+    def __init__(self, vectorstore, docs: List[Document]) -> None:
+        self.vectorstore = vectorstore
+        self._docs       = docs
 
-    def build_na2d(self) -> "LegalVectorStore":
-        """Build FAISS indexes for rulings and principles."""
-        if self._rulings_path.exists() and self._principles_path.exists() and not self.force_rebuild:
-            logger.info("Loading na2d indexes from disk …")
-            self._na2d_stores["rulings"]    = self._load(self._rulings_path)
-            self._na2d_stores["principles"] = self._load(self._principles_path)
-            return self
+    # ── constructors ──────────────────────────────────────────────────────
 
-        corpus = CorpusChunker().get_na2d_chunks()
-        for key, path in [("rulings", self._rulings_path), ("principles", self._principles_path)]:
-            self._na2d_stores[key] = self._build(corpus[key], key)
-            self._save(self._na2d_stores[key], path)
-        return self
+    @classmethod
+    def from_documents(cls,docs:List[Document],embeddings,backend:str= "faiss",faiss_index_path:Optional[str] = None,chroma_persist_dir:Optional[str] = "./chroma_legal_db",chroma_collection:str= "egyptian_legal_corpus",verbose:bool= True,) -> "LegalVectorStore":
+        if not docs:
+            raise ValueError("No documents to index.")
 
-    # ------------------------------------------------------------------ search
+        logger.info(f"  Indexing {len(docs):,} documents (backend='{backend}')")
 
-    def search_laws(self, query: str, k: int = 5,
-                    law_id: Optional[str] = None,
-                    chunk_type: Optional[str] = None) -> List[Document]:
-        self._require("laws")
-        filters = {k: v for k, v in [("law_id", law_id), ("chunk_type", chunk_type)] if v}
-        return self._laws_store.similarity_search(query, k=k, filter=filters or None)
-
-    def search_na2d(self, query: str, k: int = 5,
-                    source: str = "both",
-                    crime_category: Optional[str] = None) -> List[Document]:
-        """source: 'rulings' | 'principles' | 'both'"""
-        self._require("na2d")
-        results: List[Document] = []
-        for key in (["rulings", "principles"] if source == "both" else [source]):
-            hits = self._na2d_stores[key].similarity_search(query, k=k)
-            if crime_category and key == "rulings":
-                hits = [d for d in hits if d.metadata.get("crime_category") == crime_category]
-            results.extend(hits)
-        return results[:k]
-
-    # ------------------------------------------------------------------ retrievers
-
-    def laws_retriever(self, k: int = 5, law_id: Optional[str] = None, chunk_type: Optional[str] = None):
-        self._require("laws")
-        filters = {k: v for k, v in [("law_id", law_id), ("chunk_type", chunk_type)] if v}
-        return self._laws_store.as_retriever(search_kwargs={"k": k, **({"filter": filters} if filters else {})})
-
-    def na2d_retriever(self, k: int = 5, search_rulings: bool = True,
-                       search_principles: bool = True, crime_category: Optional[str] = None) -> Na2dRetriever:
-        self._require("na2d")
-        return Na2dRetriever(stores=self._na2d_stores, k=k,
-                             search_rulings=search_rulings,
-                             search_principles=search_principles,
-                             crime_category=crime_category)
-
-    # ------------------------------------------------------------------ filter helpers
-
-    def _filter(self, docs: List[Document], mode: str) -> List[Document]:
-        if mode == "original":
-            return [d for d in docs if d.metadata.get("chunk_type") == "article"]
-        if mode == "latest":
-            return self._latest_versions(docs)
-        return docs  # 'all'
-
-    @staticmethod
-    def _latest_versions(docs: List[Document]) -> List[Document]:
-        groups: Dict[tuple, List[Document]] = defaultdict(list)
-        for doc in docs:
-            m = doc.metadata
-            groups[(m.get("law_id"), m.get("article_number"))].append(doc)
-        latest = []
-        for group in groups.values():
-            amended = sorted(
-                [d for d in group if d.metadata.get("chunk_type") == "amended_article" and d.metadata.get("amendment_date")],
-                key=lambda d: d.metadata["amendment_date"], reverse=True,
+        if backend == "faiss":
+            vs = cls._build_faiss(docs, embeddings, faiss_index_path, verbose)
+        elif backend == "chroma":
+            vs = cls._build_chroma(
+                docs, embeddings,
+                chroma_persist_dir, chroma_collection, verbose,
             )
-            if amended:
-                latest.append(amended[0])
-            else:
-                originals = [d for d in group if d.metadata.get("sub_index", 0) == 0]
-                latest.extend(originals or group[:1])
-        return latest
+        else:
+            raise ValueError(f"Unknown backend '{backend}'. Use 'faiss' or 'chroma'.")
 
-    # ------------------------------------------------------------------ FAISS helpers
+        return cls(vs, docs)
 
-    def _build(self, docs: List[Document], label: str) -> FAISS:
-        logger.info(f"  [{label}] Embedding {len(docs):,} chunks …")
-        t0    = time.time()
-        store = FAISS.from_documents(docs, self._embeddings)
-        logger.info(f"  [{label}] Done in {time.time() - t0:.1f}s")
-        return store
+    @classmethod
+    def _build_faiss(cls, docs, embeddings, index_path, verbose):
+        try:
+            from langchain_community.vectorstores import FAISS
+        except ImportError:
+            raise ImportError("Run: pip install langchain-community faiss-cpu")
+        vs = FAISS.from_documents(docs, embeddings)
+        if index_path:
+            vs.save_local(index_path)
+            logger.info(f"  ✓ FAISS index saved → {index_path}")
+        return vs
 
-    def _save(self, store: FAISS, path: Path):
-        path.mkdir(parents=True, exist_ok=True)
-        store.save_local(str(path))
-        logger.info(f"  Saved → {path}")
+    @classmethod
+    def _build_chroma(cls, docs, embeddings, persist_dir, collection, verbose):
+        try:
+            from langchain_community.vectorstores import Chroma
+        except ImportError:
+            raise ImportError("Run: pip install langchain-community chromadb")
+        vs = Chroma.from_documents(
+            docs, embeddings,
+            collection_name   = collection,
+            persist_directory = persist_dir,
+        )
+        return vs
 
-    def _load(self, path: Path) -> FAISS:
-        return FAISS.load_local(str(path), self._embeddings, allow_dangerous_deserialization=True)
+    # ── load from disk ────────────────────────────────────────────────────
 
-    def _require(self, corpus: str):
-        if corpus == "laws" and self._laws_store is None:
-            raise RuntimeError("Laws index not built. Call build_laws() first.")
-        if corpus == "na2d" and not self._na2d_stores:
-            raise RuntimeError("Na2d indexes not built. Call build_na2d() first.")
+    @classmethod
+    def load_faiss(
+        cls,
+        index_path: str,
+        embeddings,
+        docs: Optional[List[Document]] = None,
+    ) -> "LegalVectorStore":
+        """Load a previously saved FAISS index from disk."""
+        from langchain_community.vectorstores import FAISS
+        vs = FAISS.load_local(
+            index_path, embeddings, allow_dangerous_deserialization=True
+        )
+        logger.info(f"✓ FAISS index loaded ← {index_path}")
+        return cls(vs, docs or [])
+
+    # ── search ────────────────────────────────────────────────────────────
+
+    def search(
+        self,
+        query:      str,
+        k:          int           = 5,
+        law_id:     Optional[str] = None,
+        chunk_type: Optional[str] = None,
+        doc_type:   Optional[str] = None,
+    ) -> List[Document]:
+        """
+        Similarity search with optional metadata filters.
+
+        Args:
+            query:      Arabic query string.
+            k:          Number of results to return.
+            law_id:     Restrict to one law         (e.g. ``'penal_code'``).
+            chunk_type: Restrict by law chunk type   (``'article'`` |
+                        ``'amended_article'`` | ``'preamble'`` | ``'table'``).
+            doc_type:   Restrict to Na2d type        (``'ruling'`` | ``'principle'``).
+        """
+        filter_dict: Dict[str, Any] = {}
+        if law_id:
+            filter_dict["law_id"]     = law_id
+        if chunk_type:
+            filter_dict["chunk_type"] = chunk_type
+        if doc_type:
+            filter_dict["doc_type"]   = doc_type
+
+        if filter_dict:
+            return self.vectorstore.similarity_search(query, k=k, filter=filter_dict)
+        return self.vectorstore.similarity_search(query, k=k)
+
+    def search_with_scores(
+        self,
+        query:    str,
+        k:        int           = 5,
+        law_id:   Optional[str] = None,
+        doc_type: Optional[str] = None,
+    ) -> List[Tuple[Document, float]]:
+        """Return ``(Document, score)`` pairs sorted by similarity."""
+        filter_dict: Dict[str, Any] = {}
+        if law_id:
+            filter_dict["law_id"]   = law_id
+        if doc_type:
+            filter_dict["doc_type"] = doc_type
+        if filter_dict:
+            return self.vectorstore.similarity_search_with_score(
+                query, k=k, filter=filter_dict
+            )
+        return self.vectorstore.similarity_search_with_score(query, k=k)
+
+    def search_latest(
+        self,
+        query:  str,
+        k:      int           = 5,
+        law_id: Optional[str] = None,
+    ) -> List[Document]:
+        """
+        Search then deduplicate results — for each (law_id, article_number)
+        keep only the most recent version. Na2d chunks pass through unchanged.
+        """
+        raw     = self.search(query, k=k * 3, law_id=law_id)
+        deduped = filter_latest_versions(raw)
+        return deduped[:k]
+
+    def as_retriever(
+        self,
+        k:          int           = 5,
+        law_id:     Optional[str] = None,
+        chunk_type: Optional[str] = None,
+        doc_type:   Optional[str] = None,
+    ):
+        """Return a LangChain ``BaseRetriever`` for use in chains."""
+        search_kwargs: Dict[str, Any] = {"k": k}
+        filter_dict:   Dict[str, Any] = {}
+        if law_id:
+            filter_dict["law_id"]     = law_id
+        if chunk_type:
+            filter_dict["chunk_type"] = chunk_type
+        if doc_type:
+            filter_dict["doc_type"]   = doc_type
+        if filter_dict:
+            search_kwargs["filter"] = filter_dict
+        return self.vectorstore.as_retriever(search_kwargs=search_kwargs)
 
 
 # =============================================================================
-# ENTRY POINTS
+# CONVENIENCE ENTRY POINT
 # =============================================================================
+
+def build_vector_store(
+    docs:               List[Document],
+    embeddings,
+    backend:            str           = "faiss",
+    faiss_index_path:   Optional[str] = None,
+    chroma_persist_dir: Optional[str] = "./chroma_legal_db",
+    chroma_collection:  str           = "egyptian_legal_corpus",
+    verbose:            bool          = True,
+) -> LegalVectorStore:
+
+    return LegalVectorStore.from_documents(
+        docs               = docs,
+        embeddings         = embeddings,
+        backend            = backend,
+        faiss_index_path   = faiss_index_path,
+        chroma_persist_dir = chroma_persist_dir,
+        chroma_collection  = chroma_collection,
+        verbose            = verbose,
+    )
+
+
+# =============================================================================
+# RUN
+# =============================================================================
+
+law_chunks = get_chunks()
+na2d       = get_na2d_chunks()
+all_chunks = law_chunks + na2d["rulings"] + na2d["principles"]
+embeddings = HuggingFaceEmbeddings(model_name=get_settings().EMBEDDING_MODEL)
+
+lvs = build_vector_store(
+    docs             = all_chunks,
+    embeddings       = embeddings,
+    backend          = "faiss",
+    faiss_index_path = "legal_faiss_index",
+)
 
 def get_retriever():
-    """Laws retriever — latest versions, FAISS backed."""
-    return LegalVectorStore().build_laws(docs_filter="latest").laws_retriever()
-
-def get_na2d_retriever(**kwargs) -> Na2dRetriever:
-    """Na2d retriever — rulings + principles, FAISS backed."""
-    return LegalVectorStore().build_na2d().na2d_retriever(**kwargs)
+    return lvs.as_retriever()

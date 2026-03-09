@@ -16,6 +16,7 @@ from src.Utils import (
     _to_western_digits,
     norm_regu,
     reg,
+    _normalize_article_no
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -34,7 +35,7 @@ def _split_into_articles(full_text: str) -> List[Dict[str, Optional[str]]]:
     Text before the first article header gets ``article_number=None``
     and is tagged as a preamble by the caller.
     """
-    matches  = list(reg._ARTICLE_BOUNDARY_RE.finditer(full_text))
+    matches  = list(reg._ARTICLE_BOUNDARY_RE.value.finditer(full_text))
     articles: List[Dict[str, Optional[str]]] = []
 
     if not matches:
@@ -51,7 +52,7 @@ def _split_into_articles(full_text: str) -> List[Dict[str, Optional[str]]]:
         start      = m.end()
         end        = matches[i + 1].start() if i + 1 < len(matches) else len(full_text)
         body       = full_text[start:end].strip()
-        article_no = norm_regu._normalize_article_no(m.group("num") or "")
+        article_no = _normalize_article_no(m.group("num") or "")
         if body:
             articles.append({"article_number": article_no, "text": body})
 
