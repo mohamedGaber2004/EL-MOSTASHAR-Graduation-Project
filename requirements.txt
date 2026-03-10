@@ -27,3 +27,4 @@ ocrmypdf==17.3.0
 networkx==3.6.1
 langchain_huggingface==1.2.0
 faiss-cpu==1.13.2
+pandas>=2.0.0
