@@ -29,12 +29,25 @@ def _stable_id(*components) -> str:
 
 class reg(Enum) :
     PDF_UNICODES_REG = r"[\u0617-\u061A\u064B-\u0652\u0670]"
-    DRUGS_ENTRIES_SECTIONS_REG = r'\n(\d+)\s*[–\-]\s*'
+    DRUGS_ENTRIES_SECTIONS_REG = r'(?m)^---\s*\n\s*(\d+)\s*[–\-]\s*'
     DRUGS_TABLE_HEADER_NAME_REG = r'^([^(]+)(?:\(([^)]+)\))?'
     DRUGS_TABLE_CHEMICAL_NAME_REG = r'الاسم الكيميائي:\s*(.+?)(?=\n|$)'
-    DRUGS_TABLE_TRADING_NAME_REG = r'الأسماء التجارية:\s*(.+?)(?=\n---|\n\d+|$)'
-    WEAPON_TABLE_SCHEDUAL_ENTRIES_REG = r'^(\d+)\s*[–\-]\s*(.+)$'
-    TBALE_DETECTION_REG = r'(?:الجدول|جدول)\s+رقم\s*\(?([0-9٠-٩]+)\)?'
+    DRUGS_TABLE_TRADING_NAME_REG = r'الأسماء التجارية:\s*(.+?)(?=\n---|^---|\Z)'
+    WEAPON_TABLE_SCHEDUAL_ENTRIES_REG = (
+    r'^(?:'
+    r'(\d+)\s*[–\-]\s*(.+)'          # 1 – item
+    r'|(\([أ-ي]\))\s*[–\-]?\s*(.+)' # (أ) item
+    r'|((?:أولاً|ثانياً|ثالثاً|رابعاً|خامساً))\s*[–:]\s*(.+)'  # أولاً – item
+    r')$'
+)
+    TBALE_DETECTION_REG = re.compile(
+        r'(?:الجدول|جدول)\s+رقم\s*\(?([0-9٠-٩]+)\)?',
+        re.UNICODE,
+    )
+    _TABLE_HEADER_RE = re.compile(
+        r'(?:الجدول|جدول)\s+رقم\s*\(?([0-9٠-٩]+)\)?',
+        re.UNICODE,
+    )
 
     ORIGINAL_LAW_RE = re.compile(
         r'(?:القانون|قانون)\s+رقم\s+([٠-٩0-9]+)\s+لسنة\s+([٠-٩0-9]+)',

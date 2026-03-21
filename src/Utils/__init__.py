@@ -10,8 +10,6 @@ from .files_extractors import (
     AmendmentExtractor,
     LawExtractor ,
     Amendment , 
-    Schedule , 
-    ScheduleEntry , 
     ExtractedLaw , 
 )
 from .legal_enumerations import (

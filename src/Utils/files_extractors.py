@@ -25,21 +25,7 @@ logger = logging.getLogger(__name__)
 # DATA STRUCTURES
 # =============================================================================
 
-@dataclass
-class ScheduleEntry:
-    entry_number:  str
-    arabic_name:   Optional[str]       = None
-    english_name:  Optional[str]       = None
-    chemical_name: Optional[str]       = None
-    description:   Optional[str]       = None
-    trade_names:   Optional[List[str]] = None
 
-@dataclass
-class Schedule:
-    schedule_id:     str
-    schedule_number: str
-    title:           str
-    entries:         List[ScheduleEntry] = field(default_factory=list)
 
 @dataclass
 class Amendment:
@@ -61,7 +47,6 @@ class ExtractedLaw:
     references:  List[Dict[str, Any]]
     topics:      List[Dict[str, Any]]
     amendments:  List[Amendment] = field(default_factory=list)
-    schedules:   List[Schedule]  = field(default_factory=list)
 
 
 # =============================================================================
@@ -101,53 +86,6 @@ class LawExtractor:
             text = text.replace(old, new)
         return re.sub(r"\s+", " ", text).strip()
 
-    def _extract_schedule_entries_drug(self, text: str) -> List[ScheduleEntry]:
-        entries, sections = [], re.split(reg.DRUGS_ENTRIES_SECTIONS_REG.value, text)
-        for i in range(1, len(sections), 2):
-            if i + 1 >= len(sections):
-                break
-            body = sections[i + 1].strip()
-            nm = re.match(reg.DRUGS_TABLE_HEADER_NAME_REG.value, body.split('\n')[0])
-            cm = re.search(reg.DRUGS_TABLE_CHEMICAL_NAME_REG.value, body, re.UNICODE)
-            tm = re.search(reg.DRUGS_TABLE_TRADING_NAME_REG.value, body, re.UNICODE)
-            entries.append(ScheduleEntry(
-                entry_number  = sections[i].strip(),
-                arabic_name   = nm.group(1).strip() if nm else None,
-                english_name  = nm.group(2).strip() if nm and nm.group(2) else None,
-                chemical_name = cm.group(1).strip() if cm else None,
-                trade_names   = [n.strip() for n in re.split(r'[،,\-–]', tm.group(1)) if n.strip()] if tm else None,
-            ))
-        return entries
-
-    def _extract_schedule_entries_weapon(self, text: str) -> List[ScheduleEntry]:
-        return [
-            ScheduleEntry(entry_number=m.group(1), arabic_name=m.group(2).strip(), description=m.group(2).strip())
-            for line in text.split('\n')
-            if (m := re.match(reg.WEAPON_TABLE_SCHEDUAL_ENTRIES_REG.value, line.strip()))
-        ]
-
-    def _extract_schedules(self) -> List[Schedule]:
-        if not self._schedule_type:
-            return []
-        entry_fn  = self._extract_schedule_entries_drug if self._schedule_type == "drug" else self._extract_schedule_entries_weapon
-        HEADER_RE = re.compile(reg.TBALE_DETECTION_REG.value, re.UNICODE)
-        matches   = list(HEADER_RE.finditer(self.raw_text))
-        schedules = []
-        for i, m in enumerate(matches):
-            num   = _to_western_digits(m.group(1))
-            start = m.end()
-            end   = matches[i + 1].start() if i + 1 < len(matches) else len(self.raw_text)
-            chunk = self.raw_text[start:end].strip()
-            lines = [l.strip() for l in chunk.split('\n') if l.strip()]
-            schedules.append(Schedule(
-                schedule_id     = f"{self._schedule_type}_schedule_{num}",
-                schedule_number = num,
-                title           = lines[0] if lines else f"جدول رقم {num}",
-                entries         = entry_fn(chunk),
-            ))
-        return schedules
-
-    # ── extraction methods ────────────────────────────────────────────────
 
     def _articles(self) -> List[Dict]:
         text    = self.raw_text
@@ -224,14 +162,13 @@ class LawExtractor:
         articles = self._articles()
         return ExtractedLaw(
             law_meta    = {"law_id": self.law_key, "title": self.title,
-                           "promulgation_date": self.date, "effective_date": self.date,
-                           "source": "الجريدة الرسمية", "language": "ar"},
+                        "promulgation_date": self.date, "effective_date": self.date,
+                        "source": "الجريدة الرسمية", "language": "ar"},
             articles    = articles,
             penalties   = self._penalties(articles),
             definitions = self._definitions(articles),
             references  = self._references(articles),
             topics      = self._topics(articles),
-            schedules   = self._extract_schedules(),
         )
 
 

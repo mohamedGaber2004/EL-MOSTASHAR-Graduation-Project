@@ -19,6 +19,10 @@ class norm_regu(Enum) :
     ADDITION_KEYWORDS = ["تضاف","يضاف","أضيف","إضافة","جديدة","جديد"]
     DELETION_KEYWORDS = ["يلغى","ألغي","يحذف","حذف","إلغاء"]
 
+    NODE_LABELS = ["Law","Article","Penalty","Definition","Topic","Table","Substance","Amendment"]
+    RELATIONSHIPS = ["CONTAINS","REFERENCES","HAS_PENALTY","DEFINES","TAGGED_WITH","HAS_TABLE","DEFINES_SUBSTANCE","HAS_AMENDMENT","AMENDED_BY","SUPERSEDES"]
+
+
     _LAW_REGISTRY: Dict[str, Tuple[str, Optional[str], Optional[Any]]] = {
         "penal_code":            ("قانون العقوبات",                          "1937-07-31", None),
         "money_laundering":      ("قانون مكافحة غسل الأموال",               "2002-05-15", None),
@@ -60,20 +64,17 @@ class norm_regu(Enum) :
         "1762919079675_ultra_clean" : "مبادئ محكمة النقض - المجلد الثاني",
         "2019-2018_المستحدث"        :"المستحدث من المبادئ 2018-2019",
     }
+    
 
     CREATION_OF_SCHEMA = [
-                "CREATE CONSTRAINT law_id_unique        IF NOT EXISTS FOR (l:Law)          REQUIRE l.law_id IS UNIQUE",
-                "CREATE CONSTRAINT article_id_unique    IF NOT EXISTS FOR (a:Article)       REQUIRE a.article_id IS UNIQUE",
-                "CREATE CONSTRAINT penalty_id_unique    IF NOT EXISTS FOR (p:Penalty)       REQUIRE p.penalty_id IS UNIQUE",
-                "CREATE CONSTRAINT definition_id_unique IF NOT EXISTS FOR (d:Definition)    REQUIRE d.definition_id IS UNIQUE",
-                "CREATE CONSTRAINT topic_id_unique      IF NOT EXISTS FOR (t:Topic)         REQUIRE t.topic_id IS UNIQUE",
-                "CREATE CONSTRAINT schedule_id_unique   IF NOT EXISTS FOR (s:Schedule)      REQUIRE s.schedule_id IS UNIQUE",
-                "CREATE CONSTRAINT entry_id_unique      IF NOT EXISTS FOR (e:ScheduleEntry) REQUIRE e.entry_id IS UNIQUE",
-                "CREATE CONSTRAINT substance_id_unique  IF NOT EXISTS FOR (sub:Substance)   REQUIRE sub.substance_id IS UNIQUE",
-                "CREATE CONSTRAINT amendment_id_unique  IF NOT EXISTS FOR (am:Amendment)    REQUIRE am.amendment_id IS UNIQUE",
-                "CREATE INDEX supersedes_date_idx IF NOT EXISTS FOR ()-[r:SUPERSEDES]-() ON (r.amendment_date)",
-            ]
-
-    NODE_LABELS = ["Law","Article","Penalty","Definition","Topic","Schedule","ScheduleEntry","Substance","Amendment"]
-    RELATIONSHIPS = ["CONTAINS","REFERENCES","HAS_PENALTY","DEFINES","TAGGED_WITH","HAS_SCHEDULE","CONTAINS_ENTRY","DEFINES_SUBSTANCE","HAS_AMENDMENT","AMENDED_BY","SUPERSEDES"]
+        "CREATE CONSTRAINT law_id_unique        IF NOT EXISTS FOR (l:Law)       REQUIRE l.law_id IS UNIQUE",
+        "CREATE CONSTRAINT article_id_unique    IF NOT EXISTS FOR (a:Article)    REQUIRE a.article_id IS UNIQUE",
+        "CREATE CONSTRAINT penalty_id_unique    IF NOT EXISTS FOR (p:Penalty)    REQUIRE p.penalty_id IS UNIQUE",
+        "CREATE CONSTRAINT definition_id_unique IF NOT EXISTS FOR (d:Definition) REQUIRE d.definition_id IS UNIQUE",
+        "CREATE CONSTRAINT topic_id_unique      IF NOT EXISTS FOR (t:Topic)      REQUIRE t.topic_id IS UNIQUE",
+        "CREATE CONSTRAINT table_id_unique      IF NOT EXISTS FOR (t:Table)      REQUIRE t.table_id IS UNIQUE",
+        "CREATE CONSTRAINT substance_id_unique  IF NOT EXISTS FOR (s:Substance)  REQUIRE s.substance_id IS UNIQUE",
+        "CREATE CONSTRAINT amendment_id_unique  IF NOT EXISTS FOR (am:Amendment) REQUIRE am.amendment_id IS UNIQUE",
+        "CREATE INDEX supersedes_date_idx IF NOT EXISTS FOR ()-[r:SUPERSEDES]-() ON (r.amendment_date)",
+    ]
 

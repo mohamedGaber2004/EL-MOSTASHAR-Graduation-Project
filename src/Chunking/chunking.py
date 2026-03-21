@@ -26,6 +26,50 @@ logger = logging.getLogger(__name__)
 # CORPUS CHUNKER
 # =============================================================================
 
+def _split_into_tables(
+    full_text:  str,
+    law_id:     str,
+    law_title:  str,
+    source_file: str,
+) -> List[Document]:
+    """
+    Split a tables file into one Document per logical table.
+    Each Document gets the raw text of that table only.
+    """
+    matches = list(reg._TABLE_HEADER_RE.value.finditer(full_text))
+
+    if not matches:
+        # No headers found — return the whole file as one chunk
+        return [Document(
+            page_content = full_text.strip(),
+            metadata     = {
+                "law_id":        law_id,
+                "law_title":     law_title,
+                "chunk_type":    "table",
+                "table_number":  "0",
+                "source_file":   source_file,
+            },
+        )]
+
+    docs = []
+    for i, m in enumerate(matches):
+        table_num = _to_western_digits(m.group(1))
+        start     = m.start()                                      # include the header line
+        end       = matches[i + 1].start() if i + 1 < len(matches) else len(full_text)
+        text      = full_text[start:end].strip()
+        if text:
+            docs.append(Document(
+                page_content = text,
+                metadata     = {
+                    "law_id":       law_id,
+                    "law_title":    law_title,
+                    "chunk_type":   "table",
+                    "table_number": table_num,
+                    "source_file":  source_file,
+                },
+            ))
+    return docs
+
 def _split_into_articles(full_text: str) -> List[Dict[str, Optional[str]]]:
     """
     Split raw law text into per-article dicts::
@@ -59,7 +103,7 @@ def _split_into_articles(full_text: str) -> List[Dict[str, Optional[str]]]:
     return articles
 
 _table_splitter = CharacterTextSplitter(
-    separator="\n\n\n\n", chunk_size=500_000, chunk_overlap=0
+    separator="\n\n", chunk_size=500_000, chunk_overlap=0
 )
 
 class CorpusChunker:
@@ -218,19 +262,9 @@ class CorpusChunker:
                 full_text = raw[0].page_content
 
                 if "tables" in fp.name.lower():
-                    # Tables: one large chunk per logical table block
-                    docs = _table_splitter.create_documents(
-                        texts     = [full_text],
-                        metadatas = [{
-                            "law_id":         law_key,
-                            "law_title":      law_title,
-                            "chunk_type":     "table",
-                            "article_number": None,
-                            "source_file":    fp.name,
-                        }],
-                    )
-                    all_docs.extend(docs)
-                    logger.info(f"  {fp.name} [table] → {len(docs)} chunks")
+                    table_docs = _split_into_tables(full_text, law_key, law_title, fp.name)
+                    all_docs.extend(table_docs)
+                    logger.info(f"  {fp.name} [table] → {len(table_docs)} tables")
 
                 else:
                     # Articles: exactly one Document per article
