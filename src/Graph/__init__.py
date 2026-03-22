@@ -1,5 +1,5 @@
+from .state import AgentState
 from .graph_builder import ( 
-    AgentState, 
     legal_graph, 
     graph_image, 
     run_case, 
