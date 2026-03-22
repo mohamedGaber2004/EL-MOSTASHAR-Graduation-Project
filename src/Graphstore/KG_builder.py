@@ -1,233 +1,346 @@
 from __future__ import annotations
 
+# =============================================================================
+# IMPORTS
+# =============================================================================
+ 
+import logging
+import traceback
+from typing import Any, Dict, List, Optional
+ 
 import pandas as pd
-import logging , fnmatch
-from pathlib import Path
-from neo4j import GraphDatabase
 from langchain_core.documents import Document
-from typing import Any , Dict , List, Optional
+from neo4j import GraphDatabase
+ 
 from src.Chunking import get_chunks
 from src.Config import get_settings
 from src.Utils import (
-    LawExtractor , 
-    AmendmentExtractor , 
-    Amendment , 
-    Schedule , 
-    ScheduleEntry , 
-    ExtractedLaw , 
-    _stable_id ,
-    _read_file ,
-    norm_regu
+    _stable_id,
+    _to_western_digits,
+    Amendment,
+    norm_regu,
+    LawExtractor,
+    AmendmentExtractor,
+    reg,
 )
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+ 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 
-class LegalKnowledgeGraph:
 
+# =============================================================================
+# CHUNK-BASED INGESTION
+# =============================================================================
+ 
+def ingest_dataset(chunks: List[Document]) -> List[Dict]:
+    law_data: Dict[str, Dict] = {}
+    for chunk in chunks:
+        if chunk.metadata.get("chunk_type") != "article":
+            continue
+        law_key = chunk.metadata["law_id"]
+        if law_key not in law_data:
+            law_data[law_key] = {
+                "law_title": chunk.metadata.get("law_title", law_key),
+                "articles":  [],
+            }
+        law_data[law_key]["articles"].append({
+            "article_number": chunk.metadata.get("article_number"),
+            "text":           chunk.page_content,
+            "language":       "ar",
+        })
+ 
+    summaries = []
+    for law_key, data in law_data.items():
+        articles = data["articles"]
+        try:
+            if not articles:
+                summaries.append({"law_key": law_key, "articles": [], "error": "empty"})
+                continue
+            reconstructed = "\n\n".join(
+                f"المادة {a['article_number']}\n{a['text']}"
+                if a.get("article_number") else a["text"]
+                for a in articles
+            )
+            ext = LawExtractor(law_key, reconstructed)
+            summaries.append({
+                "law_key":     law_key,
+                "law_meta":    ext.extract().law_meta,
+                "articles":    articles,
+                "penalties":   ext._penalties(articles),
+                "definitions": ext._definitions(articles),
+                "references":  ext._references(articles),
+                "topics":      ext._topics(articles),
+                "schedules":   [],   # always empty — tables live in separate chunks
+                "error":       None,
+            })
+        except Exception as e:
+            logger.error(f"  [ERROR] {law_key}: {e}")
+            summaries.append({"law_key": law_key, "articles": [], "error": str(e)})
+    return summaries
+ 
+ 
+def ingest_amendments(chunks: List[Document]) -> Dict[str, List[Amendment]]:
+    groups: Dict[tuple, Dict] = {}
+    for chunk in chunks:
+        if chunk.metadata.get("chunk_type") != "amended_article":
+            continue
+        m       = chunk.metadata
+        law_key = m["law_id"]
+        law_num = m.get("amendment_law_number", "unknown")
+        adate   = m.get("amendment_date",       "unknown")
+        key     = (law_key, law_num, adate)
+        if key not in groups:
+            groups[key] = {"law_key": law_key, "texts": [], "articles": []}
+        if (no := m.get("article_number")) and no not in groups[key]["articles"]:
+            groups[key]["articles"].append(no)
+        groups[key]["texts"].append(chunk.page_content)
+ 
+    result: Dict[str, List[Amendment]] = {}
+    for (law_key, _, _), data in groups.items():
+        full_text = "\n".join(data["texts"])
+        ext       = AmendmentExtractor(full_text)
+        amendment = ext.extract(target_law_id=law_key)
+        if amendment:
+            amendment.amended_article_numbers = data["articles"] or amendment.amended_article_numbers
+            result.setdefault(law_key, []).append(amendment)
+    return result
+ 
+ 
+def ingest_tables(chunks: List[Document]) -> Dict[str, List[Dict]]:
+    """
+    Each table chunk already represents exactly one logical table
+    (split correctly in Chunking.py).
+    Just collect them grouped by law_id.
+    """
+    result: Dict[str, List[Dict]] = {}
+
+    for chunk in chunks:
+        if chunk.metadata.get("chunk_type") != "table":
+            continue
+        law_id = chunk.metadata.get("law_id")
+        if not law_id:
+            logger.warning("table chunk missing law_id — skipped")
+            continue
+
+        entry = {
+            "table_number": chunk.metadata.get("table_number", "0"),
+            "source_file":  chunk.metadata.get("source_file", "unknown"),
+            "text":         chunk.page_content,
+        }
+        result.setdefault(law_id, []).append(entry)
+
+    for law_id, tables in result.items():
+        logger.info(
+            f"  ✓ {law_id}: {len(tables)} table(s) → "
+            + ", ".join(f"table {t['table_number']}" for t in tables)
+        )
+    return result
+
+
+
+# =============================================================================
+# SECTION 5: KNOWLEDGE GRAPH
+# =============================================================================
+ 
+class LegalKnowledgeGraph:
+    """
+    Neo4j knowledge graph for Egyptian criminal law.
+ 
+    All Cypher goes through ``_run()`` — one session per call, auto-closed.
+    Schema and statistics lists are read from ``norm_regu`` — single source
+    of truth, no duplication.
+    """
+ 
     def __init__(self, uri: str, user: str, password: str):
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
         self.driver.verify_connectivity()
         logger.info("✓ Neo4j connected")
-
+ 
     def close(self):
         self.driver.close()
-
-
-    def _read_law_folder(self , folder: Path) -> str:
-        parts = []
-        for fp in sorted(f for f in folder.glob("*.txt") if not fnmatch.fnmatch(f.name.lower(), "new*")):
-            text = _read_file(fp)
-            if text:
-                parts.append(text)
-        return "\n\n".join(parts).strip()
-
-
-    def ingest_dataset(self,root_dir: str, folder_to_law_key: Dict[str, str]) -> List[Dict]:
-        summaries = []
-        for folder in sorted(p for p in Path(root_dir).iterdir() if p.is_dir()):
-            if folder.name not in folder_to_law_key:
-                continue
-            law_key = folder_to_law_key[folder.name]
-            try:
-                raw = self._read_law_folder(folder)
-                if not raw:
-                    summaries.append({"folder": folder.name, "law_key": law_key, "error": "empty"})
-                    continue
-                bundle = LawExtractor(law_key, raw).extract()
-                summaries.append({"folder": folder.name, "law_key": law_key,
-                                "articles": len(bundle.articles), "penalties": len(bundle.penalties),
-                                "definitions": len(bundle.definitions), "references": len(bundle.references),
-                                "schedules": len(bundle.schedules), "error": None})
-            except Exception as e:
-                summaries.append({"folder": folder.name, "law_key": law_key, "error": str(e)})
-        return summaries
-
-
-    def ingest_amendments(self,root_dir: str, folder_to_law_key: Dict[str, str]) -> Dict[str, List[Amendment]]:
-        result: Dict[str, List[Amendment]] = {}
-        for folder in sorted(p for p in Path(root_dir).iterdir() if p.is_dir()):
-            if folder.name not in folder_to_law_key:
-                continue
-            law_key, law_amendments = folder_to_law_key[folder.name], []
-            for af in sorted(folder.glob("new*.txt")):
-                text = _read_file(af)
-                if not text or not text.strip():
-                    continue
-                amendment = AmendmentExtractor(text, af.name).extract(law_key)
-                if amendment:
-                    law_amendments.append(amendment)
-            if law_amendments:
-                result[law_key] = law_amendments
-                logger.info(f"  '{folder.name}' → {len(law_amendments)} amendment(s)")
-        return result
-
-
-
+ 
+    def _run(self, query: str, **params):
+        with self.driver.session() as s:
+            s.run(query, **params)
+ 
+    # ── schema ────────────────────────────────────────────────────────────
+ 
     def setup_schema(self, drop_existing: bool = False):
         with self.driver.session() as s:
             if drop_existing:
                 s.run("MATCH (n) DETACH DELETE n")
+                logger.info("✓ Existing data cleared")
             for stmt in norm_regu.CREATION_OF_SCHEMA.value:
                 try:
                     s.run(stmt)
                 except Exception:
                     pass
         logger.info("✓ Schema ready")
-
-    def _run(self, query: str, **params):
-        with self.driver.session() as s:
-            s.run(query, **params)
-
+ 
+    # ── node / relationship creators ──────────────────────────────────────
+ 
     def create_law(self, meta: Dict[str, Any]):
         self._run("""
             MERGE (l:Law {law_id: $law_id})
-            SET l.title=$title, l.promulgation_date=$promulgation_date,
-                l.source=$source, l.language=$language
-        """, law_id=meta.get("law_id"), title=meta.get("title"),
+            SET l.title             = $title,
+                l.promulgation_date = $promulgation_date,
+                l.source            = $source,
+                l.language          = $language
+        """, law_id=meta["law_id"], title=meta.get("title"),
             promulgation_date=meta.get("promulgation_date"),
             source=meta.get("source"), language=meta.get("language", "ar"))
-
-    def create_article(self, law_id: str, article_number: Optional[str], text: str, position: int):
-        article_id = _stable_id(law_id, article_number or "preamble", position)
+ 
+    def create_article(self, law_id: str, article_number: Optional[str],
+                       text: str, position: int):
         self._run("""
             MATCH (l:Law {law_id: $law_id})
             MERGE (a:Article {article_id: $article_id})
-            SET a.article_number=$article_number, a.text=$text, a.law_id=$law_id
-            MERGE (l)-[r:CONTAINS]->(a) SET r.position=$position
-        """, law_id=law_id, article_id=article_id,
+            SET a.article_number = $article_number,
+                a.text           = $text,
+                a.law_id         = $law_id
+            MERGE (l)-[r:CONTAINS]->(a)
+            SET r.position = $position
+        """, law_id=law_id,
+            article_id=_stable_id(law_id, article_number or "preamble", position),
             article_number=article_number, text=text, position=position)
-
+ 
     def create_penalty(self, penalty: Dict, law_id: str):
         self._run("""
             MATCH (a:Article {law_id: $law_id, article_number: $article_number})
             MERGE (p:Penalty {penalty_id: $penalty_id})
-            SET p.penalty_type=$penalty_type, p.min_value=$min_value,
-                p.max_value=$max_value, p.unit=$unit
+            SET p.penalty_type = $penalty_type,
+                p.min_value    = $min_value,
+                p.max_value    = $max_value,
+                p.unit         = $unit
             MERGE (a)-[:HAS_PENALTY]->(p)
         """, law_id=law_id,
             penalty_id=_stable_id(law_id, penalty.get("article_number"), penalty.get("penalty_type")),
-            article_number=penalty.get("article_number"), penalty_type=penalty.get("penalty_type"),
-            min_value=penalty.get("min_value"), max_value=penalty.get("max_value"), unit=penalty.get("unit"))
-
+            article_number=penalty.get("article_number"),
+            penalty_type=penalty.get("penalty_type"),
+            min_value=penalty.get("min_value"),
+            max_value=penalty.get("max_value"),
+            unit=penalty.get("unit"))
+ 
     def create_definition(self, definition: Dict, law_id: str):
         self._run("""
             MATCH (a:Article {law_id: $law_id, article_number: $article_number})
             MERGE (d:Definition {definition_id: $def_id})
-            SET d.term=$term, d.definition_text=$definition_text
+            SET d.term            = $term,
+                d.definition_text = $definition_text
             MERGE (a)-[:DEFINES]->(d)
-        """, law_id=law_id, def_id=_stable_id(law_id, definition.get("term")),
+        """, law_id=law_id,
+            def_id=_stable_id(law_id, definition.get("term")),
             article_number=definition.get("defined_in_article"),
-            term=definition.get("term"), definition_text=definition.get("definition_text"))
-
+            term=definition.get("term"),
+            definition_text=definition.get("definition_text"))
+ 
     def create_topic(self, topic_name: str):
         self._run("MERGE (t:Topic {topic_id: $id, name: $name})",
                   id=_stable_id(topic_name), name=topic_name)
-
-    def link_article_topic(self, law_id: str, article_number: str, topic_name: str, confidence: float):
+ 
+    def link_article_topic(self, law_id: str, article_number: str,
+                           topic_name: str, confidence: float):
         self._run("""
             MATCH (a:Article {law_id: $law_id, article_number: $article_number})
             MATCH (t:Topic {name: $topic_name})
-            MERGE (a)-[r:TAGGED_WITH]->(t) SET r.confidence=$confidence
-        """, law_id=law_id, article_number=article_number, topic_name=topic_name, confidence=confidence)
-
+            MERGE (a)-[r:TAGGED_WITH]->(t)
+            SET r.confidence = $confidence
+        """, law_id=law_id, article_number=article_number,
+            topic_name=topic_name, confidence=confidence)
+ 
     def create_reference(self, law_id: str, from_article: str, to_article: str):
         self._run("""
             MATCH (from:Article {law_id: $law_id, article_number: $from_article})
             MATCH (to:Article   {law_id: $law_id, article_number: $to_article})
-            MERGE (from)-[r:REFERENCES]->(to) SET r.reference_type='direct'
+            MERGE (from)-[r:REFERENCES]->(to)
+            SET r.reference_type = 'direct'
         """, law_id=law_id, from_article=from_article, to_article=to_article)
-
-    def create_schedule(self, law_id: str, schedule: Schedule):
+ 
+    def create_table_node(self, law_id: str, table_number: str,
+                      source_file: str, text: str, position: int):
+        """One Table node per logical table. Full raw text stored on the node."""
+        table_id = _stable_id(law_id, table_number)
         self._run("""
             MATCH (l:Law {law_id: $law_id})
-            MERGE (s:Schedule {schedule_id: $schedule_id})
-            SET s.schedule_number=$schedule_number, s.title=$title, s.entry_count=$count
-            MERGE (l)-[:HAS_SCHEDULE]->(s)
-        """, law_id=law_id, schedule_id=schedule.schedule_id,
-            schedule_number=schedule.schedule_number, title=schedule.title, count=len(schedule.entries))
-
-    def create_schedule_entry(self, schedule_id: str, entry: ScheduleEntry, position: int):
-        entry_id = _stable_id(schedule_id, entry.entry_number, position)
-        self._run("""
-            MATCH (s:Schedule {schedule_id: $schedule_id})
-            MERGE (e:ScheduleEntry {entry_id: $entry_id})
-            SET e.entry_number=$entry_number, e.arabic_name=$arabic_name,
-                e.english_name=$english_name, e.description=$description
-            MERGE (s)-[r:CONTAINS_ENTRY]->(e) SET r.position=$position
-        """, schedule_id=schedule_id, entry_id=entry_id, entry_number=entry.entry_number,
-            arabic_name=entry.arabic_name, english_name=entry.english_name,
-            description=entry.description, position=position)
-        if entry.chemical_name:
-            sub_id = _stable_id("substance", entry.arabic_name or entry.english_name)
-            self._run("""
-                MATCH (e:ScheduleEntry {entry_id: $entry_id})
-                MERGE (sub:Substance {substance_id: $sub_id})
-                SET sub.arabic_name=$arabic_name, sub.english_name=$english_name,
-                    sub.chemical_name=$chemical_name, sub.trade_names=$trade_names
-                MERGE (e)-[:DEFINES_SUBSTANCE]->(sub)
-            """, entry_id=entry_id, sub_id=sub_id, arabic_name=entry.arabic_name,
-                english_name=entry.english_name, chemical_name=entry.chemical_name,
-                trade_names=entry.trade_names or [])
-
-    def create_amendment(self, law_id: str, amendment: Amendment):
+            MERGE (t:Table {table_id: $table_id})
+            SET t.table_number = $table_number,
+                t.source_file  = $source_file,
+                t.text         = $text,
+                t.law_id       = $law_id
+            MERGE (l)-[r:HAS_TABLE]->(t)
+            SET r.position = $position
+        """,
+            law_id=law_id, table_id=table_id,
+            table_number=table_number, source_file=source_file,
+            text=text, position=position,
+        )
+ 
+    def import_amendment(self, law_id: str, amendment: Amendment):
+        """
+        Create Amendment node and all article-version relationships.
+ 
+        modification / deletion:
+            existing Article -[:AMENDED_BY]-> Amendment
+            new versioned Article -[:SUPERSEDES]-> old Article
+ 
+        addition:
+            new Article -[:AMENDED_BY]-> Amendment
+            new Article -[:SUPERSEDES]-> old Article (if one exists)
+        """
         desc = (amendment.description or "")[:500]
         self._run("""
             MATCH (l:Law {law_id: $law_id})
             MERGE (am:Amendment {amendment_id: $amendment_id})
-            SET am.amendment_law_number=$law_num, am.amendment_law_title=$law_title,
-                am.amendment_date=$date, am.amendment_type=$atype,
-                am.description=$desc, am.effective_date=$effective_date
+            SET am.amendment_law_number = $law_num,
+                am.amendment_law_title  = $law_title,
+                am.amendment_date       = $date,
+                am.amendment_type       = $atype,
+                am.description          = $desc,
+                am.effective_date       = $effective_date
             MERGE (l)-[:HAS_AMENDMENT]->(am)
         """, law_id=law_id, amendment_id=amendment.amendment_id,
-            law_num=amendment.amendment_law_number, law_title=amendment.amendment_law_title,
+            law_num=amendment.amendment_law_number,
+            law_title=amendment.amendment_law_title,
             date=amendment.amendment_date, atype=amendment.amendment_type,
             desc=desc, effective_date=amendment.effective_date)
-
+ 
         for article_number in amendment.amended_article_numbers:
             if not article_number:
                 continue
-            new_id = _stable_id(law_id, article_number,
-                                "added" if amendment.amendment_type == "addition" else "amended",
-                                amendment.amendment_date)
-            if amendment.amendment_type == "addition":
+            is_addition = amendment.amendment_type == "addition"
+            tag         = "added" if is_addition else "amended"
+            new_id      = _stable_id(law_id, article_number, tag, amendment.amendment_date)
+ 
+            if is_addition:
                 self._run("""
                     MATCH (l:Law {law_id: $law_id})
                     MATCH (am:Amendment {amendment_id: $amendment_id})
                     MERGE (a_new:Article {article_id: $new_id})
-                    ON CREATE SET a_new.article_number=$article_number, a_new.law_id=$law_id,
-                                  a_new.text=$desc, a_new.version=$date, a_new.is_addition=true
+                    ON CREATE SET
+                        a_new.article_number = $article_number,
+                        a_new.law_id         = $law_id,
+                        a_new.text           = $desc,
+                        a_new.version        = $date,
+                        a_new.is_addition    = true
                     MERGE (l)-[:CONTAINS]->(a_new)
-                    MERGE (a_new)-[:AMENDED_BY {amendment_type: $atype, amendment_date: $date}]->(am)
-                """, law_id=law_id, amendment_id=amendment.amendment_id, new_id=new_id,
-                    article_number=article_number, desc=desc,
+                    MERGE (a_new)-[:AMENDED_BY {
+                        amendment_type: $atype, amendment_date: $date
+                    }]->(am)
+                """, law_id=law_id, amendment_id=amendment.amendment_id,
+                    new_id=new_id, article_number=article_number, desc=desc,
                     date=amendment.amendment_date, atype=amendment.amendment_type)
                 self._run("""
                     MATCH (a_new:Article {article_id: $new_id})
                     MATCH (a_old:Article {law_id: $law_id, article_number: $article_number})
-                    WHERE a_old.article_id <> $new_id AND a_old.is_addition IS NULL
-                    MERGE (a_new)-[:SUPERSEDES {amendment_id: $amendment_id, amendment_date: $date}]->(a_old)
+                    WHERE a_old.article_id <> $new_id
+                      AND a_old.is_addition IS NULL
+                    MERGE (a_new)-[:SUPERSEDES {
+                        amendment_id: $amendment_id, amendment_date: $date
+                    }]->(a_old)
                 """, new_id=new_id, law_id=law_id, article_number=article_number,
                     amendment_id=amendment.amendment_id, date=amendment.amendment_date)
             else:
@@ -235,167 +348,250 @@ class LegalKnowledgeGraph:
                     MATCH (am:Amendment {amendment_id: $amendment_id})
                     MATCH (a:Article {law_id: $law_id, article_number: $article_number})
                     MERGE (a)-[r:AMENDED_BY]->(am)
-                    SET r.amendment_type=$atype, r.amendment_date=$date
+                    SET r.amendment_type = $atype,
+                        r.amendment_date = $date
                 """, amendment_id=amendment.amendment_id, law_id=law_id,
-                    article_number=article_number, atype=amendment.amendment_type, date=amendment.amendment_date)
+                    article_number=article_number,
+                    atype=amendment.amendment_type, date=amendment.amendment_date)
                 self._run("""
                     MATCH (l:Law {law_id: $law_id})
                     MATCH (am:Amendment {amendment_id: $amendment_id})
                     MATCH (a_old:Article {law_id: $law_id, article_number: $article_number})
-                    WHERE a_old.article_id <> $new_id AND a_old.is_amended IS NULL
+                    WHERE a_old.article_id <> $new_id
+                      AND a_old.is_amended IS NULL
                     MERGE (a_new:Article {article_id: $new_id})
-                    ON CREATE SET a_new.article_number=$article_number, a_new.law_id=$law_id,
-                                  a_new.text=$desc, a_new.version=$date, a_new.is_amended=true
+                    ON CREATE SET
+                        a_new.article_number = $article_number,
+                        a_new.law_id         = $law_id,
+                        a_new.text           = $desc,
+                        a_new.version        = $date,
+                        a_new.is_amended     = true
                     MERGE (l)-[:CONTAINS]->(a_new)
-                    MERGE (a_new)-[:SUPERSEDES {amendment_id: $amendment_id, amendment_date: $date}]->(a_old)
+                    MERGE (a_new)-[:SUPERSEDES {
+                        amendment_id: $amendment_id, amendment_date: $date
+                    }]->(a_old)
                 """, law_id=law_id, amendment_id=amendment.amendment_id,
                     article_number=article_number, new_id=new_id,
                     desc=desc, date=amendment.amendment_date)
-
-    def import_law(self, bundle: ExtractedLaw):
-        law_id = bundle.law_meta["law_id"]
-        self.create_law(bundle.law_meta)
-        for i, a in enumerate(bundle.articles):
+ 
+    def import_law(self, summary: Dict, verbose: bool = True):
+        """
+        Import one law from an ``ingest_dataset()`` summary dict.
+        All structured data is pre-extracted — no re-parsing.
+        NOTE: schedules are intentionally empty here; they are imported
+        separately in Phase 4 from dedicated table chunks.
+        """
+        law_id = summary["law_meta"]["law_id"]
+        if verbose:
+            print(f"\n{'='*60}\nIMPORTING: {summary['law_meta'].get('title')}\n{'='*60}")
+        self.create_law(summary["law_meta"])
+        for i, a in enumerate(summary["articles"]):
             self.create_article(law_id, a.get("article_number"), a.get("text", ""), i)
-        for p in bundle.penalties:
+        for p in summary["penalties"]:
             self.create_penalty(p, law_id)
-        for d in bundle.definitions:
+        for d in summary["definitions"]:
             self.create_definition(d, law_id)
-        for topic_name in set(t["topic_name"] for t in bundle.topics):
+        for topic_name in set(t["topic_name"] for t in summary["topics"]):
             self.create_topic(topic_name)
-        for t in bundle.topics:
-            self.link_article_topic(law_id, t["article_number"], t["topic_name"], t.get("confidence", 1.0))
-        for r in bundle.references:
+        for t in summary["topics"]:
+            self.link_article_topic(law_id, t["article_number"],
+                                    t["topic_name"], t.get("confidence", 1.0))
+        for r in summary["references"]:
             self.create_reference(law_id, r["from_article"], r["to_article"])
-        for sched in bundle.schedules:
-            self.create_schedule(law_id, sched)
-            for i, entry in enumerate(sched.entries):
-                self.create_schedule_entry(sched.schedule_id, entry, i)
-        logger.info(f"  ✓ {law_id}: {len(bundle.articles)} articles | {len(bundle.penalties)} penalties")
-
-    def import_amendments(self, law_id: str, amendments: List[Amendment]):
-        for am in amendments:
-            try:
-                self.create_amendment(law_id, am)
-            except Exception as e:
-                logger.error(f"  ✗ {am.amendment_id}: {e}")
-
-    def build_from_documents(self, docs: List[Document]) -> Dict[str, int]:
-        stats = {"laws": 0, "articles": 0, "amendments": 0, "skipped": 0}
-        seen_laws: set = set()
-        for doc in docs:
-            law_id = doc.metadata.get("law_id")
-            if law_id and law_id not in seen_laws:
-                self.create_law({"law_id": law_id, "title": doc.metadata.get("law_title", law_id),
-                                 "promulgation_date": None, "source": "chunking_pipeline", "language": "ar"})
-                seen_laws.add(law_id)
-                stats["laws"] += 1
-        for pos, doc in enumerate(docs):
-            m, law_id, text = doc.metadata, doc.metadata.get("law_id"), doc.page_content
-            if not law_id or not text:
-                stats["skipped"] += 1
-                continue
-            try:
-                chunk_type = m.get("chunk_type")
-                if chunk_type in ("article", "preamble"):
-                    self.create_article(law_id, m.get("article_number"), text, pos)
-                    stats["articles"] += 1
-                elif chunk_type == "amended_article":
-                    law_num = m.get("amendment_law_number")
-                    adate   = m.get("amendment_date")
-                    atype   = m.get("amendment_type", "modification")
-                    if not law_num or not adate:
-                        stats["skipped"] += 1
-                        continue
-                    year = adate.split("-")[0]
-                    self.create_amendment(law_id, Amendment(
-                        amendment_id            = _stable_id(law_id, law_num, year),
-                        amendment_law_number    = law_num,
-                        amendment_date          = adate,
-                        amendment_law_title     = f"قانون رقم {law_num} لسنة {year}",
-                        amended_article_numbers = [m["article_number"]] if m.get("article_number") else [],
-                        amendment_type          = atype,
-                        description             = text[:500],
-                        effective_date          = adate,
-                    ))
-                    stats["amendments"] += 1
-                else:
-                    stats["skipped"] += 1
-            except Exception as e:
-                logger.error(f"  ✗ pos={pos} law={law_id}: {e}")
-                stats["skipped"] += 1
-        logger.info(f"✓ KG import: {stats}")
-        return stats
-
+        if verbose:
+            print(f"  ✓ {len(summary['articles'])} articles "
+                  f"| {len(summary['penalties'])} penalties "
+                  f"| {len(summary['schedules'])} schedules")
+ 
+    # ── statistics / queries ──────────────────────────────────────────────
+ 
     def get_statistics(self) -> Dict[str, Any]:
         stats: Dict[str, Any] = {"nodes": {}, "relationships": {}}
         with self.driver.session() as s:
             for label in norm_regu.NODE_LABELS.value:
-                stats["nodes"][label] = s.run(f"MATCH (n:{label}) RETURN count(n) AS c").single()["c"]
+                stats["nodes"][label] = s.run(
+                    f"MATCH (n:{label}) RETURN count(n) AS c").single()["c"]
             for rel in norm_regu.RELATIONSHIPS.value:
-                stats["relationships"][rel] = s.run(f"MATCH ()-[r:{rel}]->() RETURN count(r) AS c").single()["c"]
+                stats["relationships"][rel] = s.run(
+                    f"MATCH ()-[r:{rel}]->() RETURN count(r) AS c").single()["c"]
         return stats
-
+ 
     def print_statistics(self):
         stats = self.get_statistics()
-        print("\n" + "="*60 + "\nKNOWLEDGE GRAPH STATISTICS")
+        print("\n" + "="*60 + "\nKNOWLEDGE GRAPH STATISTICS\n" + "="*60)
         print("\nNodes:")
         for k, v in stats["nodes"].items():
             print(f"  {k}: {v}")
         print("\nRelationships:")
         for k, v in stats["relationships"].items():
             print(f"  {k}: {v}")
+        print("="*60)
+ 
+    def query_amendments(self, law_id: Optional[str] = None) -> List[Dict]:
+        with self.driver.session() as s:
+            if law_id:
+                result = s.run("""
+                    MATCH (l:Law {law_id: $law_id})-[:HAS_AMENDMENT]->(am:Amendment)
+                    OPTIONAL MATCH (a:Article)-[:AMENDED_BY]->(am)
+                    RETURN am, collect(DISTINCT a.article_number) AS affected_articles
+                    ORDER BY am.amendment_date
+                """, law_id=law_id)
+            else:
+                result = s.run("""
+                    MATCH (l:Law)-[:HAS_AMENDMENT]->(am:Amendment)
+                    OPTIONAL MATCH (a:Article)-[:AMENDED_BY]->(am)
+                    RETURN l.law_id AS law_id, l.title AS law_title,
+                           am, collect(DISTINCT a.article_number) AS affected_articles
+                    ORDER BY am.amendment_date
+                """)
+            out = []
+            for record in result:
+                row = dict(record["am"])
+                row["affected_articles"] = record["affected_articles"]
+                if not law_id:
+                    row["law_id"]    = record["law_id"]
+                    row["law_title"] = record["law_title"]
+                out.append(row)
+            return out
+ 
+    def query_article_history(self, law_id: str, article_number: str) -> List[Dict]:
+        with self.driver.session() as s:
+            result = s.run("""
+                MATCH (a:Article {law_id: $law_id, article_number: $article_number})
+                OPTIONAL MATCH (a)-[:AMENDED_BY]->(am:Amendment)
+                OPTIONAL MATCH (a_new:Article)-[:SUPERSEDES]->(a)
+                OPTIONAL MATCH (a)-[:SUPERSEDES]->(a_old:Article)
+                RETURN
+                    a.article_number                   AS article,
+                    a.version                          AS version,
+                    a.is_amended                       AS is_amended,
+                    a.is_addition                      AS is_addition,
+                    collect(DISTINCT {
+                        amendment_id: am.amendment_id,
+                        law_num:      am.amendment_law_number,
+                        date:         am.amendment_date,
+                        type:         am.amendment_type
+                    })                                 AS amendments,
+                    collect(DISTINCT a_new.article_id) AS superseded_by,
+                    collect(DISTINCT a_old.article_id) AS supersedes
+                ORDER BY a.version
+            """, law_id=law_id, article_number=article_number)
+            return [dict(r) for r in result]
 
 
 # =============================================================================
 # PIPELINE
 # =============================================================================
-
-def run_pipeline(
-    root_dir:          str,
-    neo4j_uri:         str,
-    neo4j_user:        str,
-    neo4j_password:    str,
-    folder_to_law_key: Optional[Dict[str, str]] = None,
-    drop_existing:     bool = True,
-) -> LegalKnowledgeGraph:
-    folder_to_law_key = folder_to_law_key or norm_regu.FOLDER_TO_LAW_KEY.value
-
-
-    graph = LegalKnowledgeGraph(neo4j_uri, neo4j_user, neo4j_password)
-    graph.setup_schema(drop_existing=drop_existing)
-
-    print("\nPHASE 1: EXTRACTION SUMMARY")
-    summaries = graph.ingest_dataset(root_dir, folder_to_law_key)
-    print(pd.DataFrame(summaries).to_string())
-
-    print("\nPHASE 2: IMPORTING LAWS")
-    for s in (s for s in summaries if not s.get("error")):
-        raw    = graph._read_law_folder(Path(root_dir) / s["folder"])
-        bundle = LawExtractor(s["law_key"], raw).extract()
-        graph.import_law(bundle)
-
-    print("\nPHASE 3: IMPORTING AMENDMENTS")
-    for law_id, amendments in graph.ingest_amendments(root_dir, folder_to_law_key).items():
-        graph.import_amendments(law_id, amendments)
-
-    graph.print_statistics()
-    return graph
-
-
+ 
 def build_knowledge_graph(
-    docs:           List[Document],
     neo4j_uri:      str,
     neo4j_user:     str,
     neo4j_password: str,
-    drop_existing:  bool = False,
+    drop_existing:  bool = True,
+    verbose:        bool = True,
 ) -> LegalKnowledgeGraph:
+    """
+    Full pipeline. Calls ``get_chunks()`` once internally.
+ 
+    Phase 0 — chunk all law files.
+    Phase 1 — extract structured data from article chunks.
+    Phase 2 — import laws + articles + NLP data into Neo4j.
+    Phase 3 — import amendments from amended_article chunks.
+    Phase 4 — import schedules/tables from table chunks.
+    """
+    # ── Phase 0 ───────────────────────────────────────────────────────────
+    print("\n" + "="*60 + "\nPHASE 0: CHUNKING\n" + "="*60)
+    chunks = get_chunks()
+    print(f"  Total chunks: {len(chunks):,}")
+    chunk_type_counts = {}
+    for c in chunks:
+        ct = c.metadata.get("chunk_type", "unknown")
+        chunk_type_counts[ct] = chunk_type_counts.get(ct, 0) + 1
+    for ct, count in sorted(chunk_type_counts.items()):
+        print(f"  {ct}: {count}")
+ 
+    # ── Phase 1 ───────────────────────────────────────────────────────────
+    print("\n" + "="*60 + "\nPHASE 1: EXTRACTION SUMMARY\n" + "="*60)
+    summaries  = ingest_dataset(chunks)
+    _LIST_KEYS = {"articles", "penalties", "definitions", "references",
+                  "topics", "schedules", "law_meta"}
+    df_rows = []
+    for s in summaries:
+        row = {k: v for k, v in s.items() if k not in _LIST_KEYS}
+        for k in ("articles", "penalties", "definitions", "references", "topics"):
+            row[k] = len(s.get(k) or [])
+        df_rows.append(row)
+    print(pd.DataFrame(df_rows).to_string())
+    successful = [s for s in summaries if not s.get("error")]
+    print(f"\n  ✓ {len(successful)}/{len(summaries)} laws extracted successfully")
+ 
+    # ── Phase 2 ───────────────────────────────────────────────────────────
+    print("\n" + "="*60 + "\nPHASE 2: IMPORTING LAWS\n" + "="*60)
     graph = LegalKnowledgeGraph(neo4j_uri, neo4j_user, neo4j_password)
     graph.setup_schema(drop_existing=drop_existing)
-    graph.build_from_documents(docs)
+    for summary in successful:
+        graph.import_law(summary, verbose=verbose)
+ 
+    # ── Phase 3 ───────────────────────────────────────────────────────────
+    print("\n" + "="*60 + "\nPHASE 3: IMPORTING AMENDMENTS\n" + "="*60)
+    amendments_by_law = ingest_amendments(chunks)
+    total_amendments = 0
+    for law_id, amendments in amendments_by_law.items():
+        if verbose:
+            print(f"\n  → {law_id}: {len(amendments)} amendment(s)")
+        for amendment in amendments:
+            try:
+                graph.import_amendment(law_id, amendment)
+                total_amendments += 1
+                if verbose:
+                    print(f"    ✓ law={amendment.amendment_law_number}/"
+                          f"{amendment.amendment_date[:4]} "
+                          f"| type={amendment.amendment_type} "
+                          f"| articles={amendment.amended_article_numbers}")
+            except Exception as e:
+                logger.error(f"    ✗ {amendment.amendment_id}: {e}")
+                if verbose:
+                    traceback.print_exc()
+    print(f"\n  ✓ Total amendments imported: {total_amendments}")
+ 
+    # ── Phase 4 ───────────────────────────────────────────────────────────
+    print("\n" + "="*60 + "\nPHASE 4: IMPORTING TABLES\n" + "="*60)
+    tables_by_law = ingest_tables(chunks)
+    total_tables  = 0
+    for law_id, table_list in tables_by_law.items():
+        if verbose:
+            print(f"\n  → {law_id}: {len(table_list)} table(s)")
+        for i, table in enumerate(table_list):
+            try:
+                graph.create_table_node(
+                    law_id       = law_id,
+                    table_number = table["table_number"],
+                    source_file  = table["source_file"],
+                    text         = table["text"],
+                    position     = i,
+                )
+                total_tables += 1
+                if verbose:
+                    print(f"    ✓ table {table['table_number']} "
+                        f"| {table['source_file']} "
+                        f"| {len(table['text'])} chars")
+            except Exception as e:
+                logger.error(f"    ✗ table {table['table_number']} (law={law_id}): {e}")
+                if verbose:
+                    traceback.print_exc()
+    print(f"\n  ✓ Tables imported: {total_tables}")
+ 
+    print("\n✅ BUILD COMPLETE")
     graph.print_statistics()
     return graph
 
 
 def run_KG():
-    run_pipeline(get_settings().DataPath, get_settings().NEO4J_URI, get_settings().NEO4J_USERNAME, get_settings().NEO4J_PASSWORD, drop_existing=True).close()
+    graph = build_knowledge_graph(
+        neo4j_uri      = get_settings().NEO4J_URI,
+        neo4j_user     = get_settings().NEO4J_USERNAME,
+        neo4j_password = get_settings().NEO4J_PASSWORD,
+        drop_existing  = True,
+        verbose        = True,
+    )
+    graph.close()
