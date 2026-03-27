@@ -31,6 +31,7 @@ class AgentState(BaseModel):
     filing_date:            Optional[datetime]  = None
     referral_date:          Optional[datetime]  = None   # تاريخ إحالة للمحاكمة
     prosecutor_name:        Optional[str]       = None
+    
 
     # ── الكيانات المستخلصة ───────────────────────────────────────────────────
     defendants:             List[Defendant]          = Field(default_factory=list)
