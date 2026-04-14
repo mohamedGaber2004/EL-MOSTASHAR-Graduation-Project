@@ -2,7 +2,6 @@ import logging , json
 from typing import  Dict , Any
 from datetime import datetime
 from src.Graph import AgentState
-from src.Vectorstore import LegalVectorStore
 from src.Graphstore import LegalKnowledgeGraph
 from src.Utils import (
     Defendant,
@@ -274,59 +273,6 @@ def _build_fallback_package(contexts: list[dict]) -> dict:
         "relevant_cassation_rulings": [],
         "_fallback": True,
     }
-
-
-
-
-
-def _read_file(file_path: str) -> tuple[str, str]:
-    """
-    يقرأ ملف .txt أو .pdf ويُعيد (النص الخام، نوع الملف).
-    لا OCR — فقط نصوص مباشرة.
-
-    Returns:
-        (raw_text, file_extension)
-
-    Raises:
-        ValueError: إذا كان الملف غير مدعوم أو غير موجود.
-    """
-    import os
-    from pathlib import Path
-
-    path = Path(file_path)
-
-    if not path.exists():
-        raise ValueError(f"الملف غير موجود: {file_path}")
-
-    ext = path.suffix.lower()
-
-    if ext == ".txt":
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read(), "txt"
-
-    elif ext == ".pdf":
-        try:
-            import pdfplumber
-            text_parts = []
-            with pdfplumber.open(path) as pdf:
-                for page_num, page in enumerate(pdf.pages, start=1):
-                    page_text = page.extract_text()
-                    if page_text and page_text.strip():
-                        text_parts.append(f"[صفحة {page_num}]\n{page_text}")
-            if not text_parts:
-                raise ValueError(f"الملف {file_path} لا يحتوي على نص قابل للاستخراج (مسح ضوئي غير مدعوم)")
-            return "\n\n".join(text_parts), "pdf"
-
-        except ImportError:
-            raise ImportError(
-                "مكتبة pdfplumber غير مثبتة. "
-                "ثبّتها بـ: pip install pdfplumber"
-            )
-
-    else:
-        raise ValueError(
-            f"نوع الملف غير مدعوم: {ext} — المدعوم فقط: .txt و .pdf"
-        )
 
 
 def _chunk_text(text: str, chunk_size: int = 3000, overlap: int = 200) -> list[str]:

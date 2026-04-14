@@ -1,1 +1,1 @@
-from .vector_store_builder import get_retriever , LegalVectorStore
+from .vector_store_builder import get_retriever

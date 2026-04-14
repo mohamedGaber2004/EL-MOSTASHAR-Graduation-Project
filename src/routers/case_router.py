@@ -2,22 +2,15 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
-from src.Graph import create_sample_case
+from src.Graph import run_case
 
 # Create router
 router = APIRouter(prefix="/cases", tags=["cases"])
 
 
-@router.post("/upload_case")
-async def create_case():
-    """
-    upload case to "Datasets/User_Cases"
-    """
-    pass
-
 
 @router.post("/invoke_case")
-async def create_case():
+async def invoke_case():
     """
     invoke case by case id.
     invoke graph that takes state : AgentState()
