@@ -90,7 +90,10 @@ def _retrieve_for_charge(
     # ── 1. FAISS: semantic search for relevant articles ───────────────────────
     statute_docs = []
     try:
-        statute_docs = lv.search_laws(
+        # استخدم دالة search من vector_store_builder بدلاً من method غير موجود
+        from src.Vectorstore.vector_store_builder import search
+        statute_docs = search(
+            vs         = lv,
             query      = query,
             k          = k_statutes,
             law_id     = _lawcode_to_law_id(charge),
@@ -98,6 +101,7 @@ def _retrieve_for_charge(
         logger.info("    📖 FAISS statutes: %d", len(statute_docs))
     except Exception as e:
         logger.warning("    ⚠️  FAISS statutes failed: %s", e)
+        statute_docs = []
 
     # ── 2. KG expansion: for each retrieved article, pull its full subgraph ───
     kg_context = {}
@@ -188,17 +192,16 @@ def _retrieve_for_charge(
             logger.warning("    ⚠️  KG expansion failed: %s", e)
 
     # ── 3. FAISS: cassation rulings + principles ──────────────────────────────
+    # Note: cassation search via separate na2d retriever would go here if available
     cassation_docs = []
     try:
-        cassation_docs = lv.search_na2d(
-            query          = query,
-            k              = k_cassation,
-            source         = "both",
-            crime_category = _map_incident_to_crime_category(charge),
-        )
-        logger.info("    ⚖️  Cassation: %d docs", len(cassation_docs))
+        # TODO: cuando Na2dRetriever esté disponible, descomentar:
+        # from src.Vectorstore.na2d_retriever import Na2dRetriever
+        # retriever = Na2dRetriever(...)
+        # cassation_docs = retriever.search(query, k=k_cassation, crime_category=...)
+        logger.info("    ⚖️  Cassation: retriever not yet configured (skipped)")
     except Exception as e:
-        logger.warning("    ⚠️  Cassation retrieval failed: %s", e)
+        logger.warning("    ⚠️  Cassation retrieval unavailable: %s", e)
 
     return {
         "charge_statute":   charge.statute,
@@ -363,7 +366,8 @@ def _merge_extracted(base: dict, new: dict) -> dict:
 def _parse_llm_json(raw: str) -> dict:
     """
     يستخرج JSON من استجابة الـ LLM بشكل آمن،
-    يتعامل مع markdown code blocks والمسافات الزائدة.
+    يتعامل مع markdown code blocks والمسافات الزائدة وأخطاء JSON البسيطة.
+    يحاول إصلاح JSON المعطوب بشكل أساسي.
     """
     import re
     text = raw.strip()
@@ -378,18 +382,101 @@ def _parse_llm_json(raw: str) -> dict:
     if brace_start > 0:
         text = text[brace_start:]
 
-    return json.loads(text)
+    # إذا كان هناك عدة JSON objects، خذ الأول فقط
+    try:
+        # محاولة التحليل الأساسي
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        # إذا فشل "Extra data"، حاول استخراج أول JSON object فقط
+        if "Extra data" in str(e):
+            logger.warning("⚠️ Multiple JSON objects detected, extracting first one")
+            # عد الأقواس لإيجاد نهاية أول JSON object
+            depth = 0
+            in_string = False
+            escape_next = False
+            for i, char in enumerate(text):
+                if escape_next:
+                    escape_next = False
+                    continue
+                if char == '\\':
+                    escape_next = True
+                    continue
+                if char == '"' and not escape_next:
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if char == '{':
+                    depth += 1
+                elif char == '}':
+                    depth -= 1
+                    if depth == 0:
+                        text = text[:i+1]
+                        break
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                pass
+        
+        # محاولة إصلاح بسيطة: إضافة علامات اقتباس مغلقة و أقواس مفقودة
+        logger.warning("⚠️ JSON parsing failed, attempting repair: %s", str(e))
+        
+        # حساب عدد { و } المتطابقة
+        open_braces = text.count("{") - text.count("}")
+        if open_braces > 0:
+            text = text + "}" * open_braces
+        
+        # حساب عدد [ و ] المتطابقة
+        open_brackets = text.count("[") - text.count("]")
+        if open_brackets > 0:
+            text = text + "]" * open_brackets
+        
+        # محاولة ثانية بعد الإصلاح
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            logger.error("❌ JSON repair failed, returning empty dict")
+            # إذا فشل كل شيء، أرجع قاموس فارغ بالهيكل الأساسي
+            return {
+                "case_meta": {}, "defendants": [], "charges": [], "incidents": [],
+                "evidences": [], "lab_reports": [], "witness_statements": [],
+                "confessions": [], "procedural_issues": [], "prior_judgments": [],
+                "defense_documents": [],
+            }
 
 
 def _apply_extracted_to_state(state: AgentState, extracted: dict, doc_id: str) -> dict:
     """
     يحوّل الـ dict المستخلص من الـ LLM إلى Pydantic objects ويدمجها في الـ state.
     يُعيد dict يُمرَّر لـ model_copy.
+    يتعامل مع تضاربات أسماء الحقول من LLM.
     """
+    def _normalize_fields(data: dict, model_cls) -> dict:
+        """يصحح أسماء الحقول الشائعة (مثل 'name' → 'witness_name')."""
+        # تحريطات مشهورة من الـ LLM
+        field_aliases = {
+            "name": {
+                "WitnessStatement": "witness_name",
+                "Defendant": "name",  # لا تغيير للمدعى عليهم
+            },
+        }
+        
+        norm = {k: v for k, v in data.items()}
+        model_name = model_cls.__name__
+        
+        for source_field, aliases in field_aliases.items():
+            if source_field in norm and source_field not in model_cls.model_fields:
+                target_field = aliases.get(model_name)
+                if target_field and target_field not in norm:
+                    norm[target_field] = norm.pop(source_field)
+        
+        return norm
+    
     def _safe_parse(model_cls, data: dict):
-        """يُنشئ Pydantic object بشكل آمن — يتجاهل الحقول غير المعروفة."""
+        """يُنشئ Pydantic object بشكل آمن، مع تصحيح أسماء الحقول."""
         try:
-            return model_cls.model_validate(data)
+            normalized = _normalize_fields(data, model_cls)
+            return model_cls.model_validate(normalized)
         except Exception as e:
             logger.warning("⚠️  Failed to parse %s from %s: %s", model_cls.__name__, doc_id, e)
             return None

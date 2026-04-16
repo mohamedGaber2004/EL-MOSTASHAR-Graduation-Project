@@ -11,7 +11,8 @@ class ReasoningModel :
         self.temprature = temprature
         self.re_llm = ChatGroq(
             model=self.model_name,
-            temperature=self.temprature
+            temperature=self.temprature,
+            max_tokens=2000
         )
 
     def get_re_llm(self):

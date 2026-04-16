@@ -11,7 +11,8 @@ class ArabicModel:
         self.temperature = temperature
         self.ar_llm = ChatGroq(
             model=self.model_name,
-            temperature=self.temperature
+            temperature=self.temperature,
+            max_tokens=2000
         )
 
     def get_ar_llm(self):

@@ -11,7 +11,8 @@ class AssistantModel :
         self.temprature = temprature
         self.as_llm = ChatGroq(
             model=self.model_name,
-            temperature=self.temprature
+            temperature=self.temprature,
+            max_tokens=2000
         )
 
     def get_as_llm(self):

@@ -40,6 +40,26 @@ def _extract_file(txt_doc_id: str, raw_text: str, all_extracted: dict, file_erro
             HumanMessage(content=prompt),
         ])
         result = _parse_llm_json(response.content)
+
+        # Ensure the LLM returned a dict we can merge.
+        if not isinstance(result, dict):
+            # If it's a string that can be parsed to JSON, try that
+            try:
+                if isinstance(result, str):
+                    import json as _json
+                    parsed = _json.loads(result)
+                    if isinstance(parsed, dict):
+                        result = parsed
+                    else:
+                        raise ValueError("parsed non-dict")
+                else:
+                    raise ValueError("non-dict result")
+            except Exception as e:
+                err = f"[{txt_doc_id}] LLM returned non-dict JSON — {e}"
+                logger.warning("  ⚠️  %s", err)
+                file_errors.append(err)
+                return
+
         all_extracted.update(_merge_extracted(all_extracted, result))
         processed_docs.append(txt_doc_id)
         logger.info("  ✅ Done: %s", txt_doc_id)
