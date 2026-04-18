@@ -1,8 +1,6 @@
-from .nodes import (
-data_ingestion_node,
-procedural_auditor_node,
-legal_researcher_node,
-evidence_analyst_node,
-defense_analyst_node,
-judge_node
-)
+from .data_ingestion_agent import DataIngestionAgent
+from .procedural_auditor_agent import ProceduralAuditorAgent
+from .legal_researcher_agent import LegalResearcherAgent
+from .evidence_analyst_agent import EvidenceAnalystAgent
+from .defense_analyst_agent import DefenseAnalystAgent
+from .judge_agent import JudgeAgent

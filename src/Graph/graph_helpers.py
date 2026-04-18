@@ -1,7 +1,7 @@
 import logging , json
 from typing import  Dict , Any
 from datetime import datetime
-from src.Graph import AgentState
+from src.Graph.state import AgentState
 from src.Graphstore import LegalKnowledgeGraph
 from src.Utils import (
     Defendant,
@@ -74,7 +74,7 @@ def _lawcode_to_law_id(charge: "Charge") -> str | None:
 def _retrieve_for_charge(
     charge:     "Charge",
     lv:         "LegalVectorStore",
-    kg:         "LegalKnowledgeGraph",
+    kg:         "LegalKnowledgeGraph | None",
     k_statutes: int = 6,
     k_cassation: int = 6,
 ) -> dict:
@@ -112,7 +112,7 @@ def _retrieve_for_charge(
     ]
     law_id = _lawcode_to_law_id(charge)
 
-    if article_numbers and law_id:
+    if kg and article_numbers and law_id:
         try:
             with kg.driver.session() as session:
 
@@ -385,7 +385,28 @@ def _parse_llm_json(raw: str) -> dict:
     # إذا كان هناك عدة JSON objects، خذ الأول فقط
     try:
         # محاولة التحليل الأساسي
-        return json.loads(text)
+        parsed = json.loads(text)
+        # Ensure we always return a dict structure the rest of the pipeline expects.
+        if isinstance(parsed, dict):
+            return parsed
+        # If LLM returned a JSON string (e.g. '"{...}"') or a list, try to recover
+        if isinstance(parsed, str):
+            try:
+                nested = json.loads(parsed)
+                if isinstance(nested, dict):
+                    return nested
+            except Exception:
+                logger.warning("⚠️ LLM returned JSON string, unable to recover to dict")
+        if isinstance(parsed, list):
+            logger.warning("⚠️ LLM returned JSON array; converting to dict wrapper")
+            return {"items": parsed}
+        logger.warning("⚠️ LLM returned non-dict JSON (%s); using empty template", type(parsed).__name__)
+        return {
+            "case_meta": {}, "defendants": [], "charges": [], "incidents": [],
+            "evidences": [], "lab_reports": [], "witness_statements": [],
+            "confessions": [], "procedural_issues": [], "prior_judgments": [],
+            "defense_documents": [],
+        }
     except json.JSONDecodeError as e:
         # إذا فشل "Extra data"، حاول استخراج أول JSON object فقط
         if "Extra data" in str(e):

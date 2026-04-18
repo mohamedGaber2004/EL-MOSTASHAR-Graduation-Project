@@ -62,3 +62,15 @@ class AgentState(BaseModel):
     source_documents:       List[str]            = Field(default_factory=list)  # قائمة الملفات المدخلة
     last_updated:           Optional[datetime]   = None
     extraction_notes:       Optional[str]        = None
+
+    def get(self, key, default=None):
+        """Dict-like `.get()` compatibility for notebooks and legacy code.
+
+        Returns the value for `key` from the model's dict representation,
+        or `default` if not present. This is a small convenience helper to
+        avoid AttributeError in places that treat AgentState like a dict.
+        """
+        try:
+            return self.model_dump().get(key, default)
+        except Exception:
+            return default

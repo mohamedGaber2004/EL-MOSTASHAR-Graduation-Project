@@ -90,21 +90,16 @@ def search_latest(vs: FAISS, query: str, k: int = 5, law_id: str = None) -> List
 
 
 # =============================================================================
-# RUN
+# Retriever helpers
 # =============================================================================
 
-law_chunks = get_chunks()
-na2d       = get_na2d_chunks()
-all_chunks = law_chunks + na2d["rulings"] + na2d["principles"]
-embeddings = HuggingFaceEmbeddings(model_name=get_settings().EMBEDDING_MODEL)
+def get_retriever(vs: FAISS, k: int = 5, law_id: str = None, chunk_type: str = None, doc_type: str = None):
+    """Return a retriever bound to the given FAISS vectorstore.
 
-vs = build_vector_store(all_chunks, embeddings)
-
-# =============================================================================
-# Retriever
-# =============================================================================
-
-def get_retriever(k: int = 5, law_id: str = None, chunk_type: str = None, doc_type: str = None):
+    NOTE: This function requires an explicit `vs` instance to avoid module-level
+    side-effects during import. Build or load the FAISS instance at application
+    runtime and pass it here.
+    """
     f = _build_filter(law_id=law_id, chunk_type=chunk_type, doc_type=doc_type)
     search_kwargs = {"k": k, **({"filter": f} if f else {})}
     return vs.as_retriever(search_kwargs=search_kwargs)

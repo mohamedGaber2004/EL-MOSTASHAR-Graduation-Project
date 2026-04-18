@@ -1,8 +1,7 @@
 from .state import AgentState
 from .graph_builder import ( 
-    legal_graph, 
-    graph_image, 
-    run_case, 
+    build_legal_graph,
+    run_case,
 )
 from .graph_helpers import (
     _build_charge_query,

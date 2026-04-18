@@ -156,12 +156,23 @@ class LegalKnowledgeGraph:
     """
  
     def __init__(self, uri: str, user: str, password: str):
-        self.driver = GraphDatabase.driver(uri, auth=(user, password))
+        self._uri = uri
+        self._user = user
+        self._password = password
+        self.driver = None
+
+    def connect(self):
+        """Establish the Neo4j driver connection. Call explicitly to verify connectivity."""
+        if self.driver is not None:
+            return
+        self.driver = GraphDatabase.driver(self._uri, auth=(self._user, self._password))
         self.driver.verify_connectivity()
         logger.info("✓ Neo4j connected")
  
     def close(self):
-        self.driver.close()
+        if self.driver is not None:
+            self.driver.close()
+            self.driver = None
  
     def _run(self, query: str, **params):
         with self.driver.session() as s:
@@ -487,6 +498,7 @@ def build_knowledge_graph(
     neo4j_uri:      str,
     neo4j_user:     str,
     neo4j_password: str,
+    chunks:         Optional[List[Document]] = None,
     drop_existing:  bool = True,
     verbose:        bool = True,
 ) -> LegalKnowledgeGraph:
@@ -500,9 +512,10 @@ def build_knowledge_graph(
     Phase 4 — import schedules/tables from table chunks.
     """
     # ── Phase 0 ───────────────────────────────────────────────────────────
-    print("\n" + "="*60 + "\nPHASE 0: CHUNKING\n" + "="*60)
-    chunks = get_chunks()
-    print(f"  Total chunks: {len(chunks):,}")
+    if chunks is None:
+        logger.info("PHASE 0: chunking — invoking get_chunks()")
+        chunks = get_chunks()
+        logger.info("Total chunks: %d", len(chunks))
     chunk_type_counts = {}
     for c in chunks:
         ct = c.metadata.get("chunk_type", "unknown")
@@ -511,8 +524,8 @@ def build_knowledge_graph(
         print(f"  {ct}: {count}")
  
     # ── Phase 1 ───────────────────────────────────────────────────────────
-    print("\n" + "="*60 + "\nPHASE 1: EXTRACTION SUMMARY\n" + "="*60)
-    summaries  = ingest_dataset(chunks)
+    logger.info("PHASE 1: extraction summary — ingesting dataset")
+    summaries = ingest_dataset(chunks)
     _LIST_KEYS = {"articles", "penalties", "definitions", "references",
                   "topics", "schedules", "law_meta"}
     df_rows = []
@@ -521,77 +534,83 @@ def build_knowledge_graph(
         for k in ("articles", "penalties", "definitions", "references", "topics"):
             row[k] = len(s.get(k) or [])
         df_rows.append(row)
-    print(pd.DataFrame(df_rows).to_string())
+    try:
+        logger.info("Extraction summary:\n%s", pd.DataFrame(df_rows).to_string())
+    except Exception:
+        logger.info("Extraction summary: %d laws processed", len(df_rows))
     successful = [s for s in summaries if not s.get("error")]
-    print(f"\n  ✓ {len(successful)}/{len(summaries)} laws extracted successfully")
+    logger.info("%d/%d laws extracted successfully", len(successful), len(summaries))
  
     # ── Phase 2 ───────────────────────────────────────────────────────────
-    print("\n" + "="*60 + "\nPHASE 2: IMPORTING LAWS\n" + "="*60)
+    logger.info("PHASE 2: importing laws — initializing Knowledge Graph")
     graph = LegalKnowledgeGraph(neo4j_uri, neo4j_user, neo4j_password)
+    # connect explicitly to allow callers to control when network IO happens
+    graph.connect()
     graph.setup_schema(drop_existing=drop_existing)
     for summary in successful:
         graph.import_law(summary, verbose=verbose)
  
     # ── Phase 3 ───────────────────────────────────────────────────────────
-    print("\n" + "="*60 + "\nPHASE 3: IMPORTING AMENDMENTS\n" + "="*60)
+    logger.info("PHASE 3: importing amendments")
     amendments_by_law = ingest_amendments(chunks)
     total_amendments = 0
     for law_id, amendments in amendments_by_law.items():
-        if verbose:
-            print(f"\n  → {law_id}: {len(amendments)} amendment(s)")
+        logger.info("Processing amendments for %s: %d", law_id, len(amendments))
         for amendment in amendments:
             try:
                 graph.import_amendment(law_id, amendment)
                 total_amendments += 1
-                if verbose:
-                    print(f"    ✓ law={amendment.amendment_law_number}/"
-                          f"{amendment.amendment_date[:4]} "
-                          f"| type={amendment.amendment_type} "
-                          f"| articles={amendment.amended_article_numbers}")
+                logger.debug("Imported amendment %s for law %s", amendment.amendment_id, law_id)
             except Exception as e:
-                logger.error(f"    ✗ {amendment.amendment_id}: {e}")
+                logger.error("Failed to import amendment %s: %s", getattr(amendment, 'amendment_id', '<unknown>'), e)
                 if verbose:
                     traceback.print_exc()
-    print(f"\n  ✓ Total amendments imported: {total_amendments}")
+    logger.info("Total amendments imported: %d", total_amendments)
  
     # ── Phase 4 ───────────────────────────────────────────────────────────
-    print("\n" + "="*60 + "\nPHASE 4: IMPORTING TABLES\n" + "="*60)
+    logger.info("PHASE 4: importing tables")
     tables_by_law = ingest_tables(chunks)
-    total_tables  = 0
+    total_tables = 0
     for law_id, table_list in tables_by_law.items():
-        if verbose:
-            print(f"\n  → {law_id}: {len(table_list)} table(s)")
+        logger.info("Processing %d table(s) for %s", len(table_list), law_id)
         for i, table in enumerate(table_list):
             try:
                 graph.create_table_node(
-                    law_id       = law_id,
-                    table_number = table["table_number"],
-                    source_file  = table["source_file"],
-                    text         = table["text"],
-                    position     = i,
+                    law_id=law_id,
+                    table_number=table["table_number"],
+                    source_file=table["source_file"],
+                    text=table["text"],
+                    position=i,
                 )
                 total_tables += 1
-                if verbose:
-                    print(f"    ✓ table {table['table_number']} "
-                        f"| {table['source_file']} "
-                        f"| {len(table['text'])} chars")
+                logger.debug("Imported table %s for law %s", table.get('table_number'), law_id)
             except Exception as e:
-                logger.error(f"    ✗ table {table['table_number']} (law={law_id}): {e}")
+                logger.error("Failed to import table %s for law %s: %s", table.get('table_number'), law_id, e)
                 if verbose:
                     traceback.print_exc()
-    print(f"\n  ✓ Tables imported: {total_tables}")
+    logger.info("Tables imported: %d", total_tables)
  
-    print("\n✅ BUILD COMPLETE")
-    graph.print_statistics()
+    logger.info("BUILD COMPLETE")
+    try:
+        stats = graph.get_statistics()
+        logger.info("KG statistics: %s", stats)
+    except Exception:
+        logger.exception("Failed to fetch KG statistics")
     return graph
 
 
 def run_KG():
-    graph = build_knowledge_graph(
-        neo4j_uri      = get_settings().NEO4J_URI,
-        neo4j_user     = get_settings().NEO4J_USERNAME,
-        neo4j_password = get_settings().NEO4J_PASSWORD,
-        drop_existing  = True,
-        verbose        = True,
-    )
-    graph.close()
+    graph = None
+    try:
+        graph = build_knowledge_graph(
+            neo4j_uri=get_settings().NEO4J_URI,
+            neo4j_user=get_settings().NEO4J_USERNAME,
+            neo4j_password=get_settings().NEO4J_PASSWORD,
+            drop_existing=True,
+            verbose=True,
+        )
+    except Exception:
+        logger.exception("Failed to build knowledge graph")
+    finally:
+        if graph is not None:
+            graph.close()

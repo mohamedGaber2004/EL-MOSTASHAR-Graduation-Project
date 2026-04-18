@@ -47,7 +47,7 @@ class Defendant(BaseModel):
     mental_report_id:   Optional[str]       = None          # مرجع تقرير الطب الشرعي النفسي
 
     # ── سوابق ──────────────────────────────────────────────────────────────────
-    prior_record:       bool                = False
+    prior_record:       Optional[bool]      = False
     prior_crimes:       List[str]           = Field(default_factory=list)  # ← نوع السوابق
     prior_sentences:    List[str]           = Field(default_factory=list)  # ← الأحكام السابقة
 
@@ -77,7 +77,7 @@ class Charge(BaseModel):
 
     # ── تعريف التهمة ──────────────────────────────────────────────────────────
     charge_id:              Optional[str]       = None      # معرف داخلي
-    statute:                str                             # نص المادة
+    statute:                Optional[str]       = None      # نص المادة
     law_code:               Optional[LawCode]   = None      # القانون المنطبق
     article_number:         Optional[str]       = None      # رقم المادة
     article_paragraph:      Optional[str]       = None      # فقرة المادة إن وجدت
@@ -209,7 +209,7 @@ class WitnessStatement(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     # ── هوية الشاهد ───────────────────────────────────────────────────────────
-    witness_name:               str
+    witness_name:               Optional[str]           = None
     witness_national_id:        Optional[str]           = None
     witness_type:               Optional[WitnessType]   = None
     witness_occupation:         Optional[str]           = None
