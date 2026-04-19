@@ -1,0 +1,1 @@
+from .KG_builder import run_KG , LegalKnowledgeGraph
