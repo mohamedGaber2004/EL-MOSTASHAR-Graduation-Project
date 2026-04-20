@@ -12,16 +12,14 @@ import pandas as pd
 from langchain_core.documents import Document
 from neo4j import GraphDatabase
  
-from src.Chunking import get_chunks
-from src.Config import get_settings
-from src.Utils import (
+from ingestion_service.app.Chunking import get_chunks
+from kg_service.app.config import get_settings
+from Utils import (
     _stable_id,
-    _to_western_digits,
     Amendment,
     norm_regu,
     LawExtractor,
-    AmendmentExtractor,
-    reg,
+    AmendmentExtractor
 )
  
 logging.basicConfig(
@@ -147,6 +145,18 @@ def ingest_tables(chunks: List[Document]) -> Dict[str, List[Dict]]:
 # =============================================================================
  
 class LegalKnowledgeGraph:
+        def run_cypher_query(self, cq: str, **params) -> list:
+            """
+            Execute a Cypher query and return the results as a list of dictionaries.
+            Args:
+                cq (str): The Cypher query string.
+                **params: Parameters for the Cypher query.
+            Returns:
+                list: List of result records as dictionaries.
+            """
+            with self.driver.session() as session:
+                result = session.run(cq, **params)
+                return [dict(record) for record in result]
     """
     Neo4j knowledge graph for Egyptian criminal law.
  

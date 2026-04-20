@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter,CharacterTextSplitter
 
-from config import get_settings
+from ingestion_service.app.config import get_settings
 from shared.Utils import (
     MultiEncodingTextLoader,
     _read_file,
