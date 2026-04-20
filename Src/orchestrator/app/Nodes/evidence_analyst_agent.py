@@ -1,8 +1,8 @@
 from .agent_base import AgentBase
-from src.LLMs import get_llm_oss
+from app.llms import get_llm_oss
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.Prompts.evidence_analyst_agent import EVIDENCE_ANALYST_AGENT_PROMPT
-from src.Graph.graph_helpers import _parse_llm_json, _now, _agent_context
+from app.Prompts.evidence_analyst_agent import EVIDENCE_ANALYST_AGENT_PROMPT
+from app.Graph.graph_helpers import _parse_llm_json, _now, _agent_context
 
 class EvidenceAnalystAgent(AgentBase):
     def __init__(self):

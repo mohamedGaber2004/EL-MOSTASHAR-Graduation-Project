@@ -1,9 +1,9 @@
 from .agent_base import AgentBase
-from src.LLMs import get_llm_llama
+from app.llms import get_llm_llama
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.Prompts.judge_agent import JUDGE_AGENT_PROMPT
-from src.Graph.graph_helpers import _parse_llm_json, _now, _agent_context
-from src.Utils import VerdictType
+from app.Prompts.judge_agent import JUDGE_AGENT_PROMPT
+from app.Graph.graph_helpers import _parse_llm_json, _now, _agent_context
+from app.Utils import VerdictType
 
 class JudgeAgent(AgentBase):
     def __init__(self):

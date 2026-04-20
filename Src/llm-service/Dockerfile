@@ -9,7 +9,7 @@ WORKDIR /app
 
 # Install dependencies first (better Docker caching)
 COPY requirements.txt .
-RUN uv add --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy app code
 COPY . .

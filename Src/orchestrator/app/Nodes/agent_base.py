@@ -1,5 +1,5 @@
 import logging
-from src.Config import get_settings
+from app.config import get_settings
 import time, random
 
 class AgentBase:

@@ -10,6 +10,7 @@ class OrchestratorSettings(BaseSettings):
     RETRIEVAL_SERVICE_URL: str
     KG_SERVICE_URL: str
     INGESTION_SERVICE_URL: str
+    CASES_DIR: str = "../../Datasets/User_Cases"  # path to user case files, relative to CWD
 
     # Agent node models
     DATA_INGESTION_MODEL: str

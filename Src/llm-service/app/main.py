@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from llms import get_llm_oss , get_llm_qwn , get_llm_llama
+from app.llms import get_llm_oss , get_llm_qwn , get_llm_llama
 
 load_dotenv()
 

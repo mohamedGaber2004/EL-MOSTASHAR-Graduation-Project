@@ -8,4 +8,4 @@ langchain-experimental==0.4.1
 langchain-huggingface==1.2.0
 sentence-transformers==5.2.3
 pydantic-settings>=2.0.0
-pytest
+pytesttenacity>=8.0.0

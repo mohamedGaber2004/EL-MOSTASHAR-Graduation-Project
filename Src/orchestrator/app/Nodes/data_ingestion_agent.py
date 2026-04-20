@@ -1,9 +1,9 @@
 from .agent_base import AgentBase
-from src.LLMs import get_llm_qwn
+from app.llms import get_llm_qwn
 import json
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.Prompts.data_ingestion_agent import DATA_INGESTION_AGENT_PROMPT
-from src.Graph.graph_helpers import (
+from app.Prompts.data_ingestion_agent import DATA_INGESTION_AGENT_PROMPT
+from app.Graph.graph_helpers import (
     _merge_extracted, _parse_llm_json, _apply_extracted_to_state, _now
 )
 from pathlib import Path

@@ -7,8 +7,6 @@ from .graph_helpers import (
     _build_charge_query,
     _docs_to_text_list,
     _lawcode_to_law_id,
-    _retrieve_for_charge,
-    _map_incident_to_crime_category,
     _build_fallback_package,
     _chunk_text,
     _merge_extracted,

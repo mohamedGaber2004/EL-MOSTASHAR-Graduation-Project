@@ -12,9 +12,8 @@ import pandas as pd
 from langchain_core.documents import Document
 from neo4j import GraphDatabase
  
-from ingestion_service.app.Chunking import get_chunks
-from kg_service.app.config import get_settings
-from Utils import (
+from app.config import get_settings
+from app.Utils import (
     _stable_id,
     Amendment,
     norm_regu,
@@ -145,18 +144,6 @@ def ingest_tables(chunks: List[Document]) -> Dict[str, List[Dict]]:
 # =============================================================================
  
 class LegalKnowledgeGraph:
-        def run_cypher_query(self, cq: str, **params) -> list:
-            """
-            Execute a Cypher query and return the results as a list of dictionaries.
-            Args:
-                cq (str): The Cypher query string.
-                **params: Parameters for the Cypher query.
-            Returns:
-                list: List of result records as dictionaries.
-            """
-            with self.driver.session() as session:
-                result = session.run(cq, **params)
-                return [dict(record) for record in result]
     """
     Neo4j knowledge graph for Egyptian criminal law.
  
@@ -164,6 +151,19 @@ class LegalKnowledgeGraph:
     Schema and statistics lists are read from ``norm_regu`` — single source
     of truth, no duplication.
     """
+
+    def run_cypher_query(self, cq: str, **params) -> list:
+        """
+        Execute a Cypher query and return the results as a list of dictionaries.
+        Args:
+            cq (str): The Cypher query string.
+            **params: Parameters for the Cypher query.
+        Returns:
+            list: List of result records as dictionaries.
+        """
+        with self.driver.session() as session:
+            result = session.run(cq, **params)
+            return [dict(record) for record in result]
  
     def __init__(self, uri: str, user: str, password: str):
         self._uri = uri
@@ -436,7 +436,89 @@ class LegalKnowledgeGraph:
                 stats["relationships"][rel] = s.run(
                     f"MATCH ()-[r:{rel}]->() RETURN count(r) AS c").single()["c"]
         return stats
- 
+
+    def query_charge_context(self, law_id: Optional[str], article_numbers: List[str], keywords: List[str]) -> Dict[str, Any]:
+        """
+        Query the KG for a specific charge's context strictly via Cypher.
+        If article_numbers are provided, it fetches exact matches.
+        Otherwise, it does a fallback sub-string match using keywords.
+        """
+        kg_context = {
+            "articles": [],
+            "penalties": [],
+            "definitions": [],
+            "references": [],
+            "amendments": [],
+            "latest_versions": [],
+            "topics": []
+        }
+        
+        with self.driver.session() as session:
+            # 1. Base Article Match
+            if article_numbers:
+                match_clause = "MATCH (a:Article) WHERE a.article_number IN $article_numbers"
+                if law_id:
+                    match_clause = "MATCH (a:Article {law_id: $law_id}) WHERE a.article_number IN $article_numbers"
+            elif keywords:
+                # Basic wildcard match on the first substantial keyword as fallback
+                kw = keywords[0] if keywords else ""
+                match_clause = f"MATCH (a:Article) WHERE a.text CONTAINS $kw"
+                if law_id:
+                    match_clause = f"MATCH (a:Article {{law_id: $law_id}}) WHERE a.text CONTAINS $kw"
+            else:
+                return kg_context
+
+            # Fetch the articles themselves
+            query_articles = f"{match_clause} RETURN a.article_number AS target_article, a.text AS text LIMIT 5"
+            found_articles = session.run(query_articles, law_id=law_id, article_numbers=article_numbers, kw=keywords[0] if keywords else "").data()
+            if not found_articles:
+                return kg_context
+                
+            kg_context["articles"] = found_articles
+            
+            # The matched articles become our focused context targets
+            focused_articles = [a["target_article"] for a in found_articles if a["target_article"]]
+            if not focused_articles:
+                return kg_context
+
+            # 2. Fetch Penalties
+            kg_context["penalties"] = session.run("""
+                MATCH (a:Article)-[:HAS_PENALTY]->(p:Penalty)
+                WHERE a.article_number IN $focused
+                RETURN a.article_number AS target_article, p.penalty_type AS type, p.min_value AS min, p.max_value AS max, p.unit AS unit
+            """, focused=focused_articles).data()
+
+            # 3. Fetch Definitions
+            kg_context["definitions"] = session.run("""
+                MATCH (a:Article)-[:DEFINES]->(d:Definition)
+                WHERE a.article_number IN $focused
+                RETURN a.article_number AS target_article, d.term AS term, d.definition_text AS text
+            """, focused=focused_articles).data()
+
+            # 4. Fetch References
+            kg_context["references"] = session.run("""
+                MATCH (a:Article)-[:REFERENCES]->(ref:Article)
+                WHERE a.article_number IN $focused
+                RETURN a.article_number AS target_article, ref.article_number AS to_article, ref.text AS ref_text
+            """, focused=focused_articles).data()
+
+            # 5. Fetch Amendments
+            kg_context["amendments"] = session.run("""
+                MATCH (a:Article)-[:AMENDED_BY]->(am:Amendment)
+                WHERE a.article_number IN $focused
+                RETURN a.article_number AS target_article, am.amendment_date AS date, am.amendment_type AS type, am.description AS description
+                ORDER BY am.amendment_date DESC LIMIT 5
+            """, focused=focused_articles).data()
+
+            # 6. Fetch Topics
+            kg_context["topics"] = session.run("""
+                MATCH (a:Article)-[:TAGGED_WITH]->(t:Topic)
+                WHERE a.article_number IN $focused
+                RETURN a.article_number AS target_article, t.name AS topic
+            """, focused=focused_articles).data()
+
+        return kg_context
+
     def print_statistics(self):
         stats = self.get_statistics()
         print("\n" + "="*60 + "\nKNOWLEDGE GRAPH STATISTICS\n" + "="*60)
@@ -523,9 +605,18 @@ def build_knowledge_graph(
     """
     # ── Phase 0 ───────────────────────────────────────────────────────────
     if chunks is None:
-        logger.info("PHASE 0: chunking — invoking get_chunks()")
-        chunks = get_chunks()
-        logger.info("Total chunks: %d", len(chunks))
+        logger.info("PHASE 0: fetching chunks from ingestion-service")
+        from app.Utils import ServiceCommunicator
+        from langchain_core.documents import Document as _Doc
+        ingestion_url = get_settings().INGESTION_SERVICE_URL if getattr(get_settings(), 'INGESTION_SERVICE_URL', None) else "http://127.0.0.1:8004"
+        try:
+            client = ServiceCommunicator("KG->Ingestion", base_url=ingestion_url, timeout=300.0)
+            data = client.post("/ingest/laws", json_payload={})
+            chunks = [_Doc(page_content=c["content"], metadata=c["metadata"]) for c in data.get("chunks", [])]
+            logger.info("Total chunks received: %d", len(chunks))
+        except Exception as e:
+            logger.error("Failed to fetch chunks from ingestion-service: %s", e)
+            chunks = []
     chunk_type_counts = {}
     for c in chunks:
         ct = c.metadata.get("chunk_type", "unknown")

@@ -9,8 +9,8 @@ from typing import Any, Dict, List, Optional
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter,CharacterTextSplitter
 
-from ingestion_service.app.config import get_settings
-from shared.Utils import (
+from app.config import get_settings
+from app.Utils import (
     MultiEncodingTextLoader,
     _read_file,
     _to_western_digits,

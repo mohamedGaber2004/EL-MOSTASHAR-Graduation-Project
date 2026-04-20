@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import os
@@ -8,7 +8,9 @@ import os
 load_dotenv()
 
 # Your actual vectorstore logic (moved from src/Vectorstore)
-from app.vectorstore import load_vectorstore, search
+from app.Vectorstore.vector_store_builder import load_vector_store, search, search_with_scores
+from app.config import get_settings
+from langchain_huggingface import HuggingFaceEmbeddings
 
 vectorstore = None
 
@@ -17,9 +19,10 @@ async def lifespan(app: FastAPI):
     global vectorstore
     # Warm up FAISS index on startup
     try:
-        vectorstore = load_vectorstore(
-            os.getenv("FAISS_INDEX_PATH", "app/faiss_index")
-        )
+        cfg = get_settings()
+        embeddings = HuggingFaceEmbeddings(model_name=cfg.EMBEDDING_MODEL)
+        index_path = os.getenv("FAISS_INDEX_PATH", "app/faiss_index")
+        vectorstore = load_vector_store(index_path, embeddings)
     except Exception as e:
         print(f"[WARNING] Could not load vectorstore on startup: {e}")
     yield
@@ -35,6 +38,7 @@ app = FastAPI(
 class RetrieveRequest(BaseModel):
     query: str
     top_k: int = 5
+    doc_type: Optional[str] = None
 
 
 class RetrieveResponse(BaseModel):
@@ -56,10 +60,10 @@ async def retrieve(req: RetrieveRequest) -> RetrieveResponse:
         raise HTTPException(status_code=503, detail="Vectorstore not loaded yet")
 
     try:
-        results = search(vectorstore, req.query, req.top_k)
+        results = search_with_scores(vectorstore, req.query, req.top_k, doc_type=req.doc_type)
         return RetrieveResponse(
-            chunks=[r["text"] for r in results],
-            scores=[r["score"] for r in results]
+            chunks=[doc.page_content for doc, _score in results],
+            scores=[float(_score) for _doc, _score in results]
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

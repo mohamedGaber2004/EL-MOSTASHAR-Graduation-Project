@@ -4,10 +4,12 @@ from typing import List, Optional, Any
 from threading import Lock
 import httpx
 import os
+from app.Utils import ServiceCommunicator
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 
-ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://orchestrator:8000")
+ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://127.0.0.1:8000")
+orchestrator_client = ServiceCommunicator("Gateway->Orchestrator", base_url=ORCHESTRATOR_URL, timeout=120.0)
 
 # In-memory cache (same as before)
 _CASE_CACHE: dict = {}
@@ -30,16 +32,13 @@ async def invoke_case(payload: InvokeCaseRequest) -> Any:
     Forward the case to the orchestrator service which runs the LangGraph pipeline.
     """
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                f"{ORCHESTRATOR_URL}/pipeline/run",
-                json={
-                    "case_id": payload.case_id,
-                    "source_documents": payload.source_documents or []
-                }
-            )
-            response.raise_for_status()
-            out = response.json()
+        out = await orchestrator_client.async_post(
+            "/pipeline/run",
+            json_payload={
+                "case_id": payload.case_id,
+                "source_documents": payload.source_documents or []
+            }
+        )
 
         # Store in cache (thread-safe)
         with _CACHE_LOCK:

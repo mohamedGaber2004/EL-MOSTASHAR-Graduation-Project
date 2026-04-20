@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
-from src.Utils import (
+from app.Utils import (
     Defendant,
     Charge,
     CaseIncident,

@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import List, Dict
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from Chunking import get_chunks, get_na2d_chunks
+from app.Chunking import get_chunks, get_na2d_chunks
 
 load_dotenv()
 
@@ -19,8 +19,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+class ChunkData(BaseModel):
+    content: str
+    metadata: dict
+
 class IngestResponse(BaseModel):
-    chunks: List[str]
+    chunks: List[ChunkData]
     total_chunks: int
 
 class Na2dResponse(BaseModel):
@@ -37,7 +41,7 @@ async def health():
 async def ingest_laws() -> IngestResponse:
     try:
         docs = get_chunks()
-        chunks = [doc.page_content for doc in docs]
+        chunks = [ChunkData(content=doc.page_content, metadata=doc.metadata) for doc in docs]
         return IngestResponse(chunks=chunks, total_chunks=len(chunks))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

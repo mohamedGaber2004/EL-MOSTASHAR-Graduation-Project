@@ -7,8 +7,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Your actual LangGraph imports (moved from src/Graph)
-from app.graph import run_case
-from app.graph.state import AgentState
+from app.Graph import run_case
+from app.Graph.state import AgentState
+from app.config import get_settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -40,9 +41,27 @@ async def run_pipeline(payload: RunPipelineRequest) -> Any:
     Receives a case, runs the full graph, returns the final state.
     """
     try:
+        from pathlib import Path
+        cfg = get_settings()
+        docs = payload.source_documents or []
+
+        # Auto-resolve: if no documents given, look in CASES_DIR/<case_id>
+        if not docs:
+            cases_dir = Path(getattr(cfg, "CASES_DIR", "Datasets/User_Cases"))
+            case_path = cases_dir / payload.case_id
+            if case_path.is_dir():
+                # Include all .txt and .pdf files in that folder
+                docs = [str(f) for f in sorted(case_path.iterdir())
+                        if f.suffix.lower() in (".txt", ".pdf")]
+            elif case_path.with_suffix(".txt").exists():
+                docs = [str(case_path.with_suffix(".txt"))]
+            # If still empty, pass the path itself so the agent reports a clear error
+            if not docs:
+                docs = [str(case_path)]
+
         state = AgentState(
             case_id=payload.case_id,
-            source_documents=payload.source_documents or []
+            source_documents=docs
         )
         final = run_case(state)
 

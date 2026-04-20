@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from kg_service.app.Graphstore.KG_builder import LegalKnowledgeGraph, build_knowledge_graph
-from kg_service.app.config import get_settings
+from app.Graphstore.KG_builder import LegalKnowledgeGraph, build_knowledge_graph
+from app.config import get_settings
 
 kg: Optional[LegalKnowledgeGraph] = None
 
@@ -42,6 +42,12 @@ app = FastAPI(
 
 class AmendmentsQueryRequest(BaseModel):
     law_id: Optional[str] = None  # if omitted, returns amendments for all laws
+
+
+class ChargeContextRequest(BaseModel):
+    law_id: Optional[str] = None
+    article_numbers: List[str] = []
+    keywords: List[str] = []
 
 
 class ArticleHistoryRequest(BaseModel):
@@ -85,6 +91,22 @@ async def query_amendments(req: AmendmentsQueryRequest) -> List[Dict[str, Any]]:
     graph = _require_kg()
     try:
         return graph.query_amendments(law_id=req.law_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/query/charge-context")
+async def query_charge_context_endpoint(req: ChargeContextRequest) -> Dict[str, Any]:
+    """
+    Fetch comprehensive neo4j context for a charge.
+    Matches primarily by article_numbers and law_id, falling back to keywords.
+    """
+    graph = _require_kg()
+    try:
+        return graph.query_charge_context(
+            law_id=req.law_id,
+            article_numbers=req.article_numbers,
+            keywords=req.keywords
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
