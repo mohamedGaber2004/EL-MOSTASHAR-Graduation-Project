@@ -1,31 +1,24 @@
-DATA_INGESTION_AGENT_PROMPT = """
-You are data extraction expert from Egyptian legal documents. Extract info as is — no inference.
-
-Return VALID JSON ONLY:
+DATA_INGESTION_AGENT_PROMPT = """استخرج من النص القانوني التالي المعلومات كما هي فقط — بدون استنتاج.
+أجب بـ JSON فقط، لا تضف أي نص خارجه.
 
 {
-  "case_meta": {"case_number": null, "court": null, "court_level": null, "prosecutor_name": null},
-  "defendants": [],
-  "charges": [],
+  "case_meta": {"case_number":null,"court":null,"court_level":null,"jurisdiction":null,"filing_date":null,"referral_date":null,"prosecutor_name":null},
+  "defendants": [{"name":null,"age":null,"prior_record":null,"in_custody":null}],
+  "charges": [{"statute":null,"article_number":null,"description":null}],
   "incidents": [],
-  "evidences": [],
+  "evidences": [{"type":null,"description":null,"validity_status":null}],
   "lab_reports": [],
   "witness_statements": [],
-  "confessions": [],
+  "confessions": [{"defendant_name":null,"stage":null,"voluntary":null,"key_admissions":[]}],
   "procedural_issues": [],
   "prior_judgments": [],
   "defense_documents": []
 }
 
-Examples: defendant: {"name": "Ahmed", "age": 35, "prior_record": false}; charge: {"statute": "Art 274 Penal", "description": "Theft"}.
+إذا لم توجد معلومة → null أو []"""
 
-If no info, use null or []. JSON only. No nulls in output.
-"""
 
-case_clssifier_prompt = """
-Classify this legal document into one type: amr_ihalah | mahdar_dabt | taqrir_tibbi | aqwal_shuhud | mozakart_difa | hukm_sabiq | taqrir_lab | other
+CASE_CLASSIFIER_PROMPT = """صنّف المستند إلى نوع واحد فقط:
+amr_ihalah | mahdar_dabt | taqrir_tibbi | aqwal_shuhud | mozakart_difa | hukm_sabiq | taqrir_lab | other
 
-Answer with one word only.
-
-Text: {text}
-"""
+أجب بكلمة واحدة فقط."""

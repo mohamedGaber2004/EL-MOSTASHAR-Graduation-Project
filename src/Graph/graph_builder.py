@@ -4,7 +4,7 @@ from typing import Optional
 from langgraph.graph import END, START, StateGraph
 from src.Graph.state import AgentState
 
-from src.Nodes import (
+from src.agents import (
     DataIngestionAgent,
     ProceduralAuditorAgent,
     LegalResearcherAgent,
