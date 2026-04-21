@@ -12,7 +12,6 @@ import pandas as pd
 from langchain_core.documents import Document
 from neo4j import GraphDatabase
  
-from src.Chunking import get_chunks
 from src.Config import get_settings
 from src.Utils import (
     _stable_id,
@@ -514,7 +513,7 @@ def build_knowledge_graph(
     # ── Phase 0 ───────────────────────────────────────────────────────────
     if chunks is None:
         logger.info("PHASE 0: chunking — invoking get_chunks()")
-        chunks = get_chunks()
+        chunks = chunks
         logger.info("Total chunks: %d", len(chunks))
     chunk_type_counts = {}
     for c in chunks:
