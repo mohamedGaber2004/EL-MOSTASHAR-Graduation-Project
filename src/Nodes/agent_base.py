@@ -1,4 +1,5 @@
 import logging
+from typing import Any, Callable, List
 from src.Config import get_settings
 import time, random
 
@@ -6,14 +7,14 @@ class AgentBase:
     """
     Base class for all agent nodes. Handles LLM invocation, retry/backoff, config, and logging.
     """
-    def __init__(self, model_config_key, temp_config_key, prompt):
+    def __init__(self, model_config_key: str, temp_config_key: str, prompt: str) -> None:
         self.cfg = get_settings()
-        self.model_name = getattr(self.cfg, model_config_key)
-        self.temperature = getattr(self.cfg, temp_config_key)
-        self.prompt = prompt
+        self.model_name: str = getattr(self.cfg, model_config_key)
+        self.temperature: float = getattr(self.cfg, temp_config_key)
+        self.prompt: str = prompt
         self.logger = logging.getLogger(self.__class__.__name__)
 
-    def _llm_invoke_with_retries(self, llm_callable, messages, max_retries=5, backoff_base=2.0):
+    def _llm_invoke_with_retries(self, llm_callable: Callable, messages: List[Any], max_retries: int = 5, backoff_base: float = 2.0) -> Any:
         for attempt in range(1, max_retries + 1):
             try:
                 return llm_callable.invoke(messages)
@@ -32,5 +33,5 @@ class AgentBase:
                     continue
                 raise
 
-    def log(self, msg, level="info"):
+    def log(self, msg: str, level: str = "info") -> None:
         getattr(self.logger, level)(msg)

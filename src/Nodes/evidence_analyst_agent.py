@@ -3,6 +3,7 @@ from src.LLMs import get_llm_oss
 from langchain_core.messages import HumanMessage, SystemMessage
 from src.Prompts.evidence_analyst_agent import EVIDENCE_ANALYST_AGENT_PROMPT
 from src.Graph.graph_helpers import _parse_llm_json, _now, _agent_context
+from src.Utils.agent_output_utils import clean_agent_output
 
 class EvidenceAnalystAgent(AgentBase):
     def __init__(self):
@@ -35,8 +36,9 @@ class EvidenceAnalystAgent(AgentBase):
             [SystemMessage(content=self.prompt), HumanMessage(content=prompt)]
         )
         evidence_matrix = _parse_llm_json(response.content)
+        cleaned_matrix = clean_agent_output(evidence_matrix)
         return state.model_copy(update={
-            "agent_outputs": {**state.agent_outputs, "evidence_analyst": evidence_matrix},
+            "agent_outputs": {**state.agent_outputs, "evidence_analyst": cleaned_matrix},
             "completed_agents": state.completed_agents + ["evidence_analyst"],
             "current_agent": "evidence_analyst",
             "last_updated": _now(),

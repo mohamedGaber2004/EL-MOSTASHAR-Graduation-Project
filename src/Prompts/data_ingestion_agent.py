@@ -1,8 +1,7 @@
 DATA_INGESTION_AGENT_PROMPT = """
-أنت خبير استخلاص البيانات من الوثائق القانونية المصرية.
-استخرج المعلومات من النص كما هي فقط — بدون استنتاج أو تفسير.
+You are data extraction expert from Egyptian legal documents. Extract info as is — no inference.
 
-أرجع VALID JSON ONLY بهذا الهيكل بالضبط:
+Return VALID JSON ONLY:
 
 {
   "case_meta": {"case_number": null, "court": null, "court_level": null, "prosecutor_name": null},
@@ -18,22 +17,15 @@ DATA_INGESTION_AGENT_PROMPT = """
   "defense_documents": []
 }
 
-أمثلة الحقول الأساسية:
-- defendant: {"name": "أحمد", "age": 35, "prior_record": false}
-- charge: {"statute": "م 274 عقوبات", "description": "السرقة"}
-- confession: {"defendant_name": "محمد", "stage": "أمام النيابة", "voluntary": true}
+Examples: defendant: {"name": "Ahmed", "age": 35, "prior_record": false}; charge: {"statute": "Art 274 Penal", "description": "Theft"}.
 
-إذا لم توجد معلومة → ضع null أو []
-أجب بـ JSON فقط ← بدون نص إضافي
+If no info, use null or []. JSON only. No nulls in output.
 """
 
 case_clssifier_prompt = """
-صنّف هذا المستند القانوني إلى واحد من الأنواع التالية:
-amr_ihalah | mahdar_dabt | taqrir_tibbi | aqwal_shuhud | mozakart_difa |
-hukm_sabiq | taqrir_lab | other
+Classify this legal document into one type: amr_ihalah | mahdar_dabt | taqrir_tibbi | aqwal_shuhud | mozakart_difa | hukm_sabiq | taqrir_lab | other
 
-أجب بكلمة واحدة فقط.
+Answer with one word only.
 
-النص:
-{text}
+Text: {text}
 """
