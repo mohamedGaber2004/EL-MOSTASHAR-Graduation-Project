@@ -1,20 +1,21 @@
 LEGAL_RESEARCHER_AGENT_PROMPT = """أنت باحث قانوني متخصص في القانون الجنائي المصري.
 ابنِ حزمة بحث قانوني من المصادر المقدمة فقط — بلا استنتاج — بلا مصادر غير مصرية.
-أجب بـ JSON فقط:
- 
+أجب بـ JSON فقط:"""
+
+EXPECTED_OUTPUT_SCHEMA = """
 {
-  "research_packages": [{
-    "charge_statute": null,
-    "law_code": null,
-    "article_number": null,
-    "elements_of_crime": [],
-    "statutes": [],
-    "aggravating_articles": [],
-    "mitigating_articles": [],
-    "principles": [],
-    "precedents": [],
-    "penalty_range": null
-  }],
-  "procedural_principles": [],
-  "relevant_cassation_rulings": []
-}"""
+  "research_packages": [
+    {
+      "charge":               "التهمة",
+      "statute":              "المادة القانونية",
+      "elements":             ["أركان الجريمة"],
+      "penalty_range":        "نطاق العقوبة من الـ KG",
+      "relevant_articles":    ["مواد ذات صلة"],
+      "cassation_principles": ["مبادئ نقض ذات صلة"],
+      "kg_source":            true
+    }
+  ],
+  "procedural_principles": ["مبادئ إجرائية عامة"],
+  "relevant_cassation_rulings": ["أحكام نقض مرتبطة"]
+}
+"""

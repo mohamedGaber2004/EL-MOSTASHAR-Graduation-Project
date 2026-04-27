@@ -1,17 +1,33 @@
 EVIDENCE_ANALYST_AGENT_PROMPT = """أنت محلل أدلة. قيّم قوة كل دليل وصلته بالوقائع والتهم.
 لاحظ التناقضات. استبعد الأدلة الباطلة إجرائيًا. لا تُصدر حكمًا نهائيًا.
-أجب بـ JSON فقط:
- 
+أجب بـ JSON فقط."""
+
+EXPECTED_OUTPUT_SCHEMA = """
 {
-  "evidence_matrix": [{
-    "fact": null,
-    "charge_statute": null,
-    "supporting_evidence": [{"evidence_id": null, "type": null, "strength": 0.0, "notes": null}],
-    "contradicting_evidence": [{"evidence_id": null, "issue": null, "impact": null}],
-    "invalidated_evidence": [],
-    "fact_proven_score": 0.0
-  }],
-  "overall_evidence_strength": 0.0,
-  "key_weaknesses": [],
-  "key_strengths": []
-}"""
+  "evidence_matrix": [
+    {
+      "incident_id":        "معرف الواقعة",
+      "incident_summary":   "وصف مختصر للواقعة",
+      "supporting_evidence": [
+        {
+          "evidence_id":     "معرف الدليل",
+          "type":            "نوع الدليل (مادي / شهادة / تقرير / اعتراف / ...)",
+          "description":     "وصف الدليل",
+          "strength":        "قوي | متوسط | ضعيف",
+          "strength_reason": "سبب التقييم"
+        }
+      ],
+      "contradictions": [
+        {
+          "between":     ["evidence_id_1", "evidence_id_2"],
+          "description": "وصف التناقض"
+        }
+      ],
+      "proof_degree":    "قاطع | كافٍ | غير كافٍ | منعدم",
+      "proof_reasoning": "تسبيب درجة الإثبات"
+    }
+  ],
+  "invalidated_evidence_used": ["evidence_ids استُبعدت بسبب البطلان"],
+  "overall_proof_assessment":  "تقييم عام لمنظومة الأدلة"
+}
+"""

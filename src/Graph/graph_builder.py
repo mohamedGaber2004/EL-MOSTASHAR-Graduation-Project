@@ -1,8 +1,11 @@
 import logging
-from typing import Optional
+from functools import lru_cache
+from typing import Optional, Union
 
 from langgraph.graph import END, START, StateGraph
+
 from src.Graph.state import AgentState
+from src.Graph.shared_resources import get_kg, get_vector_store
 
 from src.agents import (
     DataIngestionAgent,
@@ -10,35 +13,57 @@ from src.agents import (
     LegalResearcherAgent,
     EvidenceAnalystAgent,
     DefenseAnalystAgent,
-    JudgeAgent
+    JudgeAgent,
 )
 
-# Instantiate agent objects
-_data_ingestion_agent = DataIngestionAgent()
-_procedural_auditor_agent = ProceduralAuditorAgent()
-_legal_researcher_agent = LegalResearcherAgent()
-_evidence_analyst_agent = EvidenceAnalystAgent()
-_defense_analyst_agent = DefenseAnalystAgent()
-_judge_agent = JudgeAgent()
-
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
 # =============================================================================
+# Error wrapper
+# =============================================================================
+
+def _safe_run(agent_key: str, agent):
+    def _wrapped(state: AgentState) -> AgentState:
+        try:
+            return agent.run(state)
+        except Exception as e:
+            logger.error("❌ Agent '%s' فشل: %s", agent_key, e, exc_info=True)
+            return state.model_copy(update={
+                "errors":           state.errors + [f"[{agent_key}] {e}"],
+                "completed_agents": state.completed_agents + [agent_key],
+                "current_agent":    agent_key,
+                "agent_outputs": {
+                    **state.agent_outputs,
+                    agent_key: {"error": str(e), "status": "failed"},
+                },
+            })
+    return _wrapped
 
 
-def build_legal_graph() -> StateGraph:
-    """
-    Builds and compiles the Legal Multi-Agent LangGraph (OOP version).
-    """
+# =============================================================================
+# Graph builder — @lru_cache يضمن بناء الـ graph مرة واحدة فقط
+# =============================================================================
+
+@lru_cache(maxsize=1)
+def build_legal_graph():
+    kg = get_kg()
+    vs = get_vector_store()
+
+    agents = {
+        "data_ingestion":     DataIngestionAgent(),
+        "procedural_auditor": ProceduralAuditorAgent(kg=kg),
+        "legal_researcher":   LegalResearcherAgent(kg=kg, vector_store=vs),
+        "evidence_analyst":   EvidenceAnalystAgent(),
+        "defense_analyst":    DefenseAnalystAgent(),
+        "judge":              JudgeAgent(),
+    }
+
     builder = StateGraph(AgentState)
-    builder.add_node("data_ingestion",     _data_ingestion_agent.run)
-    builder.add_node("procedural_auditor", _procedural_auditor_agent.run)
-    builder.add_node("legal_researcher",   _legal_researcher_agent.run)
-    builder.add_node("evidence_analyst",   _evidence_analyst_agent.run)
-    builder.add_node("defense_analyst",    _defense_analyst_agent.run)
-    builder.add_node("judge",              _judge_agent.run)
+
+    for name, agent in agents.items():
+        builder.add_node(name, _safe_run(name, agent))
+
     builder.add_edge(START,                "data_ingestion")
     builder.add_edge("data_ingestion",     "procedural_auditor")
     builder.add_edge("procedural_auditor", "legal_researcher")
@@ -46,29 +71,48 @@ def build_legal_graph() -> StateGraph:
     builder.add_edge("evidence_analyst",   "defense_analyst")
     builder.add_edge("defense_analyst",    "judge")
     builder.add_edge("judge",              END)
+
+    logger.info("✅ Legal graph built")
     return builder.compile()
 
 
-def get_graph_visualization(graph: Optional[StateGraph] = None) -> bytes:
-    """Returns Mermaid diagram PNG bytes of the graph.
+def get_graph_visualization():
+    g = build_legal_graph()
+    return g, g.get_graph().draw_mermaid_png()
 
-    If no graph is provided, a fresh graph is built. This avoids import-time
-    side effects in environments without IPython display.
-    """
-    g = graph or build_legal_graph()
-    return g.get_graph().draw_mermaid_png()
 
+# =============================================================================
+# run_case — نقطة الدخول الوحيدة للـ pipeline
+# =============================================================================
 
 def run_case(state: AgentState) -> AgentState:
-    logger.info("🚀 Starting legal pipeline for case: %s", state.case_id)
+    logger.info("🚀 بدء معالجة القضية: %s", state.case_id)
 
-    # Build graph at runtime to avoid import-time IO/display side effects.
-    graph = build_legal_graph()
+    graph, _ = get_graph_visualization()
 
-    final_state = graph.invoke({
-        "case_id": state.case_id,
-        "source_documents": state.source_documents,
-    })
+    try:
+        final_state = graph.invoke(state.model_dump())
+    except Exception as e:
+        logger.error("❌ Pipeline فشل كلياً: %s", e, exc_info=True)
+        raise
 
-    logger.info("🏁 Pipeline complete — Verdict: %s", final_state.get("suggested_verdict"))
+    verdict = _extract_verdict(final_state)
+    errors  = _extract_errors(final_state)
+
+    logger.info("🏁 Pipeline اكتمل — الحكم: %s", verdict)
+    if errors:
+        logger.warning("⚠️ أخطاء أثناء التنفيذ (%d): %s", len(errors), errors)
+
     return final_state
+
+
+def _extract_verdict(final_state: Union[AgentState, dict]) -> str:
+    if isinstance(final_state, dict):
+        return str(final_state.get("suggested_verdict", "غير محدد"))
+    return str(getattr(final_state, "suggested_verdict", "غير محدد"))
+
+
+def _extract_errors(final_state: Union[AgentState, dict]) -> list:
+    if isinstance(final_state, dict):
+        return final_state.get("errors", [])
+    return getattr(final_state, "errors", [])

@@ -4,18 +4,18 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # APP 
-    APP_NAME : str 
-    APP_VERSION : str 
+    APP_NAME: str 
+    APP_VERSION: str 
 
     # Data Paths
-    DataPath : str 
-    na2d_data_path : str 
-    FAISS_INDEX_PATH : str 
+    DataPath: str 
+    na2d_data_path: str 
+    FAISS_INDEX_PATH: str 
 
     # API Keys
     GROQ_API_KEY: Optional[str] = None
-    HUGGINGFACE_API_TOKEN : Optional[str] = None
-    LANGCHAIN_API_KEY : Optional[str] = None
+    HUGGINGFACE_API_TOKEN: Optional[str] = None
+    LANGCHAIN_API_KEY: Optional[str] = None
 
     # LLMs (raw model config for legacy code)
     REASONING_MODEL: str
@@ -43,9 +43,14 @@ class Settings(BaseSettings):
     JUDGE_TEMP: float
     
     # Neo4j KG
-    NEO4J_URI : Optional[str] = None
-    NEO4J_USERNAME : Optional[str] = None
-    NEO4J_PASSWORD : Optional[str] = None
+    NEO4J_URI: Optional[str] = None
+    NEO4J_USERNAME: Optional[str] = None
+    NEO4J_PASSWORD: Optional[str] = None
+
+    # Agents
+    INVOKATION_MAX_RETRIES: int 
+    INTER_AGENTS_DELAY: float
+    INGESTION_AGENT_MAX_CHARS: int
 
 
     class Config:

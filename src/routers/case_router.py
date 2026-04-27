@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Any
 from threading import Lock
 
-from src.Graph import run_case
+from src.Graph.graph_builder import run_case
 from src.Graph.state import AgentState
 
 

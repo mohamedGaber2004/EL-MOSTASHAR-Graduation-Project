@@ -1,19 +1,23 @@
 PROCEDURAL_AUDITOR_AGENT_PROMPT = """أنت مدقق إجرائي. راجع صحة الإجراءات وفق قانون الإجراءات الجنائية المصري.
 طبّق مبادئ النقض في البطلان (نسبي/مطلق). لا تحلل الوقائع ولا توازن الأدلة.
-أجب بـ JSON فقط:
- 
+أجب بـ JSON فقط:"""
+
+EXPECTED_OUTPUT_SCHEMA = """
 {
-  "audit_results": [{
-    "procedure": null,
-    "issue_id": null,
-    "status": "صحيح|باطل",
-    "nullity_type": "بطلان مطلق|بطلان نسبي|لا بطلان",
-    "affected_evidence_ids": [],
-    "legal_basis": [],
-    "tainted_fruit_applies": false,
-    "notes": null
-  }],
-  "overall_procedural_validity": "صحيح|مشكوك فيه|باطل",
-  "critical_nullities": [],
-  "recommendation": null
-}"""
+  "violations": [
+    {
+      "issue":          "وصف المسألة الإجرائية",
+      "article":        "رقم المادة المنتهكة",
+      "law":            "مصدر المادة (دستور / إجراءات جنائية)",
+      "violation_type": "قبض غير مشروع | تفتيش بلا إذن | اعتراف منتزع بالإكراه | استجواب بلا إخطار | ...",
+      "nullity":        true,
+      "nullity_type":   "مطلق | نسبي",
+      "effect_on_evidence": "وصف أثر البطلان على الأدلة المترتبة",
+      "kg_article_text": "النص القانوني المستند إليه من قاعدة البيانات"
+    }
+  ],
+  "overall_assessment": "تقييم عام لصحة الإجراءات",
+  "critical_nullities": ["قائمة بأخطر حالات البطلان المطلق إن وجدت"],
+  "kg_articles_used": ["أرقام المواد التي استُند إليها فعلاً"]
+}
+"""

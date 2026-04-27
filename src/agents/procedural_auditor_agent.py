@@ -1,34 +1,157 @@
+from __future__ import annotations
+
 from langchain_core.messages import HumanMessage, SystemMessage
+
 from .agent_base import AgentBase
+from src.Graphstore.KG_builder import LegalKnowledgeGraph
 from src.LLMs import get_llm_llama
-from src.Graph.graph_helpers import (
-    _parse_llm_json
-)
+from src.Graph.graph_helpers import _parse_llm_json
+from src.Prompts.procedural_auditor_agent import PROCEDURAL_AUDITOR_AGENT_PROMPT , EXPECTED_OUTPUT_SCHEMA
+from src.Utils.agents_enums import AgentsEnums
 
-from src.Prompts import (
-    PROCEDURAL_AUDITOR_AGENT_PROMPT
-)
 
-# ─────────────────────────────────────────────
-# المدقق الإجرائي
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Agent
+# ─────────────────────────────────────────────────────────────────────────────
+
 class ProceduralAuditorAgent(AgentBase):
-    def __init__(self):
-        super().__init__("PROCEDURAL_AUDITOR_MODEL", "PROCEDURAL_AUDITOR_TEMP", PROCEDURAL_AUDITOR_AGENT_PROMPT)
- 
-    def run(self, state):
-        self.log(f"⚖️ المدقق الإجرائي — {len(state.procedural_issues)} مسألة")
-        prompt = (
-            f"راجع الإجراءات وأصدر تقرير البطلان:\n"
-            f"{state.agent_outputs.get('data_ingestion', {})}\n\n"
-            "م41 دستور: القبض يستلزم أمرًا أو تلبسًا.\n"
-            "م45 إجراءات: التفتيش يستلزم إذنًا مسببًا.\n"
-            "م135 إجراءات: الاستجواب يستلزم إخطار النيابة خلال 24 ساعة.\n"
-            "الاعتراف الباطل لا يُعتد به حتى لو صادقه المتهم لاحقًا."
+    """
+    يراجع صحة الإجراءات الجنائية (القبض / التفتيش / الاستجواب / الاعتراف)
+    مستنداً إلى النصوص الفعلية المخزونة في الـ Knowledge Graph،
+    ويُصدر تقرير بطلان مُفصَّلاً بصيغة JSON.
+    """
+
+    def __init__(self, kg: LegalKnowledgeGraph):
+        super().__init__(
+            "PROCEDURAL_AUDITOR_MODEL",
+            "PROCEDURAL_AUDITOR_TEMP",
+            PROCEDURAL_AUDITOR_AGENT_PROMPT,
         )
+        self.kg = kg
+
+    # ── KG helpers ────────────────────────────────────────────────────────
+
+    def _fetch_procedural_articles(self) -> tuple[str, list[str]]:
+        """
+        يجلب أحدث نسخة من كل مادة إجرائية من الـ KG.
+
+        Returns
+        -------
+        articles_block : str
+            نص مُنسَّق يحتوي رقم كل مادة ونصها — جاهز للـ prompt.
+        fetched_numbers : list[str]
+            أرقام المواد التي تم جلبها فعلاً (للتوثيق).
+        """
+        if self.kg is None:
+            print("⚠️ KG غير متاح — سيعتمد الـ LLM على معرفته الداخلية", "warning")
+            return "لا توجد مواد متاحة من قاعدة البيانات.", []
+        articles_text: list[str] = []
+        fetched: list[str] = []
+
+        for article_num in AgentsEnums.PROCEDURAL_ARTICLE_NUMBERS.value:
+            try:
+                history = self.kg.query_article_history(
+                    AgentsEnums.CRIMINAL_PROCEDURE_LAW_ID.value, article_num
+                )
+                if not history:
+                    continue
+
+                # خذ أحدث نسخة بناءً على حقل version
+                latest = sorted(
+                    history,
+                    key=lambda x: x.get("version") or "0000-00-00",
+                )[-1]
+
+                text = (latest.get("text") or "").strip()
+                if not text:
+                    continue
+
+                # لاحظ هل المادة معدَّلة
+                amendment_note = ""
+                if latest.get("is_amended"):
+                    amendment_note = f" [معدَّلة — {latest.get('version', '')}]"
+
+                articles_text.append(f"م{article_num}{amendment_note}:\n{text}")
+                fetched.append(article_num)
+
+            except Exception as e:
+                print(e)
+
+        if not articles_text:
+            return "لا توجد مواد متاحة من قاعدة البيانات.", []
+
+        return "\n\n".join(articles_text), fetched
+
+    # ── prompt builder ────────────────────────────────────────────────────
+
+    def _build_prompt(
+        self,
+        state,
+        legal_references: str,
+        fetched_articles: list[str],
+    ) -> str:
+        ingestion_data   = state.agent_outputs.get("data_ingestion", {})
+        procedural_issues = state.procedural_issues or []
+        confessions       = getattr(state, "confessions", [])
+        incidents         = getattr(state, "incidents", [])
+
+        return (
+            "## المسائل الإجرائية المرصودة:\n"
+            f"{procedural_issues}\n\n"
+
+            "## تفاصيل الحوادث والقبض:\n"
+            f"{incidents}\n\n"
+
+            "## الاعترافات (إن وجدت):\n"
+            f"{confessions}\n\n"
+
+            "## بيانات استخلاص الوثائق:\n"
+            f"{ingestion_data}\n\n"
+
+            f"## النصوص القانونية المرجعية (مواد: {', '.join(fetched_articles)}):\n"
+            f"{legal_references}\n\n"
+
+            "## التعليمات:\n"
+            "راجع كل مسألة إجرائية في ضوء النصوص القانونية أعلاه وحدد:\n"
+            "1. هل توجد مخالفة إجرائية؟\n"
+            "2. هل تُفضي إلى بطلان؟ (مطلق أم نسبي؟)\n"
+            "3. ما أثر البطلان على الأدلة المترتبة عليه؟\n"
+            "4. الاعتراف المنتزع بالإكراه باطل ولا يُعتد به حتى لو صادقه المتهم لاحقاً.\n\n"
+
+            "## صيغة الإجابة (JSON فقط — بلا مقدمة ولا شرح خارج JSON):\n"
+            f"{EXPECTED_OUTPUT_SCHEMA}"
+        )
+
+    # ── main entry ────────────────────────────────────────────────────────
+
+    def run(self, state):
+        issues_count = len(state.procedural_issues or [])
+        # 1. جلب النصوص من الـ KG
+        legal_references, fetched_articles = self._fetch_procedural_articles()
+        # 2. بناء الـ prompt
+        prompt = self._build_prompt(state, legal_references, fetched_articles)
+        # 3. استدعاء الـ LLM مع retry
         response = self._llm_invoke_with_retries(
             get_llm_llama(self.model_name, self.temperature),
             [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
         )
+
+        # 4. تحليل الرد
         audit_report = _parse_llm_json(response.content)
+
+        # 5. إضافة metadata للتوثيق
+        if isinstance(audit_report, dict):
+            audit_report["_meta"] = {
+                "kg_law_id":         AgentsEnums.CRIMINAL_PROCEDURE_LAW_ID.value,
+                "kg_articles_fetched": fetched_articles,
+                "articles_requested":  AgentsEnums.PROCEDURAL_ARTICLE_NUMBERS.value,
+                "issues_reviewed":     issues_count,
+            }
+        else:
+            audit_report = {
+                "raw_response": audit_report,
+                "violations": [],
+                "_meta": {"kg_articles_fetched": fetched_articles},
+            }
+
         return self._empty_update(state, "procedural_auditor", audit_report)

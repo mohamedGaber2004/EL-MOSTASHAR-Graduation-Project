@@ -115,6 +115,7 @@ class VerdictType(str, Enum):
     INSUFFICIENT_EVD  = "عدم كفاية الأدلة"
     NO_JURISDICTION   = "عدم الاختصاص"
     MISTRIAL          = "بطلان المحاكمة"
+    PARTIAL_GUILTY    = "إدانة جزئية"
 
 
 class IncidentType(str, Enum):

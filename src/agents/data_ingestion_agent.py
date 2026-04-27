@@ -1,14 +1,12 @@
-import json
 from pathlib import Path
 from langchain_core.messages import HumanMessage, SystemMessage
+
 from .agent_base import AgentBase
 from src.LLMs import  get_llm_oss
-from src.Graph.graph_helpers import ( _parse_llm_json,
-    _apply_extracted_to_state, _now,_merge_extracted
-)
-from src.Prompts import (
-    DATA_INGESTION_AGENT_PROMPT
-)
+from src.Prompts.data_ingestion_agent import DATA_INGESTION_AGENT_PROMPT
+from src.Utils.agents_enums import AgentsEnums
+from src.Graph.graph_helpers import _parse_llm_json , _merge_extracted , _apply_extracted_to_state  , _now
+
 
 EMPTY_EXTRACTED = lambda: {
     "case_meta": {}, "defendants": [], "charges": [], "incidents": [],
@@ -22,17 +20,22 @@ class DataIngestionAgent(AgentBase):
         super().__init__("DATA_INGESTION_MODEL", "DATA_INGESTION_TEMP", DATA_INGESTION_AGENT_PROMPT)
 
     def _process_file(self, path, doc_id, all_extracted, file_errors, processed_docs):
-        try:
-            raw_text = path.read_text(encoding="utf-8").strip()
-        except OSError as e:
-            file_errors.append(f"[{doc_id}] قراءة فاشلة: {e}")
+        for enc in AgentsEnums.AGENT_INGESTION_TXT_FILES_ENCODING.value:
+            try:
+                raw_text = path.read_text(encoding=enc).strip()
+                break
+            except (UnicodeDecodeError, OSError):
+                continue
+        else:
+            file_errors.append(f"[{doc_id}] فشل قراءة بأي ترميز")
             return
 
         if not raw_text:
             file_errors.append(f"[{doc_id}] الملف فارغ")
             return
-
-        self.log(f"📄 {doc_id} ({len(raw_text)} chars)")
+        
+        if len(raw_text) > self.cfg.INGESTION_AGENT_MAX_CHARS:
+            raw_text = raw_text[:self.cfg.INGESTION_AGENT_MAX_CHARS]
 
         try:
             response = self._llm_invoke_with_retries(
@@ -44,11 +47,8 @@ class DataIngestionAgent(AgentBase):
                 raise ValueError(f"non-dict result: {type(result)}")
             all_extracted.update(_merge_extracted(all_extracted, result))
             processed_docs.append(doc_id)
-            self.log(f"✅ {doc_id}")
         except Exception as e:
             file_errors.append(f"[{doc_id}] فشل: {e}")
-            self.log(f"❌ {doc_id}: {e}", "error")
-
 
     def run(self, state):
         all_extracted = EMPTY_EXTRACTED()
@@ -62,6 +62,9 @@ class DataIngestionAgent(AgentBase):
                 for txt_file in sorted(path.glob("*.txt")):
                     self._process_file(txt_file, txt_file.name, all_extracted, file_errors, processed_docs)
             else:
+                if path.suffix.lower() != ".txt":
+                    file_errors.append(f"[{doc_id}] نوع ملف غير مدعوم: {path.suffix}")
+                    continue
                 self._process_file(path, doc_id, all_extracted, file_errors, processed_docs)
 
         state_updates = _apply_extracted_to_state(state, all_extracted, doc_id="__merged__")
