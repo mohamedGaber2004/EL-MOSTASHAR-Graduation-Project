@@ -1,8 +1,10 @@
 import json
+import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
+logger = logging.getLogger(__name__)
+
 from .agent_base import AgentBase
-from src.LLMs import get_llm_qwn
 from src.Graph.graph_helpers import _parse_llm_json
 from src.Prompts.defense_analysis_agent import DEFENSE_ANALYSIS_AGENT_PROMPT , EXPECTED_OUTPUT_SCHEMA
 
@@ -12,24 +14,13 @@ from src.Prompts.defense_analysis_agent import DEFENSE_ANALYSIS_AGENT_PROMPT , E
 
 
 class DefenseAnalystAgent(AgentBase):
-    """
-    يحلل دفوع المتهم (شكلية وموضوعية) في ضوء:
-    - البطلانيات الإجرائية من ProceduralAuditorAgent
-    - مصفوفة الأدلة من EvidenceAnalystAgent
-    ويُقيّم كل دفع بالاستناد إلى الـ LLM فعلاً.
-    """
 
     def __init__(self):
-        super().__init__(
-            "DEFENSE_ANALYST_MODEL",
-            "DEFENSE_ANALYST_TEMP",
-            DEFENSE_ANALYSIS_AGENT_PROMPT,
-        )
+        super().__init__("DEFENSE_ANALYST_MODEL","DEFENSE_ANALYST_TEMP",DEFENSE_ANALYSIS_AGENT_PROMPT)
 
     # ── helpers ────────────────────────────────────────────────────────
 
     def _extract_defense_data(self, state) -> dict:
-        """يستخرج بيانات الدفوع من state.defense_documents"""
         formal, substantive, principles = [], [], []
         any_alibi = False
 
@@ -124,9 +115,11 @@ class DefenseAnalystAgent(AgentBase):
 
     def run(self, state):
         docs_count = len(state.defense_documents or [])
+        logger.info("Starting defense analyst evaluation... Docs count: %d", docs_count)
 
         # حالة لا توجد مستندات دفاع
         if not docs_count:
+            logger.info("No defense documents. Returning empty output.")
             return self._empty_update(state, "defense_analyst", {
                 "formal_defenses":       [],
                 "substantive_defenses":  [],
@@ -139,19 +132,22 @@ class DefenseAnalystAgent(AgentBase):
         # 1. استخرج بيانات الدفوع
         defense_data   = self._extract_defense_data(state)
         prior_context  = self._build_prior_agents_context(state)
+        logger.debug("Defense data extracted. Alibi claimed: %s", defense_data.get("alibi_claimed"))
 
         # 2. بناء الـ prompt
         prompt = self._build_prompt(defense_data, prior_context, state)
 
         # 3. استدعاء الـ LLM وحفظ النتيجة  ← الإصلاح الأهم
+        logger.debug("Invoking LLM for defense analysis...")
         response = self._llm_invoke_with_retries(
-            get_llm_qwn(self.model_name, self.temperature),
+            self.qwen_llm,
             [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
         )
         defense_analysis = _parse_llm_json(response.content)
 
         # 4. تحقق من صحة الـ output
         if not isinstance(defense_analysis, dict):
+            logger.error("LLM defense evaluation failed to parse as valid dict.")
             defense_analysis = {
                 "formal_defenses":          [],
                 "substantive_defenses":     [],
@@ -161,6 +157,8 @@ class DefenseAnalystAgent(AgentBase):
                 "critical_defense_points":  prior_context["critical_nullities"],
                 "raw_response":             str(defense_analysis),
             }
+        else:
+            logger.debug("Defense evaluation complete. Overall strength: %s", defense_analysis.get("overall_defense_strength", "N/A"))
 
         # 5. أضف metadata
         defense_analysis["_meta"] = {

@@ -1,4 +1,4 @@
-import logging
+from src.Config.log_config import logging
 from functools import lru_cache
 from typing import Optional
 
@@ -11,20 +11,20 @@ logger = logging.getLogger(__name__)
 @lru_cache(maxsize=1)
 def get_kg() -> Optional[LegalKnowledgeGraph]:
     """
-    يفتح Neo4j connection مرة واحدة.
-    لو فشل يرجع None والـ agents تشتغل بدونه.
+    Opens Neo4j connection once.
+    If it fails, returns None and agents work without it.
     """
     cfg = get_settings()
     if not getattr(cfg, "NEO4J_URI", None):
-        logger.warning("⚠️ NEO4J_URI مش موجود — KG معطل")
+        logger.warning("NEO4J_URI not found — Knowledge Graph is disabled.")
         return None
     try:
         kg = LegalKnowledgeGraph(cfg.NEO4J_URI, cfg.NEO4J_USERNAME, cfg.NEO4J_PASSWORD)
         kg.connect()
-        logger.info("✅ Neo4j connected")
+        logger.info("Neo4j connected successfully.")
         return kg
     except Exception as e:
-        logger.warning("⚠️ KG connection فشل: %s — هيشتغل بدون KG", e)
+        logger.warning("Knowledge Graph connection failed: %s — running without KG.", e)
         return None
 
 
@@ -35,7 +35,7 @@ def get_vector_store():
     embed_model = getattr(cfg, "EMBEDDING_MODEL", None)
 
     if not faiss_path or not embed_model:
-        logger.warning("⚠️ FAISS_INDEX_PATH أو EMBEDDING_MODEL مش موجود — VectorStore معطل")
+        logger.warning("FAISS_INDEX_PATH or EMBEDDING_MODEL not found — VectorStore is disabled.")
         return None
     try:
         from langchain_huggingface import HuggingFaceEmbeddings
@@ -45,14 +45,14 @@ def get_vector_store():
         embeddings = HuggingFaceEmbeddings(model_name=embed_model)
         index_faiss = Path(faiss_path) / "index.faiss"
 
-        # ── لو الـ index موجود — حمّله ─────────────────────────────────
+        # If index exists, load it
         if index_faiss.exists():
             vs = load_vector_store(str(faiss_path), embeddings)
-            logger.info("✅ VectorStore loaded")
+            logger.info("VectorStore loaded")
             return vs
 
-        # ── لو مش موجود — ابنيه ────────────────────────────────────────
-        logger.warning("⚠️ FAISS index مش موجود — بيتبنى دلوقتي...")
+        # If it does not exist, build it
+        logger.warning("FAISS index not found - building now...")
         from src.Chunking.chunking import get_chunks
 
         chunks = get_chunks()
@@ -62,7 +62,7 @@ def get_vector_store():
         logger.info("📄 %d chunks after dedup", len(chunks))
 
         if not chunks:
-            logger.error("❌ مفيش chunks — مش هيتبنى الـ index")
+            logger.error("No chunks found - index will not be built")
             return None
 
         vs = build_vector_store(
@@ -70,20 +70,20 @@ def get_vector_store():
             embeddings=embeddings,
             index_path=str(faiss_path),
         )
-        logger.info("✅ VectorStore built and saved → %s", faiss_path)
+        logger.info("VectorStore built and saved -> %s", faiss_path)
         return vs
 
     except Exception as e:
-        logger.error("❌ VectorStore فشل: %s", e, exc_info=True)
+        logger.error("VectorStore failed: %s", e, exc_info=True)
         return None
 
 
 def cleanup():
-    """أغلق الـ KG connection عند إنهاء البرنامج."""
+    """Close the KG connection on program exit."""
     kg = get_kg()
     if kg:
         try:
             kg.close()
-            logger.info("✅ Neo4j connection أُغلق")
+            logger.info("Neo4j connection closed")
         except Exception:
             pass

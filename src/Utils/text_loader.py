@@ -7,7 +7,6 @@ from typing import Iterator, Optional, Sequence
 from langchain_community.document_loaders.base import BaseLoader
 from langchain_core.documents import Document
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 ENCODINGS: Sequence[str] = ("utf-8", "utf-16", "cp1256", "windows-1256")
@@ -32,6 +31,6 @@ class MultiEncodingTextLoader(BaseLoader):
     def lazy_load(self) -> Iterator[Document]:
         text = _read_file(self.file_path)
         if not text or not text.strip():
-            logger.warning(f"[SKIP] {self.file_path.name} — unreadable or empty")
+            logger.warning(f"SKIP {self.file_path.name} - unreadable or empty")
             return
         yield Document(page_content=text, metadata={"source": str(self.file_path)})

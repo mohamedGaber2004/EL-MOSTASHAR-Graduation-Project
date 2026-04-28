@@ -1,13 +1,14 @@
 import json
+import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
+logger = logging.getLogger(__name__)
+
 from .agent_base import AgentBase
-from src.LLMs import get_llm_llama
 from src.Graph.graph_helpers import _parse_llm_json, _now
 from src.Prompts.judge_agent import JUDGE_AGENT_PROMPT ,EXPECTED_OUTPUT_SCHEMA
 from src.Utils import VerdictType
 from src.Utils.agents_enums import AgentsEnums
-
 class JudgeAgent(AgentBase):
     """
     يُصدر حكماً مسبباً بعد مراجعة نتائج جميع الـ agents:
@@ -137,27 +138,31 @@ class JudgeAgent(AgentBase):
     # ── main entry ─────────────────────────────────────────────────────
 
     def run(self, state):
+        logger.info("Starting judge agent to issue verdict...")
 
         # 1. تحقق من اكتمال الـ agents السابقة
         required_agents = ["procedural_auditor", "evidence_analyst",
                            "defense_analyst", "legal_researcher"]
         missing = [a for a in required_agents if a not in state.completed_agents]
         if missing:
-            print(f"⚠️ agents لم تكتمل: {missing}", "warning")
+            logger.warning(f"Incomplete agents: {missing}")
 
         # 2. بناء السياق القضائي
         judicial_context = self._build_judicial_context(state)
         prompt = self._build_prompt(judicial_context)
+        logger.debug("Judicial context built successfully.")
 
         # 3. استدعاء الـ LLM
+        logger.debug("Invoking LLM to issue verdict...")
         response = self._llm_invoke_with_retries(
-            get_llm_llama(self.model_name, self.temperature),
+            self.lama_llm,
             [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
         )
         judgment = _parse_llm_json(response.content)
 
         # 4. تحقق من صحة الـ output
         if not isinstance(judgment, dict):
+            logger.error("LLM judgment evaluation failed to parse as valid dict.")
             judgment = {
                 "verdict":           "براءة",
                 "verdict_reasoning": "فشل إصدار الحكم — براءة احتياطية",
@@ -168,6 +173,7 @@ class JudgeAgent(AgentBase):
 
         # 5. استخراج الـ verdict بأمان
         verdict = self._parse_verdict(judgment.get("verdict", ""))
+        logger.info("Judgment complete. Final verdict: %s (Confidence: %s)", verdict, judgment.get("confidence_score", 0.0))
 
         # 6. بناء reasoning_trace per-charge
         reasoning_trace = self._build_reasoning_trace(judgment)

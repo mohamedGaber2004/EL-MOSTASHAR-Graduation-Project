@@ -1,8 +1,10 @@
 import json
+import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
+logger = logging.getLogger(__name__)
+
 from .agent_base import AgentBase
-from src.LLMs import get_llm_oss
 from src.Graph.graph_helpers import _parse_llm_json
 from src.Utils.agent_output_utils import clean_agent_output
 from src.Prompts.evidence_analyst_agent import EVIDENCE_ANALYST_AGENT_PROMPT , EXPECTED_OUTPUT_SCHEMA
@@ -15,11 +17,7 @@ class EvidenceAnalystAgent(AgentBase):
     """
 
     def __init__(self):
-        super().__init__(
-            "EVIDENCE_ANALYST_MODEL",
-            "EVIDENCE_ANALYST_TEMP",
-            EVIDENCE_ANALYST_AGENT_PROMPT,
-        )
+        super().__init__("EVIDENCE_ANALYST_MODEL","EVIDENCE_ANALYST_TEMP",EVIDENCE_ANALYST_AGENT_PROMPT)
 
     # ── helpers ────────────────────────────────────────────────────────
 
@@ -43,7 +41,7 @@ class EvidenceAnalystAgent(AgentBase):
 
         unique = list(dict.fromkeys(invalidated))  # إزالة التكرار مع الحفاظ على الترتيب
         if unique:
-            print(f"🚫 أدلة مستبعدة بسبب البطلان: {unique}", "warning")
+            logger.warning(f"Excluded evidence due to invalidity: {unique}")
         return unique
 
     def _build_case_context(self, state, invalidated_ids: list[str]) -> str:
@@ -120,9 +118,11 @@ class EvidenceAnalystAgent(AgentBase):
 
     def run(self, state):
         evidences_count = len(state.evidences or [])
+        logger.info("Starting evidence analysis... Total pieces of evidence: %d", evidences_count)
 
         # حالة لا توجد أدلة
         if not evidences_count:
+            logger.info("No evidence found. Returning empty matrix.")
             return self._empty_update(state, "evidence_analyst", {
                 "evidence_matrix":          [],
                 "invalidated_evidence_used": [],
@@ -134,10 +134,12 @@ class EvidenceAnalystAgent(AgentBase):
 
         # 2. بناء الـ prompt
         prompt = self._build_prompt(state, invalidated_ids)
+        logger.debug("Prompt built for evidence analysis. Invalidated IDs: %s", invalidated_ids)
 
         # 3. استدعاء الـ LLM
+        logger.debug("Invoking LLM for evidence analysis...")
         response = self._llm_invoke_with_retries(
-            get_llm_oss(self.model_name, self.temperature),
+            self.lama_llm,
             [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
         )
 
@@ -146,12 +148,15 @@ class EvidenceAnalystAgent(AgentBase):
 
         # 5. تحقق من صحة الـ output
         if not isinstance(evidence_matrix, dict):
+            logger.error("LLM evidence evaluation failed to parse as valid dict.")
             evidence_matrix = {
                 "evidence_matrix":           [],
                 "invalidated_evidence_used": invalidated_ids,
                 "overall_proof_assessment":  "فشل التحليل",
                 "raw_response":              str(evidence_matrix),
             }
+        else:
+            logger.debug("Evidence analysis complete. Overall proof: %s", evidence_matrix.get("overall_proof_assessment", "N/A"))
 
         # 6. أضف metadata
         evidence_matrix["_meta"] = {

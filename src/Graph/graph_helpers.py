@@ -1,5 +1,5 @@
 import json
-import logging
+from src.Config.log_config import logging
 import re
 from typing import Any, Dict
 from datetime import datetime, timezone
@@ -35,7 +35,7 @@ def _parse_llm_json(raw: str) -> dict:
     if brace_start > 0:
         text = text[brace_start:]
     elif brace_start == -1:
-        logger.error("❌ مفيش JSON في الرد: %s", raw[:200])
+        logger.error("No JSON found in response: %s", raw[:200])
         return {}
 
     try:
@@ -50,14 +50,14 @@ def _parse_llm_json(raw: str) -> dict:
             except Exception:
                 pass
         if isinstance(parsed, list):
-            logger.warning("⚠️ LLM رجّع array — بيتحول لـ dict wrapper")
+            logger.warning("LLM returned array, wrapping in dict.")
             return {"items": parsed}
-        logger.warning("⚠️ LLM رجّع نوع غير متوقع: %s", type(parsed).__name__)
+        logger.warning("LLM returned unexpected type: %s", type(parsed).__name__)
         return {}
 
     except json.JSONDecodeError as e:
         if "Extra data" in str(e):
-            logger.warning("⚠️ Multiple JSON objects — بياخد الأول بس")
+            logger.warning("Multiple JSON objects found, using the first only.")
             depth, in_string, escape_next = 0, False, False
             for i, char in enumerate(text):
                 if escape_next:
@@ -81,7 +81,7 @@ def _parse_llm_json(raw: str) -> dict:
                         except json.JSONDecodeError:
                             break
 
-        logger.warning("⚠️ JSON parsing فشل — بيحاول إصلاح: %s", str(e))
+        logger.warning("JSON parsing failed, attempting to repair: %s", str(e))
         open_braces   = text.count("{") - text.count("}")
         open_brackets = text.count("[") - text.count("]")
         if open_braces > 0:
@@ -92,7 +92,7 @@ def _parse_llm_json(raw: str) -> dict:
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            logger.error("❌ JSON repair فشل — بيرجع dict فارغ")
+            logger.error("JSON repair failed, returning empty dict.")
             return {}
 
 
@@ -155,13 +155,12 @@ def _apply_extracted_to_state(state: AgentState, extracted: dict, doc_id: str) -
 
     def _safe_parse(model_cls, data: dict):
         try:
-            # ← أضف السطر ده
             data = {k: v for k, v in data.items() if v is not None}
             if "source_document_id" not in data or not data.get("source_document_id"):
                 data["source_document_id"] = doc_id
             return model_cls.model_validate(data)
         except Exception as e:
-            logger.warning("⚠️ Failed to parse %s from %s: %s", model_cls.__name__, doc_id, e)
+            logger.warning("Failed to parse %s from %s: %s", model_cls.__name__, doc_id, e)
             return None
 
     updates: dict = {}
@@ -260,9 +259,9 @@ def _retrieve_for_charge(charge, lv, kg, k_statutes: int = 6) -> dict:
     try:
         from src.Vectorstore.vector_store_builder import search
         statute_docs = search(vs=lv, query=query, k=k_statutes, law_id=law_id)
-        logger.info("📖 FAISS statutes: %d", len(statute_docs))
+        logger.info("FAISS statutes found: %d", len(statute_docs))
     except Exception as e:
-        logger.warning("⚠️ FAISS statutes فشل: %s", e)
+        logger.warning("FAISS statutes failed: %s", e)
 
     # KG expansion
     kg_context = {}
@@ -313,10 +312,10 @@ def _retrieve_for_charge(charge, lv, kg, k_statutes: int = 6) -> dict:
                 "amendments":      amendments,
                 "latest_versions": latest_versions,
             }
-            logger.info("🕸️ KG expanded: %d penalties | %d defs | %d amendments",
+            logger.info("KG expanded: %d penalties | %d definitions | %d amendments",
                         len(penalties), len(definitions), len(amendments))
         except Exception as e:
-            logger.warning("⚠️ KG expansion فشل: %s", e)
+            logger.warning("KG expansion failed: %s", e)
 
     return {
         "charge_statute": getattr(charge, "statute", None),

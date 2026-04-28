@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import logging
+from src.Config.log_config import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -35,16 +35,18 @@ class PipelineManager:
         self.config = config
         self._components: Dict[str, Any] = {}
         self._initialized = False
+        logger.debug("PipelineManager initialized with config: %s", config)
 
     def init_components(self) -> None:
         if self._initialized:
             return
 
-        logger.info("Pipeline: loading chunks...")
+        logger.info("Pipeline loading chunks...")
         law_chunks = get_chunks()
         na2d_chunks = get_na2d_chunks()
 
         all_chunks = law_chunks + na2d_chunks.get("rulings", []) + na2d_chunks.get("principles", [])
+        logger.debug("Loaded %d total chunks for vectorstore", len(all_chunks))
 
         index_path = Path(self.config.faiss_index_path)
         embeddings = HuggingFaceEmbeddings(model_name=self.config.embedding_model)
@@ -61,9 +63,11 @@ class PipelineManager:
         self._components["na2d_chunks"] = na2d_chunks
 
         self._initialized = True
+        logger.info("Pipeline components initialization complete.")
 
     def get_vectorstore(self) -> FAISS:
         if not self._initialized:
+            logger.debug("get_vectorstore called but not initialized. Initializing now...")
             self.init_components()
         return self._components["vectorstore"]
 
@@ -73,10 +77,12 @@ class PipelineManager:
         Note: Graph builder modules may have import-time side effects; they should be refactored
         to avoid display/IO at import time. See repo TODOs.
         """
+        logger.info("Starting run_case for case_id: %s", state.case_id)
         # Lazy initialize vectorstore (and chunks) to ensure resources are ready
         self.init_components()
 
         # The actual LangGraph orchestration lives in src.Graph.graph_builder
+        logger.debug("Importing build_legal_graph and invoking graph...")
         from src.Graph.graph_builder import build_legal_graph
 
         graph = build_legal_graph()
@@ -85,6 +91,7 @@ class PipelineManager:
             "source_documents": state.source_documents,
         })
 
+        logger.info("run_case completed for case_id: %s", state.case_id)
         return AgentState(**final_state)
 
 
@@ -99,4 +106,5 @@ def default_pipeline_manager() -> PipelineManager:
         neo4j_user=getattr(settings, 'NEO4J_USER', None),
         neo4j_password=getattr(settings, 'NEO4J_PASSWORD', None),
     )
+    logger.debug("Default PipelineManager setup complete.")
     return PipelineManager(cfg)

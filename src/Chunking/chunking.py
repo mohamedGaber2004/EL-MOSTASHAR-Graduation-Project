@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import fnmatch
-import logging
+from src.Config.log_config import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -19,7 +19,7 @@ from src.Utils import (
     _normalize_article_no
 )
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+ # Logging is configured globally in src/log_config.py
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -264,7 +264,7 @@ class CorpusChunker:
                 if "tables" in fp.name.lower():
                     table_docs = _split_into_tables(full_text, law_key, law_title, fp.name)
                     all_docs.extend(table_docs)
-                    logger.info(f"  {fp.name} [table] → {len(table_docs)} tables")
+                    logger.info(f"  {fp.name} [table] -> {len(table_docs)} tables")
 
                 else:
                     # Articles: exactly one Document per article
@@ -283,7 +283,7 @@ class CorpusChunker:
                                 "source_file":    fp.name,
                             },
                         ))
-                    logger.info(f"  {fp.name} [article] → {len(articles)} chunks")
+                    logger.info(f"  {fp.name} [article] -> {len(articles)} chunks")
 
             # ── amendment files (new*) ─────────────────────────────────────
             for af in sorted(folder.glob("new*.txt")):
@@ -293,7 +293,7 @@ class CorpusChunker:
                 full_text = raw[0].page_content
                 meta      = self._get_amendment_metadata(full_text, af.name)
                 if not meta:
-                    logger.warning(f"  [SKIP] {af.name} — no amendment metadata")
+                    logger.warning(f"  SKIP {af.name} - no amendment metadata")
                     continue
 
                 articles = _split_into_articles(full_text)
@@ -311,9 +311,9 @@ class CorpusChunker:
                             "source_file":           af.name,
                         },
                     ))
-                logger.info(f"  {af.name} [amendment] → {len(articles)} chunks")
+                logger.info(f"  {af.name} [amendment] -> {len(articles)} chunks")
 
-        logger.info(f"✓ laws total: {len(all_docs)} chunks")
+        logger.info(f"laws total: {len(all_docs)} chunks")
         return all_docs
 
     def get_na2d_chunks(self) -> Dict[str, List[Document]]:
@@ -344,7 +344,7 @@ class CorpusChunker:
                     }],
                 )
                 principle_docs.extend(chunks)
-                logger.info(f"  [BOOK] {item.name} → {len(chunks)} chunks")
+                logger.info(f"  BOOK {item.name} -> {len(chunks)} chunks")
 
             elif item.is_dir():
                 # Court rulings folder
@@ -359,10 +359,10 @@ class CorpusChunker:
                     )
                     ruling_docs.extend(chunks)
                     folder_count += len(chunks)
-                logger.info(f"  [RULINGS] {item.name} → {folder_count} chunks")
+                logger.info(f"  RULINGS {item.name} -> {folder_count} chunks")
 
         logger.info(
-            f"✓ na2d: rulings={len(ruling_docs)} | principles={len(principle_docs)}"
+            f"na2d: rulings={len(ruling_docs)} | principles={len(principle_docs)}"
         )
         return {"rulings": ruling_docs, "principles": principle_docs}
 

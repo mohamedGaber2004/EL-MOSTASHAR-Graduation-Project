@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import logging , re 
+from src.Config.log_config import logging
+import re 
 from dataclasses import dataclass, field
 from typing import (
     Any , 
@@ -17,7 +18,7 @@ from src.Utils import (
     norm_regu
 )
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+ # Logging is configured globally in src/log_config.py
 logger = logging.getLogger(__name__)
 
 
@@ -222,11 +223,11 @@ class AmendmentExtractor:
     def extract(self, target_law_id: str) -> Optional[Amendment]:
         law_num, year = self._law_num_year()
         if not law_num or not year:
-            logger.warning(f"[SKIP] No law number/year | {self.filename}")
+            logger.warning(f"No law number or year found for file: {self.filename}")
             return None
         articles = self._article_numbers()
         if not articles:
-            logger.warning(f"[SKIP] No articles found | {self.filename}")
+            logger.warning(f"No articles found for file: {self.filename}")
             return None
         atype  = self._amendment_type()
         adate  = self._amendment_date(year)

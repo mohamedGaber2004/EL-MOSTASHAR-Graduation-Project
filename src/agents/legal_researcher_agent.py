@@ -1,15 +1,17 @@
 import json
-
+import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
+logger = logging.getLogger(__name__)
+
 from .agent_base import AgentBase
-from src.LLMs import get_llm_qwn
-from src.Graph.graph_helpers import (
-    _retrieve_for_charge, _build_fallback_package, _parse_llm_json
-)
 from src.Graphstore.KG_builder import LegalKnowledgeGraph
 from src.Prompts.legal_researcher_agent import LEGAL_RESEARCHER_AGENT_PROMPT,EXPECTED_OUTPUT_SCHEMA
-
+from src.Graph.graph_helpers import (
+    _retrieve_for_charge, 
+    _build_fallback_package, 
+    _parse_llm_json
+)
 
 class LegalResearcherAgent(AgentBase):
     """
@@ -19,30 +21,15 @@ class LegalResearcherAgent(AgentBase):
     الـ KG والـ embeddings يُحقنان من الخارج — لا يُنشآن داخل run().
     """
 
-    def __init__(
-        self,
-        kg: LegalKnowledgeGraph,
-        vector_store,                   # FAISS vector store جاهز
-    ):
-        super().__init__(
-            "LEGAL_RESEARCHER_MODEL",
-            "LEGAL_RESEARCHER_TEMP",
-            LEGAL_RESEARCHER_AGENT_PROMPT,
-        )
+    def __init__(self,kg: LegalKnowledgeGraph,vector_store):
+        super().__init__("LEGAL_RESEARCHER_MODEL","LEGAL_RESEARCHER_TEMP",LEGAL_RESEARCHER_AGENT_PROMPT)
         self.kg = kg
         self.vs = vector_store
 
     # ── context retrieval ──────────────────────────────────────────────
 
     def _retrieve_all_contexts(self, charges: list) -> tuple[list, list]:
-        """
-        يسترجع السياق لكل تهمة.
 
-        Returns
-        -------
-        contexts      : list — السياق لكل تهمة
-        failed_charges: list — التهم التي فشل استرجاعها
-        """
         contexts: list = []
         failed: list = []
 
@@ -52,7 +39,6 @@ class LegalResearcherAgent(AgentBase):
                 contexts.append(ctx)
             except Exception as e:
                 failed.append(charge.statute)
-                # أضف placeholder بدل ما تسقط التهمة
                 contexts.append({
                     "charge":  charge.statute,
                     "error":   str(e),
@@ -94,8 +80,10 @@ class LegalResearcherAgent(AgentBase):
     # ── main entry ─────────────────────────────────────────────────────
 
     def run(self, state):
+        logger.info("Starting legal research for %d charges", len(state.charges or []))
         # حالة لا توجد تهم
         if not state.charges:
+            logger.info("No charges found. Returning empty research package.")
             return self._empty_update(state, "legal_researcher", {
                 "research_packages":          [],
                 "procedural_principles":      [],
@@ -107,16 +95,18 @@ class LegalResearcherAgent(AgentBase):
 
         # 2. لو كل التهم فشلت — fallback مباشرة
         if len(failed_charges) == len(state.charges):
+            logger.warning("All charges failed during context retrieval. Using fallback.")
             legal_package = _build_fallback_package(all_contexts)
             legal_package["_meta"] = {"source": "fallback", "failed_charges": failed_charges}
             return self._empty_update(state, "legal_researcher", legal_package)
 
         # 3. بناء الـ prompt واستدعاء الـ LLM
         prompt = self._build_prompt(state, all_contexts)
+        logger.debug("Prompt built successfully. Invoking LLM...")
 
         try:
             response = self._llm_invoke_with_retries(
-                get_llm_qwn(self.model_name, self.temperature),
+                self.qwen_llm,
                 [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
             )
             legal_package = _parse_llm_json(response.content)
@@ -126,7 +116,10 @@ class LegalResearcherAgent(AgentBase):
 
         # 4. تحقق من صحة الـ output
         if not isinstance(legal_package, dict):
+            logger.error("LLM legal research failed to parse as valid dict. Using fallback.")
             legal_package = _build_fallback_package(all_contexts)
+        else:
+            logger.info("Legal research complete. Generated packages for %d charges.", len(legal_package.get("research_packages", [])))
 
         # 5. أضف metadata
         legal_package["_meta"] = {

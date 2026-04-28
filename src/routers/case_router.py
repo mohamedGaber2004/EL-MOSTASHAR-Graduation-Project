@@ -23,14 +23,15 @@ class InvokeCaseRequest(BaseModel):
 
 @router.post("/invoke_case")
 async def invoke_case(payload: InvokeCaseRequest) -> Any:
-    """
-    Run the legal pipeline for a case.
-
-    Request body: { "case_id": "case_1", "source_documents": ["path/to/docs"] }
-    Returns the final state (as JSON) produced by the graph.
-    """
     try:
-        state = AgentState(case_id=payload.case_id, source_documents=payload.source_documents or [])
+        source_docs = payload.source_documents or []
+        if not source_docs:
+            import os
+            case_dir = os.path.join("Datasets", "User_Cases", payload.case_id)
+            if os.path.isdir(case_dir):
+                source_docs = [case_dir]
+
+        state = AgentState(case_id=payload.case_id, source_documents=source_docs)
         final = run_case(state)
 
         # Normalize to JSON-serializable dict
@@ -50,13 +51,7 @@ async def invoke_case(payload: InvokeCaseRequest) -> Any:
 
 @router.get("/get_case_result")
 async def get_case_result(case_id: Optional[str] = None) -> Any:
-    """
-    Retrieve a previously-run case result.
 
-    Note: persistence is not implemented. This endpoint returns 404 unless
-    you first invoke the pipeline via `/cases/invoke_case` and wire a
-    storage layer. For now it provides a helpful message.
-    """
     if not case_id:
         raise HTTPException(status_code=400, detail="Missing query parameter: case_id")
 

@@ -1,49 +1,31 @@
 from __future__ import annotations
+import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+logger = logging.getLogger(__name__)
+
 from .agent_base import AgentBase
 from src.Graphstore.KG_builder import LegalKnowledgeGraph
-from src.LLMs import get_llm_llama
 from src.Graph.graph_helpers import _parse_llm_json
 from src.Prompts.procedural_auditor_agent import PROCEDURAL_AUDITOR_AGENT_PROMPT , EXPECTED_OUTPUT_SCHEMA
 from src.Utils.agents_enums import AgentsEnums
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Agent
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ProceduralAuditorAgent(AgentBase):
-    """
-    يراجع صحة الإجراءات الجنائية (القبض / التفتيش / الاستجواب / الاعتراف)
-    مستنداً إلى النصوص الفعلية المخزونة في الـ Knowledge Graph،
-    ويُصدر تقرير بطلان مُفصَّلاً بصيغة JSON.
-    """
 
     def __init__(self, kg: LegalKnowledgeGraph):
-        super().__init__(
-            "PROCEDURAL_AUDITOR_MODEL",
-            "PROCEDURAL_AUDITOR_TEMP",
-            PROCEDURAL_AUDITOR_AGENT_PROMPT,
-        )
+        super().__init__("PROCEDURAL_AUDITOR_MODEL","PROCEDURAL_AUDITOR_TEMP",PROCEDURAL_AUDITOR_AGENT_PROMPT)
         self.kg = kg
 
     # ── KG helpers ────────────────────────────────────────────────────────
 
     def _fetch_procedural_articles(self) -> tuple[str, list[str]]:
-        """
-        يجلب أحدث نسخة من كل مادة إجرائية من الـ KG.
-
-        Returns
-        -------
-        articles_block : str
-            نص مُنسَّق يحتوي رقم كل مادة ونصها — جاهز للـ prompt.
-        fetched_numbers : list[str]
-            أرقام المواد التي تم جلبها فعلاً (للتوثيق).
-        """
         if self.kg is None:
-            print("⚠️ KG غير متاح — سيعتمد الـ LLM على معرفته الداخلية", "warning")
+            logger.warning("KG not available - LLM will rely on its internal knowledge")
             return "لا توجد مواد متاحة من قاعدة البيانات.", []
         articles_text: list[str] = []
         fetched: list[str] = []
@@ -56,7 +38,6 @@ class ProceduralAuditorAgent(AgentBase):
                 if not history:
                     continue
 
-                # خذ أحدث نسخة بناءً على حقل version
                 latest = sorted(
                     history,
                     key=lambda x: x.get("version") or "0000-00-00",
@@ -66,7 +47,6 @@ class ProceduralAuditorAgent(AgentBase):
                 if not text:
                     continue
 
-                # لاحظ هل المادة معدَّلة
                 amendment_note = ""
                 if latest.get("is_amended"):
                     amendment_note = f" [معدَّلة — {latest.get('version', '')}]"
@@ -75,7 +55,7 @@ class ProceduralAuditorAgent(AgentBase):
                 fetched.append(article_num)
 
             except Exception as e:
-                print(e)
+                logger.error("Error fetching article: %s", e)
 
         if not articles_text:
             return "لا توجد مواد متاحة من قاعدة البيانات.", []
@@ -84,12 +64,7 @@ class ProceduralAuditorAgent(AgentBase):
 
     # ── prompt builder ────────────────────────────────────────────────────
 
-    def _build_prompt(
-        self,
-        state,
-        legal_references: str,
-        fetched_articles: list[str],
-    ) -> str:
+    def _build_prompt(self, state, legal_references: str, fetched_articles: list[str]) -> str:
         ingestion_data   = state.agent_outputs.get("data_ingestion", {})
         procedural_issues = state.procedural_issues or []
         confessions       = getattr(state, "confessions", [])
@@ -126,13 +101,16 @@ class ProceduralAuditorAgent(AgentBase):
 
     def run(self, state):
         issues_count = len(state.procedural_issues or [])
+        logger.info("Starting procedural auditor... Total issues to review: %d", issues_count)
         # 1. جلب النصوص من الـ KG
         legal_references, fetched_articles = self._fetch_procedural_articles()
+        logger.debug("Fetched %d procedural articles from KG.", len(fetched_articles))
         # 2. بناء الـ prompt
         prompt = self._build_prompt(state, legal_references, fetched_articles)
         # 3. استدعاء الـ LLM مع retry
+        logger.debug("Invoking LLM for procedural auditing...")
         response = self._llm_invoke_with_retries(
-            get_llm_llama(self.model_name, self.temperature),
+            self.lama_llm,
             [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
         )
 
@@ -141,13 +119,15 @@ class ProceduralAuditorAgent(AgentBase):
 
         # 5. إضافة metadata للتوثيق
         if isinstance(audit_report, dict):
+            logger.info("Procedural auditing complete. Found %d violations.", len(audit_report.get("violations", [])))
             audit_report["_meta"] = {
-                "kg_law_id":         AgentsEnums.CRIMINAL_PROCEDURE_LAW_ID.value,
+                "kg_law_id"          : AgentsEnums.CRIMINAL_PROCEDURE_LAW_ID.value,
                 "kg_articles_fetched": fetched_articles,
-                "articles_requested":  AgentsEnums.PROCEDURAL_ARTICLE_NUMBERS.value,
-                "issues_reviewed":     issues_count,
+                "articles_requested" : AgentsEnums.PROCEDURAL_ARTICLE_NUMBERS.value,
+                "issues_reviewed"    : issues_count,
             }
         else:
+            logger.error("LLM procedural audit failed to parse as valid dict.")
             audit_report = {
                 "raw_response": audit_report,
                 "violations": [],

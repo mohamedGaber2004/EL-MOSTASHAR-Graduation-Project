@@ -1,6 +1,6 @@
 import logging
 from functools import lru_cache
-from typing import Optional, Union
+from typing import Union
 
 from langgraph.graph import END, START, StateGraph
 

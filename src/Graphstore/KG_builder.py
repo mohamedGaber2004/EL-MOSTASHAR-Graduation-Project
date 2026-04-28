@@ -23,10 +23,6 @@ from src.Utils import (
     reg,
 )
  
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 
@@ -134,7 +130,7 @@ def ingest_tables(chunks: List[Document]) -> Dict[str, List[Dict]]:
 
     for law_id, tables in result.items():
         logger.info(
-            f"  ✓ {law_id}: {len(tables)} table(s) → "
+            f"  {law_id}: {len(tables)} table(s) -> "
             + ", ".join(f"table {t['table_number']}" for t in tables)
         )
     return result
@@ -166,7 +162,7 @@ class LegalKnowledgeGraph:
             return
         self.driver = GraphDatabase.driver(self._uri, auth=(self._user, self._password))
         self.driver.verify_connectivity()
-        logger.info("✓ Neo4j connected")
+        logger.info("Neo4j connected")
  
     def close(self):
         if self.driver is not None:
@@ -183,13 +179,13 @@ class LegalKnowledgeGraph:
         with self.driver.session() as s:
             if drop_existing:
                 s.run("MATCH (n) DETACH DELETE n")
-                logger.info("✓ Existing data cleared")
+                logger.info("Existing data cleared")
             for stmt in norm_regu.CREATION_OF_SCHEMA.value:
                 try:
                     s.run(stmt)
                 except Exception:
                     pass
-        logger.info("✓ Schema ready")
+        logger.info("Schema ready")
  
     # ── node / relationship creators ──────────────────────────────────────
  
@@ -393,7 +389,7 @@ class LegalKnowledgeGraph:
         """
         law_id = summary["law_meta"]["law_id"]
         if verbose:
-            print(f"\n{'='*60}\nIMPORTING: {summary['law_meta'].get('title')}\n{'='*60}")
+            logger.info(f"IMPORTING: {summary['law_meta'].get('title')}")
         self.create_law(summary["law_meta"])
         for i, a in enumerate(summary["articles"]):
             self.create_article(law_id, a.get("article_number"), a.get("text", ""), i)
@@ -409,9 +405,9 @@ class LegalKnowledgeGraph:
         for r in summary["references"]:
             self.create_reference(law_id, r["from_article"], r["to_article"])
         if verbose:
-            print(f"  ✓ {len(summary['articles'])} articles "
-                  f"| {len(summary['penalties'])} penalties "
-                  f"| {len(summary['schedules'])} schedules")
+            logger.info(f"  {len(summary['articles'])} articles "
+                        f"| {len(summary['penalties'])} penalties "
+                        f"| {len(summary['schedules'])} schedules")
  
     # ── statistics / queries ──────────────────────────────────────────────
  
@@ -428,14 +424,13 @@ class LegalKnowledgeGraph:
  
     def print_statistics(self):
         stats = self.get_statistics()
-        print("\n" + "="*60 + "\nKNOWLEDGE GRAPH STATISTICS\n" + "="*60)
-        print("\nNodes:")
+        logger.info("KNOWLEDGE GRAPH STATISTICS")
+        logger.info("Nodes:")
         for k, v in stats["nodes"].items():
-            print(f"  {k}: {v}")
-        print("\nRelationships:")
+            logger.info(f"  {k}: {v}")
+        logger.info("Relationships:")
         for k, v in stats["relationships"].items():
-            print(f"  {k}: {v}")
-        print("="*60)
+            logger.info(f"  {k}: {v}")
  
     def query_amendments(self, law_id: Optional[str] = None) -> List[Dict]:
         with self.driver.session() as s:
@@ -520,7 +515,7 @@ def build_knowledge_graph(
         ct = c.metadata.get("chunk_type", "unknown")
         chunk_type_counts[ct] = chunk_type_counts.get(ct, 0) + 1
     for ct, count in sorted(chunk_type_counts.items()):
-        print(f"  {ct}: {count}")
+        logger.info(f"  {ct}: {count}")
  
     # ── Phase 1 ───────────────────────────────────────────────────────────
     logger.info("PHASE 1: extraction summary — ingesting dataset")

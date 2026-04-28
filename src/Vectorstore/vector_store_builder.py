@@ -9,7 +9,6 @@ from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -53,13 +52,13 @@ def build_vector_store(docs: List[Document], embeddings, index_path: str = "lega
     logger.info("Indexing %d documents ...", len(docs))
     vs = FAISS.from_documents(docs, embeddings)
     vs.save_local(index_path)
-    logger.info("✓ FAISS index saved → %s", index_path)
+    logger.info("FAISS index saved -> %s", index_path)
     return vs
 
 
 def load_vector_store(index_path: str, embeddings) -> FAISS:
     vs = FAISS.load_local(index_path, embeddings, allow_dangerous_deserialization=True)
-    logger.info("✓ FAISS index loaded ← %s", index_path)
+    logger.info("FAISS index loaded <- %s", index_path)
     return vs
 
 
