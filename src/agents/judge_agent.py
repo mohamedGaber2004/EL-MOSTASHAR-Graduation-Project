@@ -1,22 +1,15 @@
-import json
-import logging
+import json ,logging
 from langchain_core.messages import HumanMessage, SystemMessage
-
-logger = logging.getLogger(__name__)
-
 from .agent_base import AgentBase
 from src.Graph.graph_helpers import _parse_llm_json, _now
 from src.Prompts.judge_agent import JUDGE_AGENT_PROMPT ,EXPECTED_OUTPUT_SCHEMA
 from src.Utils import VerdictType
 from src.Utils.agents_enums import AgentsEnums
+
+
+logger = logging.getLogger(__name__)
+
 class JudgeAgent(AgentBase):
-    """
-    يُصدر حكماً مسبباً بعد مراجعة نتائج جميع الـ agents:
-    - ProceduralAuditorAgent  → البطلانيات
-    - EvidenceAnalystAgent    → مصفوفة الأدلة
-    - DefenseAnalystAgent     → تقييم الدفوع
-    - LegalResearcherAgent    → الإطار القانوني
-    """
 
     def __init__(self):
         super().__init__("JUDGE_MODEL", "JUDGE_TEMP", JUDGE_AGENT_PROMPT)
@@ -24,36 +17,28 @@ class JudgeAgent(AgentBase):
     # ── context builder ────────────────────────────────────────────────
 
     def _build_judicial_context(self, state) -> dict:
-        """
-        يجمع نتائج كل الـ agents السابقة في حزمة منظمة للقاضي.
-        """
         outputs = state.agent_outputs
 
-        # 1. البطلانيات من المدقق الإجرائي
         procedural = outputs.get("procedural_auditor", {})
         nullities = [
             v for v in procedural.get("violations", [])
             if v.get("nullity") is True
         ]
 
-        # 2. مصفوفة الأدلة
         evidence_out    = outputs.get("evidence_analyst", {})
         evidence_matrix = evidence_out.get("evidence_matrix", [])
         invalidated_ids = evidence_out.get("_meta", {}).get("invalidated_ids", [])
         overall_proof   = evidence_out.get("overall_proof_assessment", "غير متاح")
 
-        # 3. تحليل الدفوع
         defense_out    = outputs.get("defense_analyst", {})
         formal_defenses     = defense_out.get("formal_defenses", [])
         substantive_defenses = defense_out.get("substantive_defenses", [])
         defense_strength    = defense_out.get("overall_defense_strength", "غير متاح")
         critical_points     = defense_out.get("critical_defense_points", [])
 
-        # 4. البحث القانوني
         legal_out      = outputs.get("legal_researcher", {})
         research_pkgs  = legal_out.get("research_packages", [])
 
-        # 5. بيانات القضية الأساسية
         case_basics = {
             "case_id":    state.case_id,
             "defendants": [getattr(d, "name", str(d)) for d in (state.defendants or [])],
@@ -108,7 +93,6 @@ class JudgeAgent(AgentBase):
         if mapped:
             return mapped
 
-        # محاولة partial match
         for key, value in AgentsEnums.VERDICT_MAP.value.items():
             if key in verdict_text:
                 return value
@@ -126,7 +110,6 @@ class JudgeAgent(AgentBase):
                 "reasoning": ruling.get("ruling_reasoning", ""),
                 "doubt":     ruling.get("doubt_noted", False),
             })
-        # أضف التسبيب الإجمالي
         trace.append({
             "agent":     "judge",
             "charge":    "إجمالي",
@@ -140,19 +123,16 @@ class JudgeAgent(AgentBase):
     def run(self, state):
         logger.info("Starting judge agent to issue verdict...")
 
-        # 1. تحقق من اكتمال الـ agents السابقة
         required_agents = ["procedural_auditor", "evidence_analyst",
                            "defense_analyst", "legal_researcher"]
         missing = [a for a in required_agents if a not in state.completed_agents]
         if missing:
             logger.warning(f"Incomplete agents: {missing}")
 
-        # 2. بناء السياق القضائي
         judicial_context = self._build_judicial_context(state)
         prompt = self._build_prompt(judicial_context)
         logger.debug("Judicial context built successfully.")
 
-        # 3. استدعاء الـ LLM
         logger.debug("Invoking LLM to issue verdict...")
         response = self._llm_invoke_with_retries(
             self.lama_llm,
@@ -160,7 +140,6 @@ class JudgeAgent(AgentBase):
         )
         judgment = _parse_llm_json(response.content)
 
-        # 4. تحقق من صحة الـ output
         if not isinstance(judgment, dict):
             logger.error("LLM judgment evaluation failed to parse as valid dict.")
             judgment = {
@@ -171,14 +150,11 @@ class JudgeAgent(AgentBase):
                 "raw_response":      str(judgment),
             }
 
-        # 5. استخراج الـ verdict بأمان
         verdict = self._parse_verdict(judgment.get("verdict", ""))
         logger.info("Judgment complete. Final verdict: %s (Confidence: %s)", verdict, judgment.get("confidence_score", 0.0))
 
-        # 6. بناء reasoning_trace per-charge
         reasoning_trace = self._build_reasoning_trace(judgment)
 
-        # 7. تحديث الـ state
         return state.model_copy(update={
             "agent_outputs":    {**state.agent_outputs, "judge": judgment},
             "suggested_verdict": verdict,

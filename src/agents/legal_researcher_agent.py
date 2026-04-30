@@ -1,9 +1,5 @@
-import json
-import logging
+import json , logging
 from langchain_core.messages import HumanMessage, SystemMessage
-
-logger = logging.getLogger(__name__)
-
 from .agent_base import AgentBase
 from src.Graphstore.KG_builder import LegalKnowledgeGraph
 from src.Prompts.legal_researcher_agent import LEGAL_RESEARCHER_AGENT_PROMPT,EXPECTED_OUTPUT_SCHEMA
@@ -13,13 +9,9 @@ from src.Graph.graph_helpers import (
     _parse_llm_json
 )
 
-class LegalResearcherAgent(AgentBase):
-    """
-    يبحث في الـ KG والـ VectorStore عن المواد والمبادئ
-    المرتبطة بكل تهمة ويبني حزمة بحث قانوني.
 
-    الـ KG والـ embeddings يُحقنان من الخارج — لا يُنشآن داخل run().
-    """
+logger = logging.getLogger(__name__)
+class LegalResearcherAgent(AgentBase):
 
     def __init__(self,kg: LegalKnowledgeGraph,vector_store):
         super().__init__("LEGAL_RESEARCHER_MODEL","LEGAL_RESEARCHER_TEMP",LEGAL_RESEARCHER_AGENT_PROMPT)
@@ -81,7 +73,6 @@ class LegalResearcherAgent(AgentBase):
 
     def run(self, state):
         logger.info("Starting legal research for %d charges", len(state.charges or []))
-        # حالة لا توجد تهم
         if not state.charges:
             logger.info("No charges found. Returning empty research package.")
             return self._empty_update(state, "legal_researcher", {
@@ -90,17 +81,14 @@ class LegalResearcherAgent(AgentBase):
                 "relevant_cassation_rulings": [],
             })
 
-        # 1. استرجاع السياق — كل تهمة منفصلة مع error handling
         all_contexts, failed_charges = self._retrieve_all_contexts(state.charges)
 
-        # 2. لو كل التهم فشلت — fallback مباشرة
         if len(failed_charges) == len(state.charges):
             logger.warning("All charges failed during context retrieval. Using fallback.")
             legal_package = _build_fallback_package(all_contexts)
             legal_package["_meta"] = {"source": "fallback", "failed_charges": failed_charges}
             return self._empty_update(state, "legal_researcher", legal_package)
 
-        # 3. بناء الـ prompt واستدعاء الـ LLM
         prompt = self._build_prompt(state, all_contexts)
         logger.debug("Prompt built successfully. Invoking LLM...")
 
@@ -114,14 +102,12 @@ class LegalResearcherAgent(AgentBase):
         except Exception as e:
             legal_package = _build_fallback_package(all_contexts)
 
-        # 4. تحقق من صحة الـ output
         if not isinstance(legal_package, dict):
             logger.error("LLM legal research failed to parse as valid dict. Using fallback.")
             legal_package = _build_fallback_package(all_contexts)
         else:
             logger.info("Legal research complete. Generated packages for %d charges.", len(legal_package.get("research_packages", [])))
 
-        # 5. أضف metadata
         legal_package["_meta"] = {
             "charges_count":   len(state.charges),
             "failed_charges":  failed_charges,

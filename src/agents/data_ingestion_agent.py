@@ -1,13 +1,13 @@
-from pathlib import Path
 import logging
+from pathlib import Path
 from langchain_core.messages import HumanMessage, SystemMessage
-
-logger = logging.getLogger(__name__)
-
 from .agent_base import AgentBase
 from src.Prompts.data_ingestion_agent import DATA_INGESTION_AGENT_PROMPT
 from src.Graph.graph_helpers import _parse_llm_json , _merge_extracted , _apply_extracted_to_state  , _now
 from src.Utils.agents_enums import AgentsEnums
+
+logger = logging.getLogger(__name__)
+
 
 EMPTY_EXTRACTED = lambda: {
     "case_meta": {}, "defendants": [], "charges": [], "incidents": [],

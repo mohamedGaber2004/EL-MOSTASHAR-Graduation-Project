@@ -2,17 +2,16 @@ from __future__ import annotations
 import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
-
-logger = logging.getLogger(__name__)
-
 from .agent_base import AgentBase
 from src.Graphstore.KG_builder import LegalKnowledgeGraph
 from src.Graph.graph_helpers import _parse_llm_json
 from src.Prompts.procedural_auditor_agent import PROCEDURAL_AUDITOR_AGENT_PROMPT , EXPECTED_OUTPUT_SCHEMA
 from src.Utils.agents_enums import AgentsEnums
 
+logger = logging.getLogger(__name__)
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Agent
+# Procedural Auditor Agent
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ProceduralAuditorAgent(AgentBase):
@@ -38,10 +37,7 @@ class ProceduralAuditorAgent(AgentBase):
                 if not history:
                     continue
 
-                latest = sorted(
-                    history,
-                    key=lambda x: x.get("version") or "0000-00-00",
-                )[-1]
+                latest = sorted(history,key=lambda x: x.get("version") or "0000-00-00")[-1]
 
                 text = (latest.get("text") or "").strip()
                 if not text:

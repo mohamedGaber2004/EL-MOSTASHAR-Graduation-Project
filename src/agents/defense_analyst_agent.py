@@ -1,17 +1,11 @@
-import json
-import logging
+import json , logging
 from langchain_core.messages import HumanMessage, SystemMessage
-
-logger = logging.getLogger(__name__)
-
 from .agent_base import AgentBase
 from src.Graph.graph_helpers import _parse_llm_json
 from src.Prompts.defense_analysis_agent import DEFENSE_ANALYSIS_AGENT_PROMPT , EXPECTED_OUTPUT_SCHEMA
 
 
-# ── Output Schema ──────────────────────────────────────────────────────
-
-
+logger = logging.getLogger(__name__)
 
 class DefenseAnalystAgent(AgentBase):
 
@@ -43,7 +37,6 @@ class DefenseAnalystAgent(AgentBase):
         يجمع النتائج ذات الصلة من الـ agents السابقة فقط —
         بدل إرسال كل الـ state.
         """
-        # من ProceduralAuditorAgent
         procedural = state.agent_outputs.get("procedural_auditor", {})
         nullities = [
             {
@@ -57,7 +50,6 @@ class DefenseAnalystAgent(AgentBase):
         ]
         critical_nullities = procedural.get("critical_nullities", [])
 
-        # من EvidenceAnalystAgent
         evidence_output = state.agent_outputs.get("evidence_analyst", {})
         evidence_matrix = evidence_output.get("evidence_matrix", [])
         overall_proof   = evidence_output.get("overall_proof_assessment", "غير متاح")
@@ -72,7 +64,6 @@ class DefenseAnalystAgent(AgentBase):
         }
 
     def _build_prompt(self, defense_data: dict, prior_context: dict, state) -> str:
-        # بيانات المتهمين والتهم للسياق
         case_basics = json.dumps({
             "defendants": [
                 getattr(d, "name", str(d)) for d in (state.defendants or [])
@@ -117,7 +108,6 @@ class DefenseAnalystAgent(AgentBase):
         docs_count = len(state.defense_documents or [])
         logger.info("Starting defense analyst evaluation... Docs count: %d", docs_count)
 
-        # حالة لا توجد مستندات دفاع
         if not docs_count:
             logger.info("No defense documents. Returning empty output.")
             return self._empty_update(state, "defense_analyst", {
@@ -129,15 +119,12 @@ class DefenseAnalystAgent(AgentBase):
                 "critical_defense_points":  [],
             })
 
-        # 1. استخرج بيانات الدفوع
         defense_data   = self._extract_defense_data(state)
         prior_context  = self._build_prior_agents_context(state)
         logger.debug("Defense data extracted. Alibi claimed: %s", defense_data.get("alibi_claimed"))
 
-        # 2. بناء الـ prompt
         prompt = self._build_prompt(defense_data, prior_context, state)
 
-        # 3. استدعاء الـ LLM وحفظ النتيجة  ← الإصلاح الأهم
         logger.debug("Invoking LLM for defense analysis...")
         response = self._llm_invoke_with_retries(
             self.qwen_llm,
@@ -160,7 +147,6 @@ class DefenseAnalystAgent(AgentBase):
         else:
             logger.debug("Defense evaluation complete. Overall strength: %s", defense_analysis.get("overall_defense_strength", "N/A"))
 
-        # 5. أضف metadata
         defense_analysis["_meta"] = {
             "docs_count":          docs_count,
             "formal_count":        len(defense_data["formal_defenses"]),
