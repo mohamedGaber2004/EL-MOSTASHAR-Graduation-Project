@@ -2,34 +2,95 @@ from __future__ import annotations
 import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
+
 from .agent_base import AgentBase
 from src.Graphstore.KG_builder import LegalKnowledgeGraph
 from src.Graph.graph_helpers import _parse_llm_json
-from src.Prompts.procedural_auditor_agent import PROCEDURAL_AUDITOR_AGENT_PROMPT , EXPECTED_OUTPUT_SCHEMA
+from src.Prompts.procedural_auditor_agent import (
+    PROCEDURAL_AUDITOR_AGENT_PROMPT,
+    EXPECTED_OUTPUT_SCHEMA,
+)
 from src.Utils.agents_enums import AgentsEnums
 
 logger = logging.getLogger(__name__)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Procedural Auditor Agent
-# ─────────────────────────────────────────────────────────────────────────────
 
 class ProceduralAuditorAgent(AgentBase):
+    """Audits procedural issues against articles retrieved from the KG."""
 
-    def __init__(self, kg: LegalKnowledgeGraph):
-        super().__init__("PROCEDURAL_AUDITOR_MODEL","PROCEDURAL_AUDITOR_TEMP",PROCEDURAL_AUDITOR_AGENT_PROMPT)
+    def __init__(self, kg: LegalKnowledgeGraph, vector_store=None):
+        super().__init__("PROCEDURAL_AUDITOR_MODEL","PROCEDURAL_AUDITOR_TEMP",PROCEDURAL_AUDITOR_AGENT_PROMPT,llm_provider="llama")
         self.kg = kg
+        self.vs = vector_store
 
-    # ── KG helpers ────────────────────────────────────────────────────────
-
-    def _fetch_procedural_articles(self) -> tuple[str, list[str]]:
+    # ── dynamic article discovery ─────────────────────────────────────
+    def _retrieve_articles_for_issue(self, issue_text: str, k: int = 5) -> list[str]:
         if self.kg is None:
-            logger.warning("KG not available - LLM will rely on its internal knowledge")
+            return []
+        # use first 2 words only for better match
+        short_keyword = " ".join(issue_text.strip().split()[:2])
+        try:
+            hits = self.kg.search_articles_by_keyword(
+                keyword=short_keyword,
+                law_id=AgentsEnums.CRIMINAL_PROCEDURE_LAW_ID.value,
+                k=k,
+            )
+            article_nums = [str(h["article_number"]) for h in hits if h.get("article_number")]
+            logger.info("KG retrieval for [%s]: %d article(s)", short_keyword, len(article_nums))
+            return article_nums
+        except Exception as e:
+            logger.warning("KG retrieval failed for [%s]: %s", short_keyword, e)
+            return []
+
+    def _resolve_article_numbers(self, procedural_issues: list) -> list[str]:
+        """
+        Purely dynamic — NO hardcoded baseline whatsoever.
+        """
+        dynamic: list[str] = []
+
+        for issue in procedural_issues:
+            # ── extract meaningful text from issue ──────────────────────
+            if isinstance(issue, dict):
+                issue_text = (
+                    issue.get("issue_description")
+                    or issue.get("procedure_type")
+                    or issue.get("violation_type")
+                    or ""
+                ).strip()
+            else:
+                issue_text = str(issue).strip()
+
+            if not issue_text or issue_text.lower() == "none":
+                logger.warning("Skipping empty procedural issue")
+                continue
+
+            for num in self._retrieve_articles_for_issue(issue_text):
+                if num not in dynamic:
+                    dynamic.append(num)
+
+        if not dynamic:
+            logger.warning(
+                "No articles found from KG for any issue — "
+                "LLM will rely on internal knowledge"
+            )
+
+        logger.info("Article resolution — dynamic from KG: %d", len(dynamic))
+        return dynamic
+
+    # ── KG fetcher ────────────────────────────────────────────────────
+
+    def _fetch_procedural_articles(
+        self, article_numbers: list[str]
+    ) -> tuple[str, list[str]]:
+        """Fetch article texts from the KG for the given article numbers."""
+        if self.kg is None:
+            logger.warning("KG not available — LLM will rely on internal knowledge")
             return "لا توجد مواد متاحة من قاعدة البيانات.", []
+
         articles_text: list[str] = []
         fetched: list[str] = []
 
-        for article_num in AgentsEnums.PROCEDURAL_ARTICLE_NUMBERS.value:
+        for article_num in article_numbers:
             try:
                 history = self.kg.query_article_history(
                     AgentsEnums.CRIMINAL_PROCEDURE_LAW_ID.value, article_num
@@ -37,31 +98,36 @@ class ProceduralAuditorAgent(AgentBase):
                 if not history:
                     continue
 
-                latest = sorted(history,key=lambda x: x.get("version") or "0000-00-00")[-1]
+                latest = sorted(
+                    history,
+                    key=lambda x: x.get("version") or "0000-00-00",
+                )[-1]
 
                 text = (latest.get("text") or "").strip()
                 if not text:
                     continue
 
-                amendment_note = ""
-                if latest.get("is_amended"):
-                    amendment_note = f" [معدَّلة — {latest.get('version', '')}]"
+                amendment_note = (
+                    f" [معدَّلة — {latest.get('version', '')}]"
+                    if latest.get("is_amended")
+                    else ""
+                )
 
                 articles_text.append(f"م{article_num}{amendment_note}:\n{text}")
                 fetched.append(article_num)
 
             except Exception as e:
-                logger.error("Error fetching article: %s", e)
+                logger.error("Error fetching article %s: %s", article_num, e)
 
         if not articles_text:
             return "لا توجد مواد متاحة من قاعدة البيانات.", []
 
         return "\n\n".join(articles_text), fetched
 
-    # ── prompt builder ────────────────────────────────────────────────────
+    # ── prompt builder ────────────────────────────────────────────────
 
     def _build_prompt(self, state, legal_references: str, fetched_articles: list[str]) -> str:
-        ingestion_data   = state.agent_outputs.get("data_ingestion", {})
+        ingestion_data    = state.agent_outputs.get("data_ingestion", {})
         procedural_issues = state.procedural_issues or []
         confessions       = getattr(state, "confessions", [])
         incidents         = getattr(state, "incidents", [])
@@ -93,41 +159,48 @@ class ProceduralAuditorAgent(AgentBase):
             f"{EXPECTED_OUTPUT_SCHEMA}"
         )
 
-    # ── main entry ────────────────────────────────────────────────────────
+    # ── main entry ────────────────────────────────────────────────────
 
     def run(self, state):
         issues_count = len(state.procedural_issues or [])
-        logger.info("Starting procedural auditor... Total issues to review: %d", issues_count)
-        # 1. جلب النصوص من الـ KG
-        legal_references, fetched_articles = self._fetch_procedural_articles()
-        logger.debug("Fetched %d procedural articles from KG.", len(fetched_articles))
-        # 2. بناء الـ prompt
+        logger.info(
+            "ProceduralAuditorAgent starting — %d issue(s) to review", issues_count
+        )
+
+        # ← dynamic resolution replaces the hardcoded enum loop
+        article_numbers = self._resolve_article_numbers(state.procedural_issues or [])
+
+        legal_references, fetched_articles = self._fetch_procedural_articles(
+            article_numbers
+        )
+        logger.debug("Fetched %d procedural articles from KG", len(fetched_articles))
+
         prompt = self._build_prompt(state, legal_references, fetched_articles)
-        # 3. استدعاء الـ LLM مع retry
-        logger.debug("Invoking LLM for procedural auditing...")
         response = self._llm_invoke_with_retries(
-            self.lama_llm,
+            self._llm,
             [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
         )
 
-        # 4. تحليل الرد
         audit_report = _parse_llm_json(response.content)
 
-        # 5. إضافة metadata للتوثيق
         if isinstance(audit_report, dict):
-            logger.info("Procedural auditing complete. Found %d violations.", len(audit_report.get("violations", [])))
+            logger.info(
+                "Procedural audit complete — %d violation(s) found",
+                len(audit_report.get("violations", [])),
+            )
             audit_report["_meta"] = {
-                "kg_law_id"          : AgentsEnums.CRIMINAL_PROCEDURE_LAW_ID.value,
+                "kg_law_id":           AgentsEnums.CRIMINAL_PROCEDURE_LAW_ID.value,
                 "kg_articles_fetched": fetched_articles,
-                "articles_requested" : AgentsEnums.PROCEDURAL_ARTICLE_NUMBERS.value,
-                "issues_reviewed"    : issues_count,
+                "articles_dynamic":    article_numbers,
+                "issues_reviewed":     issues_count,
+                "vs_connected":        self.vs is not None
             }
         else:
-            logger.error("LLM procedural audit failed to parse as valid dict.")
+            logger.error("Procedural audit — LLM response could not be parsed as dict")
             audit_report = {
                 "raw_response": audit_report,
-                "violations": [],
-                "_meta": {"kg_articles_fetched": fetched_articles},
+                "violations":   [],
+                "_meta":        {"kg_articles_fetched": fetched_articles},
             }
 
         return self._empty_update(state, "procedural_auditor", audit_report)

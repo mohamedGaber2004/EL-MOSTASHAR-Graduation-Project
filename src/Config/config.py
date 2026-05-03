@@ -15,8 +15,11 @@ class Settings(BaseSettings):
     # API Keys
     GROQ_API_KEY: Optional[str] = None
     HUGGINGFACE_API_TOKEN: Optional[str] = None
-    LANGCHAIN_API_KEY: Optional[str] = None
-
+    LANGSMITH_API_KEY: Optional[str] = None
+    LANGSMITH_TRACING: Optional[bool] = True
+    LANGSMITH_ENDPOINT: Optional[str] = None
+    LANGSMITH_PROJECT: Optional[str] = None
+    
     # LLMs (raw model config for legacy code)
     REASONING_MODEL: str
     REASONING_MODEL_TEMP: float

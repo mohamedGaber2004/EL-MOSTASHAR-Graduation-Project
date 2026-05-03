@@ -6,21 +6,6 @@ class AgentsEnums (Enum):
     AGENT_INVOKATION_ERRORS  = ("429", "rate_limit", "rate_limit_exceeded", "tokens per minute", "please try again")
     AGENT_INGESTION_TXT_FILES_ENCODING = ("utf-8", "cp1256", "latin-1")
 
-    CRIMINAL_PROCEDURE_LAW_ID = "egyptian_criminal_procedure"
-
-    PROCEDURAL_ARTICLE_NUMBERS = [
-    "41",   # الدستور — اشتراطات القبض
-    "45",   # الدستور — اشتراطات التفتيش
-    "54",   # الإجراءات — القبض بغير إذن قضائي
-    "55",   # الإجراءات — مدة الاحتجاز قبل العرض على النيابة
-    "91",   # الإجراءات — الضبط والإحضار
-    "92",   # الإجراءات — الحبس الاحتياطي
-    "135",  # الإجراءات — الاستجواب وإخطار النيابة خلال 24 ساعة
-    "136",  # الإجراءات — حق المتهم في الاستعانة بمحامٍ
-    "302",  # الإجراءات — الاعتراف وشروط صحته
-    "333",  # الإجراءات — البطلان وأثره
-    ]
-
     VERDICT_MAP = {
         "إدانة":         VerdictType.CONVICTION,
         "براءة":         VerdictType.ACQUITTAL,
@@ -29,3 +14,20 @@ class AgentsEnums (Enum):
         "acquittal":     VerdictType.ACQUITTAL,
         "partial_guilty": VerdictType.PARTIAL_GUILTY,
     }
+
+    
+    CRIMINAL_PROCEDURE_LAW_ID = "criminal_procedure"  # was "egyptian_criminal_procedure"
+
+    @staticmethod
+    def law_code_to_kg_id(law_code: str) -> str:
+        mapping = {
+            "قانون العقوبات":               "penal_code",
+            "قانون الإجراءات الجنائية":     "criminal_procedure",
+            "قانون مكافحة المخدرات":        "anti_drugs",
+            "قانون مكافحة الإرهاب":         "anti_terror",
+            "قانون الأسلحة والذخائر":       "weapons_ammunition",
+            "قانون مكافحة جرائم المعلومات": "cybercrime",
+            "قانون مكافحة غسيل الأموال":    "money_laundering",
+            "قانون الطوارئ":                "emergency_law",
+        }
+        return mapping.get(law_code, law_code)

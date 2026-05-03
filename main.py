@@ -1,6 +1,15 @@
 # Import necessary modules
 import uvicorn
 from fastapi import FastAPI
+import os
+from src.Config.config import get_settings
+
+
+cfg = get_settings()
+os.environ["LANGCHAIN_TRACING_V2"]  = str(cfg.LANGSMITH_TRACING).lower()
+os.environ["LANGCHAIN_API_KEY"]     = cfg.LANGSMITH_API_KEY or ""
+os.environ["LANGCHAIN_ENDPOINT"]    = cfg.LANGSMITH_ENDPOINT or ""
+os.environ["LANGCHAIN_PROJECT"]     = cfg.LANGSMITH_PROJECT or ""
 
 # Initialize the FastAPI app
 app = FastAPI()

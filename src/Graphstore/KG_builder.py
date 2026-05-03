@@ -482,12 +482,46 @@ class LegalKnowledgeGraph:
                 ORDER BY a.version
             """, law_id=law_id, article_number=article_number)
             return [dict(r) for r in result]
+        
+
+    def search_articles_by_keyword(
+        self, keyword: str, law_id: Optional[str] = None, k: int = 3
+    ) -> List[Dict]:
+        with self.driver.session() as s:
+            if law_id:
+                result = s.run("""
+                    MATCH (a:Article {law_id: $law_id})
+                    WHERE a.text CONTAINS $keyword
+                    OR a.article_number CONTAINS $keyword
+                    RETURN a.article_number AS article_number,
+                        a.text           AS text,
+                        a.law_id         AS law_id,
+                        a.version        AS version,
+                        a.is_amended     AS is_amended
+                    LIMIT $k
+                """, law_id=law_id, keyword=keyword, k=k)
+            else:
+                result = s.run("""
+                    MATCH (a:Article)
+                    WHERE a.text CONTAINS $keyword
+                    OR a.article_number CONTAINS $keyword
+                    RETURN a.article_number AS article_number,
+                        a.text           AS text,
+                        a.law_id         AS law_id,
+                        a.version        AS version,
+                        a.is_amended     AS is_amended
+                    LIMIT $k
+                """, keyword=keyword, k=k)
+            return [dict(r) for r in result]
 
 
 # =============================================================================
 # PIPELINE
 # =============================================================================
  
+
+
+
 def build_knowledge_graph(
     neo4j_uri:      str,
     neo4j_user:     str,

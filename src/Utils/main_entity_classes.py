@@ -25,38 +25,35 @@ from src.Utils import (
 # =============================================================================
 
 class Defendant(BaseModel):
-    """
-    بيانات المتهم المستخلصة من ملفات القضية.
-    """
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     # ── هوية ──────────────────────────────────────────────────────────────────
-    name:               str
+    name:               str                                 # اسم المتهم
     alias:              Optional[str]       = None          # الاسم المستعار / اللقب
-    national_id:        Optional[str]       = None
-    passport_number:    Optional[str]       = None
-    gender:             Optional[Gender]    = None
-    age:                Optional[int]       = None          # ← بيأثر في التخفيف
-    date_of_birth:      Optional[datetime]  = None
-    nationality:        Optional[str]       = None
-    occupation:         Optional[str]       = None          # ← بيأثر في ظروف التخفيف
-    address:            Optional[str]       = None
+    national_id:        Optional[str]       = None          # الرقم القومي
+    passport_number:    Optional[str]       = None          # رقم جواز السفر
+    gender:             Optional[Gender]    = None          # النوع
+    age:                Optional[int]       = None          # السن
+    date_of_birth:      Optional[datetime]  = None          # تاريخ الميلاد
+    nationality:        Optional[str]       = None          # الجنسية
+    occupation:         Optional[str]       = None          # المهنة
+    address:            Optional[str]       = None          # العنوان
 
     # ── حالة نفسية / قانونية ─────────────────────────────────────────────────
-    mental_state:       Optional[MentalState] = None        # ← جنون / إكراه / سكر
-    mental_report_id:   Optional[str]       = None          # مرجع تقرير الطب الشرعي النفسي
+    mental_state:       Optional[MentalState] = None        # الحالة النفسية / القانونية
+    mental_report_id:   Optional[str]       = None          # مرجع التقرير النفسي
 
     # ── سوابق ──────────────────────────────────────────────────────────────────
-    prior_record:       Optional[bool]      = False
-    prior_crimes:       List[str]           = Field(default_factory=list)  # ← نوع السوابق
-    prior_sentences:    List[str]           = Field(default_factory=list)  # ← الأحكام السابقة
+    prior_record:       Optional[bool]      = False                         # له سوابق أم لا
+    prior_crimes:       List[str]           = Field(default_factory=list)   # أنواع الجرائم السابقة
+    prior_sentences:    List[str]           = Field(default_factory=list)   # ← الأحكام السابقة
 
     # ── دور في الجريمة ────────────────────────────────────────────────────────
-    complicity_role:    Optional[ComplicityRole] = None
+    complicity_role:    Optional[ComplicityRole] = None     # دوره في الجريمة
 
     # ── وضع في القضية ────────────────────────────────────────────────────────
-    in_custody:         Optional[bool]      = None
-    arrest_date:        Optional[datetime]  = None
+    in_custody:         Optional[bool]      = None          # محبوس احتياطي
+    arrest_date:        Optional[datetime]  = None          # تاريخ القبض
     detention_order_id: Optional[str]       = None          # رقم أمر الحبس الاحتياطي
 
     # ── مصدر البيانات ────────────────────────────────────────────────────────
@@ -70,9 +67,6 @@ class Defendant(BaseModel):
 # =============================================================================
 
 class Charge(BaseModel):
-    """
-    التهم الموجهة — مستخلصة من أمر الإحالة أو قرار الاتهام.
-    """
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     # ── تعريف التهمة ──────────────────────────────────────────────────────────
@@ -81,11 +75,10 @@ class Charge(BaseModel):
     law_code:               Optional[LawCode]   = None      # القانون المنطبق
     article_number:         Optional[str]       = None      # رقم المادة
     article_paragraph:      Optional[str]       = None      # فقرة المادة إن وجدت
-    incident_type:          Optional[IncidentType] = None
-
     description:            Optional[str]       = None      # وصف التهمة
     charge_date:            Optional[datetime]  = None      # تاريخ ارتكاب الجريمة
     charge_location:        Optional[str]       = None      # مكان الجريمة
+    incident_type:          Optional[IncidentType] = None   # نوع الواقعة
 
     # ── عناصر الجريمة ────────────────────────────────────────────────────────
     elements_required:      List[str]           = Field(default_factory=list)  # أركان الجريمة

@@ -1,44 +1,54 @@
-import json ,logging
+import json
+import logging
+
 from langchain_core.messages import HumanMessage, SystemMessage
+
 from .agent_base import AgentBase
 from src.Graph.graph_helpers import _parse_llm_json, _now
-from src.Prompts.judge_agent import JUDGE_AGENT_PROMPT ,EXPECTED_OUTPUT_SCHEMA
+from src.Prompts.judge_agent import JUDGE_AGENT_PROMPT, EXPECTED_OUTPUT_SCHEMA
 from src.Utils import VerdictType
 from src.Utils.agents_enums import AgentsEnums
 
-
 logger = logging.getLogger(__name__)
 
+
 class JudgeAgent(AgentBase):
+    """Issues the final verdict after receiving the outputs of all preceding agents."""
 
     def __init__(self):
-        super().__init__("JUDGE_MODEL", "JUDGE_TEMP", JUDGE_AGENT_PROMPT)
+        super().__init__("JUDGE_MODEL","JUDGE_TEMP",JUDGE_AGENT_PROMPT,llm_provider="llama")
 
-    # ── context builder ────────────────────────────────────────────────
+    # ── context builder ───────────────────────────────────────────────
 
     def _build_judicial_context(self, state) -> dict:
         outputs = state.agent_outputs
 
-        procedural = outputs.get("procedural_auditor", {})
-        nullities = [
+        # ── procedural ────────────────────────────────────────────────
+        procedural    = outputs.get("procedural_auditor", {})
+        nullities     = [
             v for v in procedural.get("violations", [])
             if v.get("nullity") is True
         ]
 
+        # ── evidence ──────────────────────────────────────────────────
         evidence_out    = outputs.get("evidence_analyst", {})
         evidence_matrix = evidence_out.get("evidence_matrix", [])
         invalidated_ids = evidence_out.get("_meta", {}).get("invalidated_ids", [])
         overall_proof   = evidence_out.get("overall_proof_assessment", "غير متاح")
 
-        defense_out    = outputs.get("defense_analyst", {})
-        formal_defenses     = defense_out.get("formal_defenses", [])
+        # ── defense ───────────────────────────────────────────────────
+        defense_out          = outputs.get("defense_analyst", {})
+        formal_defenses      = defense_out.get("formal_defenses", [])
         substantive_defenses = defense_out.get("substantive_defenses", [])
-        defense_strength    = defense_out.get("overall_defense_strength", "غير متاح")
-        critical_points     = defense_out.get("critical_defense_points", [])
+        defense_strength     = defense_out.get("overall_defense_strength", "غير متاح")
+        critical_points      = defense_out.get("critical_defense_points", [])
 
-        legal_out      = outputs.get("legal_researcher", {})
-        research_pkgs  = legal_out.get("research_packages", [])
+        # ── legal research (includes cassation rulings now) ────────────
+        legal_out     = outputs.get("legal_researcher", {})
+        research_pkgs = legal_out.get("research_packages", [])
+        cassation     = legal_out.get("relevant_cassation_rulings", [])
 
+        # ── case basics ───────────────────────────────────────────────
         case_basics = {
             "case_id":    state.case_id,
             "defendants": [getattr(d, "name", str(d)) for d in (state.defendants or [])],
@@ -46,21 +56,25 @@ class JudgeAgent(AgentBase):
         }
 
         return {
-            "case_basics":           case_basics,
-            "procedural_nullities":  nullities,
-            "invalidated_evidence":  invalidated_ids,
-            "evidence_matrix":       evidence_matrix,
-            "overall_proof":         overall_proof,
-            "formal_defenses":       formal_defenses,
-            "substantive_defenses":  substantive_defenses,
-            "defense_strength":      defense_strength,
-            "critical_defense_points": critical_points,
-            "legal_research":        research_pkgs,
+            "case_basics":              case_basics,
+            "procedural_nullities":     nullities,
+            "invalidated_evidence":     invalidated_ids,
+            "evidence_matrix":          evidence_matrix,
+            "overall_proof":            overall_proof,
+            "formal_defenses":          formal_defenses,
+            "substantive_defenses":     substantive_defenses,
+            "defense_strength":         defense_strength,
+            "critical_defense_points":  critical_points,
+            "legal_research":           research_pkgs,
+            "cassation_rulings":        cassation,       # ← new
         }
 
+    # ── prompt builder ────────────────────────────────────────────────
+
     def _build_prompt(self, judicial_context: dict) -> str:
-        nullities_count = len(judicial_context["procedural_nullities"])
+        nullities_count   = len(judicial_context["procedural_nullities"])
         invalidated_count = len(judicial_context["invalidated_evidence"])
+        cassation_count   = len(judicial_context["cassation_rulings"])
 
         return (
             "## ملف القضية الكامل للمداولة:\n"
@@ -71,8 +85,10 @@ class JudgeAgent(AgentBase):
             "2. الدليل الباطل لا يُعتد به ولا يُستأنس به ولو بشكل غير مباشر.\n"
             "3. رُد على كل دفع من الدفوع المُثارة صراحةً في الحكم.\n"
             "4. قيّم كل دليل على حدة قبل الحكم الإجمالي.\n"
-            f"5. يوجد {nullities_count} بطلان إجرائي و{invalidated_count} دليل مستبعد — "
-            "ضعها في الاعتبار عند تقدير الأدلة.\n\n"
+            f"5. يوجد {nullities_count} بطلان إجرائي و{invalidated_count} دليل مستبعد "
+            "— ضعها في الاعتبار عند تقدير الأدلة.\n"
+            f"6. يوجد {cassation_count} مبدأ من محكمة النقض — استشهد بها عند التسبيب "
+            "إن كانت وثيقة الصلة.\n\n"
 
             "## التعليمات:\n"
             "أصدر حكماً مسبباً يناقش كل تهمة على حدة، "
@@ -82,25 +98,20 @@ class JudgeAgent(AgentBase):
             f"{EXPECTED_OUTPUT_SCHEMA}"
         )
 
-    # ── verdict parsing ────────────────────────────────────────────────
+    # ── verdict helpers ───────────────────────────────────────────────
 
     def _parse_verdict(self, verdict_text: str) -> VerdictType:
-        """يحوّل نص الحكم إلى VerdictType مع fallback آمن."""
         if not verdict_text:
             return VerdictType.ACQUITTAL
-
         mapped = AgentsEnums.VERDICT_MAP.value.get(verdict_text.strip())
         if mapped:
             return mapped
-
         for key, value in AgentsEnums.VERDICT_MAP.value.items():
             if key in verdict_text:
                 return value
-
         return VerdictType.ACQUITTAL
 
     def _build_reasoning_trace(self, judgment: dict) -> list[dict]:
-        """يبني reasoning_trace per-charge."""
         trace = []
         for ruling in judgment.get("charges_rulings", []):
             trace.append({
@@ -118,30 +129,29 @@ class JudgeAgent(AgentBase):
         })
         return trace
 
-    # ── main entry ─────────────────────────────────────────────────────
+    # ── main entry ────────────────────────────────────────────────────
 
     def run(self, state):
-        logger.info("Starting judge agent to issue verdict...")
+        logger.info("JudgeAgent starting — issuing verdict")
 
-        required_agents = ["procedural_auditor", "evidence_analyst",
-                           "defense_analyst", "legal_researcher"]
-        missing = [a for a in required_agents if a not in state.completed_agents]
+        required = ["procedural_auditor", "evidence_analyst",
+                    "defense_analyst", "legal_researcher"]
+        missing  = [a for a in required if a not in state.completed_agents]
         if missing:
-            logger.warning(f"Incomplete agents: {missing}")
+            logger.warning("Some upstream agents not yet complete: %s", missing)
 
         judicial_context = self._build_judicial_context(state)
-        prompt = self._build_prompt(judicial_context)
-        logger.debug("Judicial context built successfully.")
+        prompt           = self._build_prompt(judicial_context)
 
-        logger.debug("Invoking LLM to issue verdict...")
         response = self._llm_invoke_with_retries(
-            self.lama_llm,
+            self._llm,
             [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
         )
+
         judgment = _parse_llm_json(response.content)
 
         if not isinstance(judgment, dict):
-            logger.error("LLM judgment evaluation failed to parse as valid dict.")
+            logger.error("Judge LLM response could not be parsed — issuing safe acquittal")
             judgment = {
                 "verdict":           "براءة",
                 "verdict_reasoning": "فشل إصدار الحكم — براءة احتياطية",
@@ -150,17 +160,24 @@ class JudgeAgent(AgentBase):
                 "raw_response":      str(judgment),
             }
 
-        verdict = self._parse_verdict(judgment.get("verdict", ""))
-        logger.info("Judgment complete. Final verdict: %s (Confidence: %s)", verdict, judgment.get("confidence_score", 0.0))
-
+        verdict         = self._parse_verdict(judgment.get("verdict", ""))
         reasoning_trace = self._build_reasoning_trace(judgment)
 
-        return state.model_copy(update={
-            "agent_outputs":    {**state.agent_outputs, "judge": judgment},
-            "suggested_verdict": verdict,
-            "confidence_score":  float(judgment.get("confidence_score", 0.0)),
-            "reasoning_trace":   reasoning_trace,
-            "completed_agents":  state.completed_agents + ["judge"],
-            "current_agent":     "judge",
-            "last_updated":      _now(),
-        })
+        logger.info(
+            "Verdict issued: %s (confidence=%.2f)",
+            verdict,
+            float(judgment.get("confidence_score", 0.0)),
+        )
+
+        # _empty_update handles agent_outputs, completed_agents,
+        # current_agent, and last_updated — we pass verdict-specific
+        # fields via a subsequent model_copy to keep _empty_update clean.
+        base_state = self._empty_update(state, "judge", judgment)
+
+        return base_state.model_copy(
+            update={
+                "suggested_verdict": verdict,
+                "confidence_score":  float(judgment.get("confidence_score", 0.0)),
+                "reasoning_trace":   reasoning_trace,
+            }
+        )

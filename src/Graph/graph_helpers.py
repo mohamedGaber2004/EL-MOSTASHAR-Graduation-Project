@@ -1,6 +1,6 @@
 import json
+from json_repair import repair_json
 from src.Config.log_config import logging
-import re
 from typing import Any, Dict
 from datetime import datetime, timezone
 
@@ -25,75 +25,18 @@ def _parse_llm_json(raw: str) -> dict:
     if not raw:
         return {}
 
-    text = raw.strip()
-
-    match = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
-    if match:
-        text = match.group(1).strip()
-
-    brace_start = text.find("{")
-    if brace_start > 0:
-        text = text[brace_start:]
-    elif brace_start == -1:
-        logger.error("No JSON found in response: %s", raw[:200])
-        return {}
-
     try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-        if isinstance(parsed, str):
-            try:
-                nested = json.loads(parsed)
-                if isinstance(nested, dict):
-                    return nested
-            except Exception:
-                pass
-        if isinstance(parsed, list):
+        repaired = repair_json(raw, return_objects=True)
+        if isinstance(repaired, dict):
+            return repaired
+        if isinstance(repaired, list):
             logger.warning("LLM returned array, wrapping in dict.")
-            return {"items": parsed}
-        logger.warning("LLM returned unexpected type: %s", type(parsed).__name__)
+            return {"items": repaired}
+        logger.warning("LLM returned unexpected type: %s", type(repaired).__name__)
         return {}
-
-    except json.JSONDecodeError as e:
-        if "Extra data" in str(e):
-            logger.warning("Multiple JSON objects found, using the first only.")
-            depth, in_string, escape_next = 0, False, False
-            for i, char in enumerate(text):
-                if escape_next:
-                    escape_next = False
-                    continue
-                if char == "\\":
-                    escape_next = True
-                    continue
-                if char == '"' and not escape_next:
-                    in_string = not in_string
-                    continue
-                if in_string:
-                    continue
-                if char == "{":
-                    depth += 1
-                elif char == "}":
-                    depth -= 1
-                    if depth == 0:
-                        try:
-                            return json.loads(text[: i + 1])
-                        except json.JSONDecodeError:
-                            break
-
-        logger.warning("JSON parsing failed, attempting to repair: %s", str(e))
-        open_braces   = text.count("{") - text.count("}")
-        open_brackets = text.count("[") - text.count("]")
-        if open_braces > 0:
-            text += "}" * open_braces
-        if open_brackets > 0:
-            text += "]" * open_brackets
-
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            logger.error("JSON repair failed, returning empty dict.")
-            return {}
+    except Exception as e:
+        logger.error("JSON repair failed: %s", e)
+        return {}
 
 
 # =============================================================================
@@ -112,15 +55,15 @@ def _merge_extracted(base: dict, new: dict) -> dict:
 
     id_keys = {
         "defendants":         "name",
-        "charges":            "charge_id",
-        "incidents":          "incident_id",
-        "evidences":          "evidence_id",
-        "lab_reports":        "report_id",
-        "witness_statements": "witness_id",
-        "confessions":        "confession_id",
-        "procedural_issues":  "issue_id",
-        "prior_judgments":    "judgment_id",
-        "defense_documents":  "doc_id",
+        "charges":            "article_number",
+        "incidents":          "incident_description",
+        "evidences":          "description",
+        "lab_reports":        "lab_name",
+        "witness_statements": "witness_name",      # fix field name too
+        "confessions":        "defendant_name",
+        "procedural_issues":  "issue_description",
+        "prior_judgments":    "case_reference",
+        "defense_documents":  "doc_type",
     }
 
     for field, id_key in id_keys.items():
@@ -155,10 +98,10 @@ def _apply_extracted_to_state(state: AgentState, extracted: dict, doc_id: str) -
 
     def _safe_parse(model_cls, data: dict):
         try:
-            data = {k: v for k, v in data.items() if v is not None}
-            if "source_document_id" not in data or not data.get("source_document_id"):
-                data["source_document_id"] = doc_id
-            return model_cls.model_validate(data)
+            cleaned = {k: v for k, v in data.items() if v is not None and v != [] and v != {}}
+            if not cleaned.get("source_document_id"):
+                cleaned["source_document_id"] = doc_id
+            return model_cls.model_validate(cleaned)
         except Exception as e:
             logger.warning("Failed to parse %s from %s: %s", model_cls.__name__, doc_id, e)
             return None
@@ -168,7 +111,7 @@ def _apply_extracted_to_state(state: AgentState, extracted: dict, doc_id: str) -
     # case_meta
     meta = extracted.get("case_meta", {})
     if meta:
-        for field in ("case_number", "court", "jurisdiction", "prosecutor_name"):
+        for field in ("case_number", "court", "court_level","jurisdiction", "prosecutor_name","filing_date", "referral_date"):
             if getattr(state, field, None) is None and meta.get(field):
                 updates[field] = meta[field]
 

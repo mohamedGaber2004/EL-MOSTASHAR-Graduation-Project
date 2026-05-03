@@ -1,24 +1,35 @@
-import json , logging
+import json
+import logging
+
 from langchain_core.messages import HumanMessage, SystemMessage
+
 from .agent_base import AgentBase
 from src.Graph.graph_helpers import _parse_llm_json
-from src.Prompts.defense_analysis_agent import DEFENSE_ANALYSIS_AGENT_PROMPT , EXPECTED_OUTPUT_SCHEMA
-
+from src.Prompts.defense_analysis_agent import (
+    DEFENSE_ANALYSIS_AGENT_PROMPT,
+    EXPECTED_OUTPUT_SCHEMA,
+)
 
 logger = logging.getLogger(__name__)
 
+
 class DefenseAnalystAgent(AgentBase):
+    """
+    Evaluates the defense documents against procedural nullities and the
+    evidence matrix produced by earlier agents.
+    Uses qwen (unchanged from original).
+    """
 
     def __init__(self):
-        super().__init__("DEFENSE_ANALYST_MODEL","DEFENSE_ANALYST_TEMP",DEFENSE_ANALYSIS_AGENT_PROMPT)
+        super().__init__("DEFENSE_ANALYST_MODEL","DEFENSE_ANALYST_TEMP",DEFENSE_ANALYSIS_AGENT_PROMPT,llm_provider="llama")
 
-    # ── helpers ────────────────────────────────────────────────────────
+    # ── helpers ───────────────────────────────────────────────────────
 
     def _extract_defense_data(self, state) -> dict:
         formal, substantive, principles = [], [], []
         any_alibi = False
 
-        for doc in (state.defense_documents or []):
+        for doc in state.defense_documents or []:
             formal.extend(getattr(doc, "formal_defenses", []))
             substantive.extend(getattr(doc, "substantive_defenses", []))
             principles.extend(getattr(doc, "supporting_principles", []))
@@ -26,24 +37,24 @@ class DefenseAnalystAgent(AgentBase):
                 any_alibi = True
 
         return {
-            "formal_defenses":      formal,
-            "substantive_defenses": substantive,
+            "formal_defenses":       formal,
+            "substantive_defenses":  substantive,
             "supporting_principles": principles,
-            "alibi_claimed":        any_alibi,
+            "alibi_claimed":         any_alibi,
         }
 
     def _build_prior_agents_context(self, state) -> dict:
         """
-        يجمع النتائج ذات الصلة من الـ agents السابقة فقط —
-        بدل إرسال كل الـ state.
+        Collects only the fields that are actually used in the prompt —
+        keeps the payload lean and avoids leaking raw LLM internals.
         """
         procedural = state.agent_outputs.get("procedural_auditor", {})
-        nullities = [
+        nullities  = [
             {
-                "violation":   v.get("violation_type"),
-                "article":     v.get("article"),
+                "violation":    v.get("violation_type"),
+                "article":      v.get("article"),
                 "nullity_type": v.get("nullity_type"),
-                "effect":      v.get("effect_on_evidence"),
+                "effect":       v.get("effect_on_evidence"),
             }
             for v in procedural.get("violations", [])
             if v.get("nullity") is True
@@ -56,22 +67,26 @@ class DefenseAnalystAgent(AgentBase):
         invalidated_ids = evidence_output.get("_meta", {}).get("invalidated_ids", [])
 
         return {
-            "procedural_nullities":  nullities,
-            "critical_nullities":    critical_nullities,
-            "evidence_matrix":       evidence_matrix,
-            "overall_proof":         overall_proof,
-            "invalidated_evidence":  invalidated_ids,
+            "procedural_nullities": nullities,
+            "critical_nullities":   critical_nullities,
+            "evidence_matrix":      evidence_matrix,
+            "overall_proof":        overall_proof,
+            "invalidated_evidence": invalidated_ids,
         }
 
     def _build_prompt(self, defense_data: dict, prior_context: dict, state) -> str:
-        case_basics = json.dumps({
-            "defendants": [
-                getattr(d, "name", str(d)) for d in (state.defendants or [])
-            ],
-            "charges": [
-                getattr(c, "statute", str(c)) for c in (state.charges or [])
-            ],
-        }, ensure_ascii=False, indent=2)
+        case_basics = json.dumps(
+            {
+                "defendants": [
+                    getattr(d, "name", str(d)) for d in (state.defendants or [])
+                ],
+                "charges": [
+                    getattr(c, "statute", str(c)) for c in (state.charges or [])
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
         return (
             "## معطيات القضية الأساسية:\n"
@@ -102,39 +117,37 @@ class DefenseAnalystAgent(AgentBase):
             f"{EXPECTED_OUTPUT_SCHEMA}"
         )
 
-    # ── main entry ─────────────────────────────────────────────────────
+    # ── main entry ────────────────────────────────────────────────────
 
     def run(self, state):
         docs_count = len(state.defense_documents or [])
-        logger.info("Starting defense analyst evaluation... Docs count: %d", docs_count)
+        logger.info("DefenseAnalystAgent starting — %d defense document(s)", docs_count)
 
         if not docs_count:
-            logger.info("No defense documents. Returning empty output.")
+            logger.info("No defense documents — returning empty output")
             return self._empty_update(state, "defense_analyst", {
-                "formal_defenses":       [],
-                "substantive_defenses":  [],
-                "alibi_analysis":        {"claimed": False},
-                "supporting_principles": [],
+                "formal_defenses":          [],
+                "substantive_defenses":     [],
+                "alibi_analysis":           {"claimed": False},
+                "supporting_principles":    [],
                 "overall_defense_strength": "لا توجد دفوع",
                 "critical_defense_points":  [],
             })
 
-        defense_data   = self._extract_defense_data(state)
-        prior_context  = self._build_prior_agents_context(state)
-        logger.debug("Defense data extracted. Alibi claimed: %s", defense_data.get("alibi_claimed"))
+        defense_data  = self._extract_defense_data(state)
+        prior_context = self._build_prior_agents_context(state)
+        logger.debug("Defense data extracted — alibi claimed: %s", defense_data["alibi_claimed"])
 
-        prompt = self._build_prompt(defense_data, prior_context, state)
-
-        logger.debug("Invoking LLM for defense analysis...")
+        prompt   = self._build_prompt(defense_data, prior_context, state)
         response = self._llm_invoke_with_retries(
-            self.qwen_llm,
+            self._llm,
             [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
         )
+
         defense_analysis = _parse_llm_json(response.content)
 
-        # 4. تحقق من صحة الـ output
         if not isinstance(defense_analysis, dict):
-            logger.error("LLM defense evaluation failed to parse as valid dict.")
+            logger.error("Defense analysis — LLM response could not be parsed as dict")
             defense_analysis = {
                 "formal_defenses":          [],
                 "substantive_defenses":     [],
@@ -145,14 +158,17 @@ class DefenseAnalystAgent(AgentBase):
                 "raw_response":             str(defense_analysis),
             }
         else:
-            logger.debug("Defense evaluation complete. Overall strength: %s", defense_analysis.get("overall_defense_strength", "N/A"))
+            logger.debug(
+                "Defense analysis complete — overall strength: %s",
+                defense_analysis.get("overall_defense_strength", "N/A"),
+            )
 
         defense_analysis["_meta"] = {
-            "docs_count":          docs_count,
-            "formal_count":        len(defense_data["formal_defenses"]),
-            "substantive_count":   len(defense_data["substantive_defenses"]),
-            "nullities_count":     len(prior_context["procedural_nullities"]),
-            "alibi_claimed":       defense_data["alibi_claimed"],
+            "docs_count":        docs_count,
+            "formal_count":      len(defense_data["formal_defenses"]),
+            "substantive_count": len(defense_data["substantive_defenses"]),
+            "nullities_count":   len(prior_context["procedural_nullities"]),
+            "alibi_claimed":     defense_data["alibi_claimed"],
         }
 
         return self._empty_update(state, "defense_analyst", defense_analysis)
