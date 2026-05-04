@@ -41,5 +41,12 @@ from .main_entity_classes import (
     EvidenceAnalysis,
     DefenseArgument,
     JudicialPrinciple,
-    FinalJudgment
+    FinalJudgment,
+    CaseMeta,
+    AmrIhalaExtraction,
+    MahdarDabtExtraction,
+    MahdarIstijwabExtraction,
+    AqwalShuhudExtraction,
+    TaqrirTibbiExtraction,
+    MozakaretDifaExtraction,
 )

@@ -2,7 +2,16 @@ from enum import Enum
 from src.Utils import VerdictType
 
 
-class AgentsEnums (Enum):
+class LegalDocType(str, Enum):
+    AMR_IHALA       = "amr_ihala"
+    MAHDAR_DABT     = "mahdar_dabt"
+    MAHDAR_ISTIJWAB = "mahdar_istijwab"
+    AQWAL_SHUHUD    = "aqwal_shuhud"
+    TAQRIR_TIBBI    = "taqrir_tibbi"
+    MOZAKARET_DIFA  = "mozakaret_difa"
+
+
+class AgentsEnums:
     AGENT_INVOKATION_ERRORS  = ("429", "rate_limit", "rate_limit_exceeded", "tokens per minute", "please try again")
     AGENT_INGESTION_TXT_FILES_ENCODING = ("utf-8", "cp1256", "latin-1")
 

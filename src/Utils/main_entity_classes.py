@@ -1,449 +1,209 @@
-from typing import List, Optional, Dict
-from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
-from datetime import datetime
+from __future__ import annotations
+from typing import List, Optional
 
-from src.Utils import (
-    Gender,
-    MentalState,
-    LawCode,
-    ComplicityRole,
-    EvidenceType,
-    CourtLevel,
-    ValidityStatus,
-    VerdictType,
-    WitnessRelation,
-    WitnessType,
-    ProcedureType,
-    NullityType,
-    IncidentType
-)
+from pydantic import BaseModel, Field
 
+from src.Utils.legal_enumerations import Gender ,NullityType, CourtLevel
 
-# =============================================================================
-#  DEFENDANT
-# =============================================================================
+# ══════════════════════════════════════════════════════
+#  Core Entities
+# ══════════════════════════════════════════════════════
 
 class Defendant(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    """متهم في القضية"""
+    name:                  Optional[str]      = None
+    alias:                 Optional[str]      = None
+    national_id:           Optional[str]      = None
+    passport_number:       Optional[str]      = None
+    gender:                Optional[Gender]   = None
+    date_of_birth:         Optional[str]      = None
+    age:                   Optional[int]      = None
+    occupation:            Optional[str]      = None
+    nationality:           Optional[str]      = None
+    address:               Optional[str]      = None
+    complicity_role:       Optional[str]      = None   # فاعل / شريك / محرّض
+    source_document_id:    Optional[str]      = None
 
-    # ── هوية ──────────────────────────────────────────────────────────────────
-    name:               str                                 # اسم المتهم
-    alias:              Optional[str]       = None          # الاسم المستعار / اللقب
-    national_id:        Optional[str]       = None          # الرقم القومي
-    passport_number:    Optional[str]       = None          # رقم جواز السفر
-    gender:             Optional[Gender]    = None          # النوع
-    age:                Optional[int]       = None          # السن
-    date_of_birth:      Optional[datetime]  = None          # تاريخ الميلاد
-    nationality:        Optional[str]       = None          # الجنسية
-    occupation:         Optional[str]       = None          # المهنة
-    address:            Optional[str]       = None          # العنوان
-
-    # ── حالة نفسية / قانونية ─────────────────────────────────────────────────
-    mental_state:       Optional[MentalState] = None        # الحالة النفسية / القانونية
-    mental_report_id:   Optional[str]       = None          # مرجع التقرير النفسي
-
-    # ── سوابق ──────────────────────────────────────────────────────────────────
-    prior_record:       Optional[bool]      = False                         # له سوابق أم لا
-    prior_crimes:       List[str]           = Field(default_factory=list)   # أنواع الجرائم السابقة
-    prior_sentences:    List[str]           = Field(default_factory=list)   # ← الأحكام السابقة
-
-    # ── دور في الجريمة ────────────────────────────────────────────────────────
-    complicity_role:    Optional[ComplicityRole] = None     # دوره في الجريمة
-
-    # ── وضع في القضية ────────────────────────────────────────────────────────
-    in_custody:         Optional[bool]      = None          # محبوس احتياطي
-    arrest_date:        Optional[datetime]  = None          # تاريخ القبض
-    detention_order_id: Optional[str]       = None          # رقم أمر الحبس الاحتياطي
-
-    # ── مصدر البيانات ────────────────────────────────────────────────────────
-    source_document_id: Optional[str]       = None
-    notes:              Optional[str]       = None
-
-
-
-# =============================================================================
-#  CHARGE
-# =============================================================================
 
 class Charge(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    """تهمة موجهة"""
+    law_code:                  Optional[str]       = None   # قانون العقوبات / قانون المخدرات …
+    article_number:            Optional[str]       = None
+    description:               Optional[str]       = None
+    incident_type:             Optional[str]       = None
+    attempt_flag:              bool                = False
+    charge_date:               Optional[str]       = None
+    charge_location:           Optional[str]       = None
+    linked_defendant_names:    List[str]           = Field(default_factory=list)
+    complicity_role:           Optional[str]       = None
+    source_document_id:        Optional[str]       = None
 
-    # ── تعريف التهمة ──────────────────────────────────────────────────────────
-    charge_id:              Optional[str]       = None      # معرف داخلي
-    statute:                Optional[str]       = None      # نص المادة
-    law_code:               Optional[LawCode]   = None      # القانون المنطبق
-    article_number:         Optional[str]       = None      # رقم المادة
-    article_paragraph:      Optional[str]       = None      # فقرة المادة إن وجدت
-    description:            Optional[str]       = None      # وصف التهمة
-    charge_date:            Optional[datetime]  = None      # تاريخ ارتكاب الجريمة
-    charge_location:        Optional[str]       = None      # مكان الجريمة
-    incident_type:          Optional[IncidentType] = None   # نوع الواقعة
-
-    # ── عناصر الجريمة ────────────────────────────────────────────────────────
-    elements_required:      List[str]           = Field(default_factory=list)  # أركان الجريمة
-    elements_proven:        Dict[str, bool]     = Field(default_factory=dict)  # ← ثبت / لم يثبت
-
-    # ── درجة الجريمة ─────────────────────────────────────────────────────────
-    attempt_flag:           bool                = False      # شروع أم جريمة تامة؟
-    complicity_role:        Optional[ComplicityRole] = None  # فاعل / شريك / محرض
-
-    # ── العقوبة ───────────────────────────────────────────────────────────────
-    penalty_range:          Optional[str]       = None      # الحد الأدنى والأقصى
-    penalty_min:            Optional[str]       = None      # الحد الأدنى
-    penalty_max:            Optional[str]       = None      # الحد الأقصى
-
-    # ── ظروف ──────────────────────────────────────────────────────────────────
-    aggravating_factors:    List[str]           = Field(default_factory=list)  # ظروف مشددة
-    mitigating_factors:     List[str]           = Field(default_factory=list)  # ظروف مخففة
-
-    # ── ربط بمتهمين ───────────────────────────────────────────────────────────
-    linked_defendant_names: List[str]           = Field(default_factory=list)
-
-    # ── مصدر ──────────────────────────────────────────────────────────────────
-    source_document_id:     Optional[str]       = None
-    notes:                  Optional[str]       = None
-
-
-
-
-# =============================================================================
-#  EVIDENCE
-# =============================================================================
-
-class Evidence(BaseModel):
-    """
-    الأدلة المادية والمستندية المضبوطة.
-    """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    # ── هوية الدليل ───────────────────────────────────────────────────────────
-    evidence_id:                Optional[str]           = None
-    evidence_type:              Optional[EvidenceType]  = None
-    description:                Optional[str]           = None
-
-    # ── الضبط ─────────────────────────────────────────────────────────────────
-    seizure_date:               Optional[datetime]      = None   # تاريخ الضبط
-    seizure_location:           Optional[str]           = None   # مكان الضبط ← مهم للتفتيش
-    seized_by:                  Optional[str]           = None   # ضابط/مخبر ضبطه
-    seizure_warrant_present:    Optional[bool]          = None   # هل في إذن تفتيش؟
-
-    # ── سلسلة الحيازة ────────────────────────────────────────────────────────
-    chain_of_custody_ok:        Optional[bool]          = None   # سلامة سلسلة الحيازة
-    chain_of_custody_notes:     Optional[str]           = None   # ملاحظات سلسلة الحيازة
-    storage_conditions_ok:      Optional[bool]          = None   # ظروف التخزين سليمة؟
-
-    # ── الصلاحية ──────────────────────────────────────────────────────────────
-    validity_status:            Optional[ValidityStatus] = None
-    invalidity_reason:          Optional[str]           = None   # سبب البطلان إن وُجد
-
-    # ── الربط ─────────────────────────────────────────────────────────────────
-    linked_charge_ids:          List[str]               = Field(default_factory=list)
-    linked_charge_elements:     List[str]               = Field(default_factory=list)
-    linked_defendant_name:      Optional[str]           = None   # بيخص متهم معين
-
-    # ── مصدر ──────────────────────────────────────────────────────────────────
-    source_document_id:         Optional[str]           = None
-    page_reference:             Optional[str]           = None   # رقم الصفحة في الملف
-    notes:                      Optional[str]           = None
-
-
-
-
-
-# =============================================================================
-#  LAB REPORT
-# =============================================================================
-
-class LabReport(BaseModel):
-    """
-    تقارير الطب الشرعي والمعامل الجنائية.
-    """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    # ── هوية التقرير ──────────────────────────────────────────────────────────
-    report_id:                  Optional[str]       = None
-    report_type:                Optional[str]       = None   # كيمياء / دم / بصمات / DNA / سموم
-    lab_name:                   Optional[str]       = None   # اسم المعمل / الجهة
-    examiner_name:              Optional[str]       = None   # اسم الخبير
-    examination_date:           Optional[datetime]  = None
-
-    # ── العينة ────────────────────────────────────────────────────────────────
-    sample_id:                  Optional[str]       = None
-    sample_type:                Optional[str]       = None   # دم / مسحة / بصمة / سلاح
-    sample_source:              Optional[str]       = None   # من أين أُخذت العينة
-    sample_chain_intact:        Optional[bool]      = None   # سلسلة حيازة العينة سليمة؟
-
-    # ── النتيجة ───────────────────────────────────────────────────────────────
-    result:                     Optional[str]       = None
-    result_is_positive:         Optional[bool]      = None   # إيجابي / سلبي
-    confirms_charge_element:    Optional[bool]      = None   # يثبت ركن من أركان التهمة؟
-    linked_charge_element:      Optional[str]       = None   # أي ركن؟
-
-    # ── الربط ─────────────────────────────────────────────────────────────────
-    linked_evidence_id:         Optional[str]       = None
-    linked_defendant_name:      Optional[str]       = None
-
-    # ── مصدر ──────────────────────────────────────────────────────────────────
-    source_document_id:         Optional[str]       = None
-    notes:                      Optional[str]       = None
-
-
-
-
-# =============================================================================
-#  WITNESS STATEMENT
-# =============================================================================
-
-class WitnessStatement(BaseModel):
-    """
-    أقوال الشهود المستخلصة من محاضر التحقيق والمحاكمة.
-    """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    # ── هوية الشاهد ───────────────────────────────────────────────────────────
-    witness_name:               Optional[str]           = None
-    witness_national_id:        Optional[str]           = None
-    witness_type:               Optional[WitnessType]   = None
-    witness_occupation:         Optional[str]           = None
-    relation_to_defendant:      Optional[WitnessRelation] = None  # قريب / عدو / محايد / ضابط
-
-    # ── الإجراءات ─────────────────────────────────────────────────────────────
-    statement_date:             Optional[datetime]      = None
-    statement_stage:            Optional[str]           = None   # تحقيق / محاكمة / نيابة
-    was_sworn_in:               Optional[bool]          = None   # أدى اليمين؟ ← إجرائي مهم
-    presence_at_scene:          Optional[bool]          = None   # كان موجود في مكان الجريمة؟
-
-    # ── المضمون ───────────────────────────────────────────────────────────────
-    statement_summary:          Optional[str]           = None
-    key_facts_mentioned:        List[str]               = Field(default_factory=list)  # وقائع ذكرها
-
-    # ── الاتساق ───────────────────────────────────────────────────────────────
-    consistency_flag:           Optional[bool]          = None   # متسق مع باقي الأدلة؟
-    contradicts_other_evidence: Optional[bool]          = None
-    contradiction_details:      Optional[str]           = None   # تفاصيل التناقض
-    prior_statement_exists:     Optional[bool]          = None   # أدلى بأقوال سابقة؟
-    retracted_statement:        Optional[bool]          = None   # عدل عن أقواله؟
-
-    # ── الموثوقية ─────────────────────────────────────────────────────────────
-    credibility_flags:          List[str]               = Field(default_factory=list)  # عوامل تأثر الموثوقية
-
-    # ── مصدر ──────────────────────────────────────────────────────────────────
-    source_document_id:         Optional[str]           = None
-    page_reference:             Optional[str]           = None
-    notes:                      Optional[str]           = None
-
-
-
-
-# =============================================================================
-#  CONFESSION
-# =============================================================================
-
-class Confession(BaseModel):
-    """
-    اعترافات المتهمين — بيانات الاستخلاص الإجرائي والموضوعي.
-    """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    # ── هوية ──────────────────────────────────────────────────────────────────
-    confession_id:              Optional[str]       = None
-    defendant_name:             str
-
-    # ── الظروف الإجرائية ─────────────────────────────────────────────────────
-    confession_date:            Optional[datetime]  = None
-    confession_stage:           Optional[str]       = None   # شرطة / نيابة / محكمة
-    obtained_before_arrest:     Optional[bool]      = None   # قبل القبض الرسمي؟
-    obtained_after_arrest:      Optional[bool]      = None   # ← بعد القبض؟ — إجرائي حاسم
-    legal_counsel_present:      Optional[bool]      = None   # ← حضر محامي؟ — حق دستوري
-    informed_of_rights:         Optional[bool]      = None   # أُخبر بحقوقه؟
-    coercion_claimed:           Optional[bool]      = None   # ادعى الإكراه؟
-    coercion_evidence:          Optional[str]       = None   # دليل على الإكراه المزعوم
-
-    # ── المضمون ───────────────────────────────────────────────────────────────
-    text:                       Optional[str]       = None   # نص الاعتراف
-    key_admissions:             List[str]           = Field(default_factory=list)  # الاعترافات الجوهرية
-
-    # ── الموثوقية ─────────────────────────────────────────────────────────────
-    voluntary:                  Optional[bool]      = None   # طوعي؟
-    consistent_with_facts:      Optional[bool]      = None   # يتسق مع وقائع القضية؟
-    consistent_with_evidence:   Optional[bool]      = None   # يتسق مع الأدلة المادية؟
-    retracted:                  Optional[bool]      = None   # ← عدل عنه؟ — مهم جدًا
-    retraction_date:            Optional[datetime]  = None
-    retraction_reason:          Optional[str]       = None   # سبب العدول
-
-    # ── مصدر ──────────────────────────────────────────────────────────────────
-    source_document_id:         Optional[str]       = None
-    page_reference:             Optional[str]       = None
-    notes:                      Optional[str]       = None
-
-
-
-
-# =============================================================================
-#  PROCEDURAL ISSUE
-# =============================================================================
-
-class ProceduralIssue(BaseModel):
-    """
-    المسائل الإجرائية المستخلصة من ملفات القضية —
-    تُمرَّر لـ Procedural Auditor Agent للتقييم القانوني.
-    """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    # ── تعريف الإجراء ─────────────────────────────────────────────────────────
-    issue_id:                   Optional[str]           = None
-    procedure_type:             Optional[ProcedureType] = None
-    procedure_date:             Optional[datetime]      = None
-    conducting_officer:         Optional[str]           = None   # من أجرى الإجراء
-    conducting_authority:       Optional[str]           = None   # الجهة (شرطة / نيابة / قاضي)
-
-    # ── السلامة الإجرائية ─────────────────────────────────────────────────────
-    warrant_present:            Optional[bool]          = None   # وجود إذن / أمر قضائي
-    warrant_id:                 Optional[str]           = None   # رقم الإذن
-    notification_to_da:         Optional[bool]          = None   # تم إخطار النيابة؟
-    notification_time:          Optional[str]           = None   # وقت الإخطار
-    legal_timeframes_respected: Optional[bool]          = None   # المواعيد القانونية ملتزم بها؟
-
-    # ── المشكلة المستخلصة ─────────────────────────────────────────────────────
-    issue_description:          Optional[str]           = None   # وصف الإشكالية الإجرائية
-    nullity_type:               Optional[NullityType]   = None   # بطلان مطلق / نسبي / لا بطلان
-    article_basis:              Optional[str]           = None   # المادة القانونية للبطلان المزعوم
-
-    # ── الأثر ─────────────────────────────────────────────────────────────────
-    affects_evidence_ids:       List[str]               = Field(default_factory=list)
-    may_invalidate_case:        Optional[bool]          = None
-    tainted_fruit_risk:         Optional[bool]          = None   # خطر ثمرة الشجرة المسمومة
-
-    # ── مصدر ──────────────────────────────────────────────────────────────────
-    source_document_id:         Optional[str]           = None
-    page_reference:             Optional[str]           = None
-    notes:                      Optional[str]           = None
-
-
-
-
-# =============================================================================
-#  PRIOR JUDGMENT  (مستخلص من أحكام سابقة — للمقارنة والاستدلال)
-# =============================================================================
-
-class PriorJudgment(BaseModel):
-    """
-    بيانات الأحكام السابقة المستخلصة — للاستدلال القانوني والمقارنة.
-    """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    # ── تعريف الحكم ───────────────────────────────────────────────────────────
-    judgment_id:                Optional[str]           = None
-    case_reference:             Optional[str]           = None   # رقم القضية
-    court_name:                 Optional[str]           = None
-    court_level:                Optional[CourtLevel]    = None
-    verdict_date:               Optional[datetime]      = None
-    verdict_type:               Optional[VerdictType]   = None
-
-    # ── موضوع الحكم ───────────────────────────────────────────────────────────
-    charge_statutes:            List[str]               = Field(default_factory=list)
-    key_legal_principles:       List[str]               = Field(default_factory=list)  # مبادئ قانونية مقررة
-    penalty_imposed:            Optional[str]           = None
-
-    # ── الاستخدام ─────────────────────────────────────────────────────────────
-    relevance_to_current_case:  Optional[str]           = None   # أوجه الصلة بالقضية الحالية
-
-    # ── مصدر ──────────────────────────────────────────────────────────────────
-    source_document_id:         Optional[str]           = None
-    notes:                      Optional[str]           = None
-
-
-
-
-# =============================================================================
-#  DEFENSE DOCUMENT  (مستندات الدفاع)
-# =============================================================================
-
-class DefenseDocument(BaseModel):
-    """
-    مستندات ومذكرات الدفاع المستخلصة.
-    """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    # ── تعريف ─────────────────────────────────────────────────────────────────
-    doc_id:                     Optional[str]           = None
-    doc_type:                   Optional[str]           = None   # مذكرة / تقرير طبي / حجج دفاع
-    submission_date:            Optional[datetime]      = None
-    submitted_by:               Optional[str]           = None   # المحامي / المتهم
-
-    # ── الدفوع المستخلصة ──────────────────────────────────────────────────────
-    formal_defenses:            List[str]               = Field(default_factory=list)   # دفوع شكلية
-    substantive_defenses:       List[str]               = Field(default_factory=list)   # دفوع موضوعية
-    alibi_claimed:              Optional[bool]          = None   # ادعاء حضوري في مكان آخر؟
-    alibi_details:              Optional[str]           = None
-
-    # ── الأدلة الدفاعية ───────────────────────────────────────────────────────
-    defense_evidence_ids:       List[str]               = Field(default_factory=list)
-    supporting_principles:      List[str]               = Field(default_factory=list)   # مبادئ نقض مستشهد بها
-
-    # ── مصدر ──────────────────────────────────────────────────────────────────
-    source_document_id:         Optional[str]           = None
-    notes:                      Optional[str]           = None
-
-
-
-
-# =============================================================================
-#  CASE INCIDENT  (وقائع القضية الأساسية)
-# =============================================================================
 
 class CaseIncident(BaseModel):
-    """
-    الوقائع الجوهرية للقضية المستخلصة من محاضر الضبط والتحقيق.
-    """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    """واقعة / حادثة"""
+    incident_type:         Optional[str]  = None
+    incident_date:         Optional[str]  = None
+    incident_location:     Optional[str]  = None
+    incident_description:  Optional[str]  = None
+    perpetrator_names:     List[str]      = Field(default_factory=list)
+    victim_names:          List[str]      = Field(default_factory=list)
+    source_document_id:    Optional[str]  = None
 
-    incident_id:                Optional[str]           = None
-    incident_type:              Optional[IncidentType]  = None
-    incident_date:              Optional[datetime]      = None
-    incident_location:          Optional[str]           = None
-    incident_description:       Optional[str]           = None
 
-    # ── الأطراف ───────────────────────────────────────────────────────────────
-    perpetrator_names:          List[str]               = Field(default_factory=list)
-    victim_names:               List[str]               = Field(default_factory=list)
-    witness_names:              List[str]               = Field(default_factory=list)
+class Evidence(BaseModel):
+    """دليل مادي / إجرائي"""
+    evidence_type:             Optional[str]  = None   # سلاح / مخدر / مستند …
+    description:               Optional[str]  = None
+    seizure_date:              Optional[str]  = None
+    seizure_location:          Optional[str]  = None
+    seized_by:                 Optional[str]  = None
+    seizure_warrant_present:   bool           = False
+    linked_defendant_name:     Optional[str]  = None
+    source_document_id:        Optional[str]  = None
 
-    # ── النتيجة ───────────────────────────────────────────────────────────────
-    outcome:                    Optional[str]           = None   # نتيجة الواقعة (وفاة / إصابة / خسارة مالية)
-    outcome_severity:           Optional[str]           = None   # درجة الخطورة
 
-    # ── الربط ─────────────────────────────────────────────────────────────────
-    linked_evidence_ids:        List[str]               = Field(default_factory=list)
-    linked_charge_ids:          List[str]               = Field(default_factory=list)
+class LabReport(BaseModel):
+    """تقرير معملي / طبي شرعي / فني"""
+    report_type:           Optional[str]  = None   # طبي شرعي / معملي / كيميائي
+    examination_date:      Optional[str]  = None
+    examiner_name:         Optional[str]  = None
+    result:                Optional[str]  = None
+    linked_defendant_name: Optional[str]  = None
+    source_document_id:    Optional[str]  = None
 
-    source_document_id:         Optional[str]           = None
-    notes:                      Optional[str]           = None
 
-# =============================================================================
-#  Others
-# =============================================================================
+class WitnessStatement(BaseModel):
+    """شهادة شاهد"""
+    witness_name:           Optional[str]  = None
+    witness_type:           Optional[str]  = None   # عيان / خبير / ضابط …
+    relation_to_defendant:  Optional[str]  = None
+    statement_summary:      Optional[str]  = None
+    statement_date:         Optional[str]  = None
+    was_sworn_in:           bool           = False
+    presence_at_scene:      bool           = False
+    key_facts_mentioned:    List[str]      = Field(default_factory=list)
+    source_document_id:     Optional[str]  = None
 
+
+class Confession(BaseModel):
+    """اعتراف / إنكار"""
+    defendant_name:        Optional[str]  = None
+    text:                  Optional[str]  = None
+    confession_date:       Optional[str]  = None
+    confession_stage:      Optional[str]  = None   # تحقيق / محكمة
+    legal_counsel_present: bool           = False
+    coercion_claimed:      bool           = False
+    voluntary:             bool           = True
+    key_admissions:        List[str]      = Field(default_factory=list)
+    source_document_id:    Optional[str]  = None
+
+
+class ProceduralIssue(BaseModel):
+    """دفع إجرائي / بطلان"""
+    procedure_type:     Optional[str]        = None   # ضبط / قبض / استجواب
+    issue_description:  Optional[str]        = None
+    warrant_present:    bool                 = False
+    conducting_officer: Optional[str]        = None
+    nullity_type:       Optional[NullityType] = None
+    article_basis:      Optional[str]        = None
+    source_document_id: Optional[str]        = None
+
+
+class PriorJudgment(BaseModel):
+    """حكم أو سابقة قضائية"""
+    judgment_number:    Optional[str]  = None
+    court_name:         Optional[str]  = None
+    judgment_date:      Optional[str]  = None
+    summary:            Optional[str]  = None
+    source_document_id: Optional[str]  = None
+
+
+class DefenseDocument(BaseModel):
+    """مذكرة دفاع"""
+    submitted_by:           Optional[str]  = None
+    formal_defenses:        List[str]      = Field(default_factory=list)
+    substantive_defenses:   List[str]      = Field(default_factory=list)
+    supporting_principles:  List[str]      = Field(default_factory=list)
+    alibi_claimed:          bool           = False
+    source_document_id:     Optional[str]  = None
+
+
+# ══════════════════════════════════════════════════════
+#  Analysis Output Models
+# ══════════════════════════════════════════════════════
 
 class EvidenceAnalysis(BaseModel):
-    evidence_id: str
-    strength_score: float = Field(ge=0, le=1)
-    legal_relevance: str # ربط الدليل بالركن المادي أو المعنوي
-    notes: Optional[str] = None
+    evidence_id:        Optional[str]   = None
+    admissibility:      Optional[str]   = None
+    weight:             Optional[str]   = None
+    notes:              Optional[str]   = None
+
 
 class DefenseArgument(BaseModel):
-    plea_type: str # دفع شكلي / دفع موضوعي
-    target_evidence_id: Optional[str] = None
-    legal_basis: str # السند القانوني (مادة قانونية أو مبدأ نقض)
-    argument_text: str
+    argument_type:      Optional[str]   = None   # شكلي / موضوعي
+    description:        Optional[str]   = None
+    legal_basis:        Optional[str]   = None
+    strength:           Optional[str]   = None   # قوي / متوسط / ضعيف
+
 
 class JudicialPrinciple(BaseModel):
-    principle_text: str # نص مبدأ محكمة النقض
-    relevance_to_case: str # وجه الاستدلال به في القضية الحالية
+    principle_text:     Optional[str]   = None
+    court_source:       Optional[str]   = None
+    applicable_to:      Optional[str]   = None
+
 
 class FinalJudgment(BaseModel):
-    procedural_ruling: str # الرد على بطلان الإجراءات
-    substantive_reasoning: str # تساند الأدلة والرد على الدفوع
-    verdict: VerdictType
-    penalty: Optional[str] = None # العقوبة في حال الإدانة
+    verdict:            Optional[str]   = None   # إدانة / براءة / جزئية
+    reasoning_summary:  Optional[str]   = None
+    recommended_penalty:Optional[str]   = None
+    confidence_score:   float           = Field(default=0.0, ge=0, le=1)
+
+
+# ══════════════════════════════════════════════════════
+#  Extraction Schemas  (used by instructor per doc-type)
+# ══════════════════════════════════════════════════════
+
+class CaseMeta(BaseModel):
+    case_number:         Optional[str]        = None
+    court:               Optional[str]        = None
+    court_level:         Optional[str] = None
+    jurisdiction:        Optional[str]        = None
+    filing_date:         Optional[str]        = None
+    referral_date:       Optional[str]        = None
+    prosecutor_name:     Optional[str]        = None
+    referral_order_text: Optional[str]        = None
+
+
+class AmrIhalaExtraction(BaseModel):
+    """أمر الإحالة"""
+    case_meta:   CaseMeta        = Field(default_factory=CaseMeta)
+    defendants:  List[Defendant] = Field(default_factory=list)
+    charges:     List[Charge]    = Field(default_factory=list)
+
+
+class MahdarDabtExtraction(BaseModel):
+    """محضر الضبط والتفتيش"""
+    evidences:          List[Evidence]         = Field(default_factory=list)
+    procedural_issues:  List[ProceduralIssue]  = Field(default_factory=list)
+    incidents:          List[CaseIncident]     = Field(default_factory=list)
+
+
+class MahdarIstijwabExtraction(BaseModel):
+    """محضر الاستجواب"""
+    confessions: List[Confession] = Field(default_factory=list)
+
+
+class AqwalShuhudExtraction(BaseModel):
+    """أقوال الشهود"""
+    witness_statements: List[WitnessStatement] = Field(default_factory=list)
+
+
+class TaqrirTibbiExtraction(BaseModel):
+    """التقرير الطبي / المعملي"""
+    lab_reports: List[LabReport] = Field(default_factory=list)
+
+
+class MozakaretDifaExtraction(BaseModel):
+    """مذكرة الدفاع"""
+    defense_documents:  List[DefenseDocument]  = Field(default_factory=list)
+    procedural_issues:  List[ProceduralIssue]  = Field(default_factory=list)

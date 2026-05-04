@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class AgentBase:
     """Base class for all court-simulation agents."""
 
-    def __init__(self,model_config_key: str,temp_config_key: str,prompt: str) -> None:
+    def __init__(self, model_config_key: str, temp_config_key: str, prompt: str) -> None:
         self.cfg = get_settings()
         self.agent: str = model_config_key
         self.model_name: str   = getattr(self.cfg, model_config_key)
@@ -36,22 +36,22 @@ class AgentBase:
             return get_ingesion_model()['open_router_llm']
         if agent_name == "PROCEDURAL_AUDITOR_MODEL":
             from src.LLMs.PROCEDURAL_AUDITOR_MODEL import get_procedural_model
-            return get_procedural_model()
+            return get_procedural_model()['open_router_llm']
         if agent_name == "LEGAL_RESEARCHER_MODEL":
             from src.LLMs.LEGAL_RESEARCHER_MODEL import get_legal_reasearcher_model
-            return get_legal_reasearcher_model()
+            return get_legal_reasearcher_model()['open_router_llm']
         if agent_name == "EVIDENCE_SCORING_MODEL":
             from src.LLMs.EVIDENCE_SCORING_MODEL import get_evidence_scoring_model
-            return get_evidence_scoring_model()
+            return get_evidence_scoring_model()['open_router_llm']
         if agent_name == "DEFENSE_AGENT_MODEL":
             from src.LLMs.DEFENSE_AGENT_MODEL import get_defense_model
-            return get_defense_model()
+            return get_defense_model()['open_router_llm']
         if agent_name == "JUDJICAL_PRINCIPLE_AGENT":
             from src.LLMs.JUDJICAL_PRINCIPLE_AGENT import get_judjical_principle_model
-            return get_judjical_principle_model()
+            return get_judjical_principle_model()['open_router_llm']
         if agent_name == "JUDGE_MODEL":
             from src.LLMs.JUDGE_MODEL import get_judge_model
-            return get_judge_model()
+            return get_judge_model()['open_router_llm']
         raise ValueError(f"Unknown LLM provider: {agent_name!r}")
 
     # ── retry wrapper ─────────────────────────────────────────────────
@@ -75,7 +75,7 @@ class AgentBase:
             except Exception as e:
                 err = str(e).lower()
                 is_rate = any(
-                    k in err for k in AgentsEnums.AGENT_INVOKATION_ERRORS.value
+                    k in err for k in AgentsEnums.AGENT_INVOKATION_ERRORS
                 )
                 if is_rate and attempt < max_retries:
                     wait = (

@@ -1,10 +1,18 @@
 import json
-from json_repair import repair_json
 from src.Config.log_config import logging
 from typing import Any, Dict
 from datetime import datetime, timezone
 
+# Try to import json_repair, but make it optional with fallback
+try:
+    from json_repair import repair_json
+except ImportError:
+    def repair_json(s: str) -> str:
+        """Fallback JSON repair when json_repair is not available"""
+        return s
+
 from src.Graph.state import AgentState
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -17,109 +25,141 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# =============================================================================
-# _parse_llm_json
-# =============================================================================
-
-def _parse_llm_json(raw: str) -> dict:
-    if not raw:
-        return {}
-
-    try:
-        repaired = repair_json(raw, return_objects=True)
-        if isinstance(repaired, dict):
-            return repaired
-        if isinstance(repaired, list):
-            logger.warning("LLM returned array, wrapping in dict.")
-            return {"items": repaired}
-        logger.warning("LLM returned unexpected type: %s", type(repaired).__name__)
-        return {}
-    except Exception as e:
-        logger.error("JSON repair failed: %s", e)
-        return {}
-
-
-# =============================================================================
-# _merge_extracted
-# =============================================================================
-
-def _merge_extracted(base: dict, new: dict) -> dict:
-    merged = {k: v for k, v in base.items()}
-
-    if "case_meta" in new:
-        if "case_meta" not in merged:
-            merged["case_meta"] = {}
-        for k, v in new["case_meta"].items():
-            if v is not None and merged["case_meta"].get(k) is None:
-                merged["case_meta"][k] = v
-
-    id_keys = {
-        "defendants":         "name",
-        "charges":            "article_number",
-        "incidents":          "incident_description",
-        "evidences":          "description",
-        "lab_reports":        "lab_name",
-        "witness_statements": "witness_name",      # fix field name too
-        "confessions":        "defendant_name",
-        "procedural_issues":  "issue_description",
-        "prior_judgments":    "case_reference",
-        "defense_documents":  "doc_type",
-    }
-
-    for field, id_key in id_keys.items():
-        if field not in new:
+# ──────────────────────────────────────────────────────────────────────────────
+#  Dedup helpers
+# ──────────────────────────────────────────────────────────────────────────────
+ 
+def _dedup_by_keys(existing: list[dict], new_items: list[dict], *keys: str) -> list[dict]:
+    """
+    Append items from new_items that don't already exist in existing,
+    using `keys` as the identity fields for deduplication.
+ 
+    If none of the keys are present in an item, the item is always appended
+    (we can't tell if it's a duplicate).
+    """
+    def fingerprint(item: dict) -> tuple:
+        return tuple(item.get(k) for k in keys)
+ 
+    seen: set[tuple] = set()
+    for item in existing:
+        fp = fingerprint(item)
+        if any(v is not None for v in fp):
+            seen.add(fp)
+ 
+    result = list(existing)
+    for item in new_items:
+        if not isinstance(item, dict):
             continue
-        existing = merged.get(field, [])
-        seen_ids = {item.get(id_key) for item in existing if item.get(id_key)}
-        for item in new.get(field, []):
-            if not isinstance(item, dict):
-                continue
-            item_id = item.get(id_key)
-            if item_id and item_id in seen_ids:
-                continue
-            existing.append(item)
-            if item_id:
-                seen_ids.add(item_id)
-        merged[field] = existing
+        fp = fingerprint(item)
+        has_key = any(v is not None for v in fp)
+        if has_key and fp in seen:
+            continue
+        result.append(item)
+        seen.add(fp)
+ 
+    return result
+ 
+ 
+def _merge_list(existing: list[dict], incoming: list[dict], *dedup_keys: str) -> list[dict]:
+    if not incoming:
+        return existing
+    if dedup_keys:
+        return _dedup_by_keys(existing, incoming, *dedup_keys)
+    return existing + incoming
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  _merge_extracted
+# ──────────────────────────────────────────────────────────────────────────────
+ 
+def _merge_extracted(base: dict, incoming: dict) -> dict:
+    """
+    Merge `incoming` extraction result into `base`.
+    List fields are appended with deduplication where meaningful keys exist.
+    Scalar fields (case_meta) are merged with 'first-write-wins'.
+    """
+    merged = dict(base)
+ 
+    # ── case_meta: first-write-wins per sub-key ──────────────────────────────
+    if "case_meta" in incoming and isinstance(incoming["case_meta"], dict):
+        base_meta = merged.get("case_meta") or {}
+        for k, v in incoming["case_meta"].items():
+            if v is not None and base_meta.get(k) is None:
+                base_meta[k] = v
+        merged["case_meta"] = base_meta
+ 
+    # ── lists: merge with dedup ───────────────────────────────────────────────
+    LIST_DEDUP: dict[str, tuple[str, ...]] = {
+        "defendants":         ("national_id", "name"),  # Enhanced dedup for defendants
+        "charges":            ("law_code", "article_number", "description"),
+        "incidents":          ("incident_type", "incident_date", "incident_location"),
+        "evidences":          ("evidence_type", "description", "seizure_date"),
+        "lab_reports":        ("report_type", "examiner_name", "examination_date"),
+        "witness_statements": ("witness_name", "statement_date"),
+        "confessions":        ("defendant_name", "confession_date", "text"),
+        "procedural_issues":  ("procedure_type", "issue_description"),
+        "prior_judgments":    ("judgment_number", "court_name"),
+        "defense_documents":  ("submitted_by", "alibi_claimed"),
+    }
+ 
+    for key, dedup_keys in LIST_DEDUP.items():
+        if key in incoming and isinstance(incoming[key], list):
+            merged[key] = _merge_list(
+                merged.get(key, []),
+                incoming[key],
+                *dedup_keys,
+            )
+ 
     return merged
 
 
-# =============================================================================
-# _apply_extracted_to_state
-# =============================================================================
-
-def _apply_extracted_to_state(state: AgentState, extracted: dict) -> dict:
+# ──────────────────────────────────────────────────────────────────────────────
+#  _apply_extracted_to_state
+# ──────────────────────────────────────────────────────────────────────────────
+ 
+def _apply_extracted_to_state(state: Any, extracted: dict) -> dict:
+    """
+    Convert the raw `extracted` dict (from _merge_extracted) to the
+    keyword arguments needed for state.model_copy(update={...}).
+ 
+    Pydantic models inside lists are constructed here so the AgentState
+    receives typed objects rather than raw dicts.
+    """
     from src.Utils import (
-            Defendant, Charge, CaseIncident, Evidence,
-            LabReport, WitnessStatement, Confession,
-            ProceduralIssue, PriorJudgment, DefenseDocument,
-        )
-
-    def _safe_parse(model_cls, data: dict):
+        Defendant, Charge, CaseIncident, Evidence, LabReport,
+        WitnessStatement, Confession, ProceduralIssue, PriorJudgment,
+        DefenseDocument, CourtLevel,
+    )
+ 
+    def safe_make(cls, data: dict) -> Any:
         try:
-            # تنظيف البيانات
-            cleaned = {k: v for k, v in data.items() if v is not None and v != [] and v != {}}
-            
-            if "source_document_id" not in cleaned:
-                cleaned["source_document_id"] = "غير محدد"
-                
-            return model_cls.model_validate(cleaned)
-        except Exception as e:
-            logger.warning("Failed to parse %s: %s", model_cls.__name__, e)
+            return cls(**{k: v for k, v in data.items() if v is not None})
+        except Exception as exc:
+            logger.warning("Could not construct %s from %s: %s", cls.__name__, data, exc)
             return None
-
+ 
+    def make_list(cls, raw: list[dict]) -> list:
+        return [obj for d in raw if isinstance(d, dict) if (obj := safe_make(cls, d)) is not None]
+ 
     updates: dict = {}
-
-    # case_meta
-    meta = extracted.get("case_meta", {})
-    if meta:
-        for field in ("case_number", "court", "court_level","jurisdiction", "prosecutor_name","filing_date", "referral_date"):
-            if getattr(state, field, None) is None and meta.get(field):
-                updates[field] = meta[field]
-
-    # lists
-    field_map = {
+ 
+    # ── case_meta scalars ─────────────────────────────────────────────────────
+    meta = extracted.get("case_meta") or {}
+    for field in ("case_number", "court", "jurisdiction", "prosecutor_name",
+                  "referral_order_text", "filing_date", "referral_date"):
+        val = meta.get(field)
+        if val is not None:
+            updates[field] = val
+ 
+    raw_level = meta.get("court_level")
+    if raw_level and state.court_level is None:
+        for member in CourtLevel:
+            if raw_level in (member.value, member.name):
+                updates["court_level"] = member
+                break
+ 
+    # ── entity lists ──────────────────────────────────────────────────────────
+    mapping = {
         "defendants":         (Defendant,        "defendants"),
         "charges":            (Charge,           "charges"),
         "incidents":          (CaseIncident,     "incidents"),
@@ -131,23 +171,16 @@ def _apply_extracted_to_state(state: AgentState, extracted: dict) -> dict:
         "prior_judgments":    (PriorJudgment,    "prior_judgments"),
         "defense_documents":  (DefenseDocument,  "defense_documents"),
     }
-
-    for json_key, (model_cls, state_field) in field_map.items():
-        raw_list = extracted.get(json_key, [])
-        if not raw_list:
-            continue
-        existing = list(getattr(state, state_field, []))
-        new_parsed = [
-            obj for item in raw_list
-            if isinstance(item, dict)
-            for obj in [_safe_parse(model_cls, item)]
-            if obj is not None
-        ]
-        if new_parsed:
-            updates[state_field] = existing + new_parsed
-
+ 
+    for raw_key, (cls, state_field) in mapping.items():
+        raw_list = extracted.get(raw_key, [])
+        if raw_list:
+            existing = getattr(state, state_field, [])
+            new_objs = make_list(cls, raw_list)
+            updates[state_field] = existing + new_objs
+ 
     return updates
-
+ 
 
 # =============================================================================
 # _retrieve_for_charge  (للـ LegalResearcherAgent)
@@ -381,3 +414,153 @@ def _agent_context(state: AgentState, agent_name: str) -> str:
         }
 
     return json.dumps({"summary": json.loads(base), **extra}, ensure_ascii=False, indent=2)
+
+
+# =============================================================================
+# _parse_llm_json  (Parse and validate LLM JSON responses using Pydantic)
+# =============================================================================
+
+def _parse_llm_json(content: Any) -> dict:
+    """
+    Parse LLM JSON response using Pydantic classes for validation.
+    
+    Handles extraction schemas from different document types (AmrIhala, MahdarDabt, etc.)
+    and returns a validated dictionary with proper structure.
+    
+    Args:
+        content: Raw JSON string from LLM response or list of blocks
+        
+    Returns:
+        dict: Validated extraction data with proper structure, ready for merging
+    """
+    from src.Utils import (
+        AmrIhalaExtraction,
+        MahdarDabtExtraction,
+        MahdarIstijwabExtraction,
+        AqwalShuhudExtraction,
+        TaqrirTibbiExtraction,
+        MozakaretDifaExtraction,
+    )
+    
+    if isinstance(content, list):
+        # Extract text if content is a list of blocks
+        extracted = ""
+        for block in content:
+            if isinstance(block, dict) and "text" in block:
+                extracted += block["text"]
+            elif isinstance(block, str):
+                extracted += block
+        content = extracted
+
+    if not content or not isinstance(content, str):
+        logger.warning(f"Empty or invalid content provided to _parse_llm_json: type={type(content)}, repr={repr(content)[:100]}")
+        return {}
+    
+    # Try to repair malformed JSON
+    try:
+        # Strip markdown codeblocks manually in case json_repair is fallback
+        cleaned_content = content.strip()
+        if cleaned_content.startswith("```json"):
+            cleaned_content = cleaned_content[7:]
+        elif cleaned_content.startswith("```"):
+            cleaned_content = cleaned_content[3:]
+        if cleaned_content.endswith("```"):
+            cleaned_content = cleaned_content[:-3]
+        cleaned_content = cleaned_content.strip()
+
+        repaired = repair_json(cleaned_content)
+        data = json.loads(repaired)
+        
+        # Handle case where LLM returned a JSON-encoded string instead of raw JSON object
+        if isinstance(data, str):
+            try:
+                inner_repaired = repair_json(data)
+                data = json.loads(inner_repaired)
+            except Exception as inner_e:
+                logger.debug("Failed to parse double-encoded JSON: %s", inner_e)
+                
+    except Exception as e:
+        logger.error("Failed to parse and repair JSON: %s", e)
+        logger.debug("Content: %s", content[:200])
+        return {}
+    
+    if not isinstance(data, dict):
+        logger.warning("Parsed JSON is not a dict: %s", type(data))
+        return {}
+    
+    result = _extract_with_entity_validation(data)
+    
+    if result:
+        logger.info("Successfully validated %d entity categories", len(result))
+    else:
+        logger.warning("No valid entities found in the JSON output.")
+        
+    return result
+
+
+def _extract_with_entity_validation(data: dict) -> dict:
+    """
+    Extract entities from raw dict and validate each using appropriate Pydantic class.
+    
+    This is a fallback method when the overall extraction schema doesn't fit.
+    It validates individual entity lists using their specific Pydantic models.
+    
+    Args:
+        data: Raw extraction dict from LLM
+        
+    Returns:
+        dict: Dict with validated entity lists
+    """
+    from src.Utils import (
+        Defendant, Charge, CaseIncident, Evidence, LabReport,
+        WitnessStatement, Confession, ProceduralIssue, PriorJudgment,
+        DefenseDocument, CaseMeta,
+    )
+    
+    result = {}
+    
+    # Entity class mapping
+    entity_mappings = {
+        "defendants":         Defendant,
+        "charges":            Charge,
+        "incidents":          CaseIncident,
+        "evidences":          Evidence,
+        "lab_reports":        LabReport,
+        "witness_statements": WitnessStatement,
+        "confessions":        Confession,
+        "procedural_issues":  ProceduralIssue,
+        "prior_judgments":    PriorJudgment,
+        "defense_documents":  DefenseDocument,
+    }
+    
+    # Validate and extract each entity list
+    for key, pydantic_class in entity_mappings.items():
+        if key in data and isinstance(data[key], list):
+            validated_items = []
+            for item in data[key]:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    validated = pydantic_class(**{k: v for k, v in item.items() if v is not None})
+                    validated_items.append(validated.model_dump(exclude_none=True))
+                except Exception as e:
+                    logger.debug(
+                        "Could not validate %s item: %s",
+                        pydantic_class.__name__, str(e)[:100]
+                    )
+                    # Still include the raw item if validation fails
+                    validated_items.append(item)
+            
+            if validated_items:
+                result[key] = validated_items
+    
+    # Handle case_meta separately
+    if "case_meta" in data and isinstance(data["case_meta"], dict):
+        try:
+            validated_meta = CaseMeta(**{k: v for k, v in data["case_meta"].items() if v is not None})
+            result["case_meta"] = validated_meta.model_dump(exclude_none=True)
+        except Exception as e:
+            logger.debug("Could not validate case_meta: %s", str(e)[:100])
+            result["case_meta"] = data["case_meta"]
+    
+    return result

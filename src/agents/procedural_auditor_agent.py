@@ -19,7 +19,7 @@ class ProceduralAuditorAgent(AgentBase):
     """Audits procedural issues against articles retrieved from the KG."""
 
     def __init__(self, kg: LegalKnowledgeGraph, vector_store=None):
-        super().__init__("PROCEDURAL_AUDITOR_MODEL","PROCEDURAL_AUDITOR_TEMP",PROCEDURAL_AUDITOR_AGENT_PROMPT,llm_provider="llama")
+        super().__init__("PROCEDURAL_AUDITOR_MODEL","PROCEDURAL_AUDITOR_TEMP",PROCEDURAL_AUDITOR_AGENT_PROMPT)
         self.kg = kg
         self.vs = vector_store
 

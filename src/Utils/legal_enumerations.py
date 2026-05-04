@@ -133,3 +133,12 @@ class IncidentType(str, Enum):
     FORGERY        = "تزوير"
     TERROR         = "إرهاب"
     OTHER          = "أخرى"
+
+
+class LegalDocType(str, Enum):
+    AMR_IHALA       = "amr_ihala"
+    MAHDAR_DABT     = "mahdar_dabt"
+    MAHDAR_ISTIJWAB = "mahdar_istijwab"
+    AQWAL_SHUHUD    = "aqwal_shuhud"
+    TAQRIR_TIBBI    = "taqrir_tibbi"
+    MOZAKARET_DIFA  = "mozakaret_difa"
