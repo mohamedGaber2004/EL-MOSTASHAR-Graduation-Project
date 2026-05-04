@@ -420,3 +420,30 @@ class CaseIncident(BaseModel):
 
     source_document_id:         Optional[str]           = None
     notes:                      Optional[str]           = None
+
+# =============================================================================
+#  Others
+# =============================================================================
+
+
+class EvidenceAnalysis(BaseModel):
+    evidence_id: str
+    strength_score: float = Field(ge=0, le=1)
+    legal_relevance: str # ربط الدليل بالركن المادي أو المعنوي
+    notes: Optional[str] = None
+
+class DefenseArgument(BaseModel):
+    plea_type: str # دفع شكلي / دفع موضوعي
+    target_evidence_id: Optional[str] = None
+    legal_basis: str # السند القانوني (مادة قانونية أو مبدأ نقض)
+    argument_text: str
+
+class JudicialPrinciple(BaseModel):
+    principle_text: str # نص مبدأ محكمة النقض
+    relevance_to_case: str # وجه الاستدلال به في القضية الحالية
+
+class FinalJudgment(BaseModel):
+    procedural_ruling: str # الرد على بطلان الإجراءات
+    substantive_reasoning: str # تساند الأدلة والرد على الدفوع
+    verdict: VerdictType
+    penalty: Optional[str] = None # العقوبة في حال الإدانة

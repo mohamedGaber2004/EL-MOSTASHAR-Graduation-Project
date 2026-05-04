@@ -37,5 +37,9 @@ from .main_entity_classes import (
     ProceduralIssue,
     DefenseDocument,
     PriorJudgment,
-    CaseIncident
+    CaseIncident,
+    EvidenceAnalysis,
+    DefenseArgument,
+    JudicialPrinciple,
+    FinalJudgment
 )

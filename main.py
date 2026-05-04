@@ -21,9 +21,11 @@ def read_root():
 
 # Import the case router
 from src.routers.case_router import router as case_router
+from src.routers.data_ingestion_router import data_ingestion_router
 
 # Include the case router in the app
 app.include_router(case_router)
+app.include_router(data_ingestion_router)
 
 # Entry point for running the app
 if __name__ == "__main__":

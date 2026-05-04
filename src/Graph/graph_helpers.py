@@ -89,21 +89,24 @@ def _merge_extracted(base: dict, new: dict) -> dict:
 # _apply_extracted_to_state
 # =============================================================================
 
-def _apply_extracted_to_state(state: AgentState, extracted: dict, doc_id: str) -> dict:
+def _apply_extracted_to_state(state: AgentState, extracted: dict) -> dict:
     from src.Utils import (
-        Defendant, Charge, CaseIncident, Evidence,
-        LabReport, WitnessStatement, Confession,
-        ProceduralIssue, PriorJudgment, DefenseDocument,
-    )
+            Defendant, Charge, CaseIncident, Evidence,
+            LabReport, WitnessStatement, Confession,
+            ProceduralIssue, PriorJudgment, DefenseDocument,
+        )
 
     def _safe_parse(model_cls, data: dict):
         try:
+            # تنظيف البيانات
             cleaned = {k: v for k, v in data.items() if v is not None and v != [] and v != {}}
-            if not cleaned.get("source_document_id"):
-                cleaned["source_document_id"] = doc_id
+            
+            if "source_document_id" not in cleaned:
+                cleaned["source_document_id"] = "غير محدد"
+                
             return model_cls.model_validate(cleaned)
         except Exception as e:
-            logger.warning("Failed to parse %s from %s: %s", model_cls.__name__, doc_id, e)
+            logger.warning("Failed to parse %s: %s", model_cls.__name__, e)
             return None
 
     updates: dict = {}

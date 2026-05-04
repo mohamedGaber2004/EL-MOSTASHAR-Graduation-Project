@@ -19,30 +19,25 @@ class Settings(BaseSettings):
     LANGSMITH_TRACING: Optional[bool] = True
     LANGSMITH_ENDPOINT: Optional[str] = None
     LANGSMITH_PROJECT: Optional[str] = None
-    
-    # LLMs (raw model config for legacy code)
-    REASONING_MODEL: str
-    REASONING_MODEL_TEMP: float
-    ARABIC_MODEL: str
-    ARABIC_MODEL_TEMP: float
-    ASSISTANT_MODEL: str
-    ASSISTANT_MODEL_TEMP: float
-    EMBEDDING_MODEL : str
+    OPENAI_BASE_URL: Optional[str] = None
+    OPENAI_BASE_ROUTER_API_KEY: Optional[str] = None
     
     # Free/open LLM model config for each agent node
     DATA_INGESTION_MODEL: str 
     PROCEDURAL_AUDITOR_MODEL: str 
     LEGAL_RESEARCHER_MODEL: str 
-    EVIDENCE_ANALYST_MODEL: str 
-    DEFENSE_ANALYST_MODEL: str 
+    EVIDENCE_SCORING_MODEL: str 
+    DEFENSE_AGENT_MODEL: str 
+    JUDJICAL_PRINCIPLE_AGENT: str
     JUDGE_MODEL: str 
 
-    # Optional: temperature per node
+    # Optional: temperature per agent
     DATA_INGESTION_TEMP: float
     PROCEDURAL_AUDITOR_TEMP: float
     LEGAL_RESEARCHER_TEMP: float
-    EVIDENCE_ANALYST_TEMP: float
-    DEFENSE_ANALYST_TEMP: float
+    EVIDENCE_SCORING_TEMP: float
+    DEFENSE_AGENT_TEMP: float
+    JUDJICAL_PRINCIPLE_TEMP: float
     JUDGE_TEMP: float
     
     # Neo4j KG

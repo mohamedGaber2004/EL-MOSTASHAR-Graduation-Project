@@ -1,7 +1,7 @@
 import logging
 import time
 import random
-from typing import Any, Callable, List, Literal
+from typing import Any, Callable, List
 
 from src.Config import get_settings
 from src.Utils.agents_enums import AgentsEnums
@@ -9,42 +9,50 @@ from src.Graph.graph_helpers import _now
 
 logger = logging.getLogger(__name__)
 
-LLMProvider = Literal["oss", "qwen", "llama"]
-
-
 class AgentBase:
     """Base class for all court-simulation agents."""
 
-    def __init__(self,model_config_key: str,temp_config_key: str,prompt: str,llm_provider: LLMProvider = "llama") -> None:
-        self.cfg        = get_settings()
+    def __init__(self,model_config_key: str,temp_config_key: str,prompt: str) -> None:
+        self.cfg = get_settings()
+        self.agent: str = model_config_key
         self.model_name: str   = getattr(self.cfg, model_config_key)
         self.temperature: float = getattr(self.cfg, temp_config_key)
-        self.prompt: str       = prompt
-        self._llm_provider     = llm_provider
-        self._llm              = self._init_llm(llm_provider)
+        self.prompt: str | List[str] = prompt
+        self._llm = self._init_llm(self.agent)
 
         logger.debug(
             "Initialized %s | model=%s | temp=%s | provider=%s",
             self.__class__.__name__,
             self.model_name,
             self.temperature,
-            llm_provider,
         )
 
     # ── LLM factory ───────────────────────────────────────────────────
 
-    def _init_llm(self, provider: LLMProvider):
+    def _init_llm(self, agent_name:str):
         """Instantiate only the requested LLM provider."""
-        if provider == "oss":
-            from src.LLMs.GPT_OSS_Model import get_llm_oss
-            return get_llm_oss(self.model_name, self.temperature)
-        if provider == "qwen":
-            from src.LLMs.Qwen_Model import get_llm_qwn
-            return get_llm_qwn(self.model_name, self.temperature)
-        if provider == "llama":
-            from src.LLMs.Llama_Model import get_llm_llama
-            return get_llm_llama(self.model_name, self.temperature)
-        raise ValueError(f"Unknown LLM provider: {provider!r}")
+        if agent_name == "DATA_INGESTION_MODEL":
+            from src.LLMs.DATA_INGESTION_MODEL import get_ingesion_model
+            return get_ingesion_model()['open_router_llm']
+        if agent_name == "PROCEDURAL_AUDITOR_MODEL":
+            from src.LLMs.PROCEDURAL_AUDITOR_MODEL import get_procedural_model
+            return get_procedural_model()
+        if agent_name == "LEGAL_RESEARCHER_MODEL":
+            from src.LLMs.LEGAL_RESEARCHER_MODEL import get_legal_reasearcher_model
+            return get_legal_reasearcher_model()
+        if agent_name == "EVIDENCE_SCORING_MODEL":
+            from src.LLMs.EVIDENCE_SCORING_MODEL import get_evidence_scoring_model
+            return get_evidence_scoring_model()
+        if agent_name == "DEFENSE_AGENT_MODEL":
+            from src.LLMs.DEFENSE_AGENT_MODEL import get_defense_model
+            return get_defense_model()
+        if agent_name == "JUDJICAL_PRINCIPLE_AGENT":
+            from src.LLMs.JUDJICAL_PRINCIPLE_AGENT import get_judjical_principle_model
+            return get_judjical_principle_model()
+        if agent_name == "JUDGE_MODEL":
+            from src.LLMs.JUDGE_MODEL import get_judge_model
+            return get_judge_model()
+        raise ValueError(f"Unknown LLM provider: {agent_name!r}")
 
     # ── retry wrapper ─────────────────────────────────────────────────
 
@@ -99,7 +107,6 @@ class AgentBase:
 
         return state.model_copy(
             update={
-                "agent_outputs":    {**state.agent_outputs, agent_key: output},
                 "completed_agents": state.completed_agents + [agent_key],
                 "current_agent":    agent_key,
                 "last_updated":     _now(),          # was missing in original
