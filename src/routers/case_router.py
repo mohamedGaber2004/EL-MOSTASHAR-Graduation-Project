@@ -8,7 +8,7 @@ from src.Graph.state import AgentState
 
 
 # Create router
-router = APIRouter(prefix="/cases", tags=["cases"])
+router = APIRouter(prefix="/cases", tags=["Full Case"])
 
 
 # Simple in-memory cache for invoked case results (per-process)

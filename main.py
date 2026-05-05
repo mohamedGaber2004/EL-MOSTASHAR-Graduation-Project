@@ -1,7 +1,6 @@
 # Import necessary modules
-import uvicorn
+import uvicorn , os
 from fastapi import FastAPI
-import os
 from src.Config.config import get_settings
 
 
@@ -22,10 +21,17 @@ def read_root():
 # Import the case router
 from src.routers.case_router import router as case_router
 from src.routers.data_ingestion_router import data_ingestion_router
+from src.routers.chunking_router import chunking_router
+from src.routers.kg_router import kg_router
+
 
 # Include the case router in the app
 app.include_router(case_router)
 app.include_router(data_ingestion_router)
+app.include_router(chunking_router)
+app.include_router(kg_router)
+
+
 
 # Entry point for running the app
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     FAISS_INDEX_PATH: str 
 
     # API Keys
+    GOOGLE_API_KEY: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None
     HUGGINGFACE_API_TOKEN: Optional[str] = None
     LANGSMITH_API_KEY: Optional[str] = None
@@ -21,7 +22,6 @@ class Settings(BaseSettings):
     LANGSMITH_PROJECT: Optional[str] = None
     OPENAI_BASE_URL: Optional[str] = None
     OPENAI_BASE_ROUTER_API_KEY: Optional[str] = None
-    GOOGLE_API_KEY: Optional[str] = None
     
     # Free/open LLM model config for each agent node
     DATA_INGESTION_MODEL: str 

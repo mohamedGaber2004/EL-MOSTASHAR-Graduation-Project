@@ -6,7 +6,7 @@ from src.Graph.state import AgentState
 from src.agents.data_ingestion_agent import DataIngestionAgent
 
 # Create router
-data_ingestion_router = APIRouter(prefix="/cases/data_ingestion")
+data_ingestion_router = APIRouter(prefix="/agents", tags=["Agents Pipeline"])
 
 class InvokeDataIngestion(BaseModel):
     case_id: str

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import fnmatch
+import fnmatch , re
 from src.Config.log_config import logging
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -12,26 +11,20 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter,CharacterTex
 from src.Config import get_settings
 from src.Utils import (
     MultiEncodingTextLoader,
-    _read_file,
-    _to_western_digits,
     norm_regu,
     reg,
-    _normalize_article_no
+    _read_file,
+    _to_western_digits,
+    _normalize_article_no,
 )
 
- # Logging is configured globally in src/log_config.py
 logger = logging.getLogger(__name__)
 
 # =============================================================================
 # CORPUS CHUNKER
 # =============================================================================
 
-def _split_into_tables(
-    full_text:  str,
-    law_id:     str,
-    law_title:  str,
-    source_file: str,
-) -> List[Document]:
+def _split_into_tables(full_text:  str,law_id:     str,law_title:  str,source_file: str) -> List[Document]:
     """
     Split a tables file into one Document per logical table.
     Each Document gets the raw text of that table only.
@@ -107,15 +100,7 @@ _table_splitter = CharacterTextSplitter(
 )
 
 class CorpusChunker:
-    def __init__(
-        self,
-        laws_dir:       str | Path = get_settings().DataPath,
-        na2d_dir:       str | Path = get_settings().na2d_data_path,
-        max_words_book: int        = 400,
-        overlap_book:   int        = 50,
-        max_words_rule: int        = 300,
-        overlap_rule:   int        = 40,
-    ) -> None:
+    def __init__(self,laws_dir: str | Path = get_settings().DataPath,na2d_dir: str | Path = get_settings().na2d_data_path,max_words_book: int= 400,overlap_book: int= 50,max_words_rule: int= 300,overlap_rule: int= 40) -> None:
         self.laws_dir         = Path(laws_dir)
         self.na2d_dir         = Path(na2d_dir)
         self._book_splitter   = self._make_splitter(max_words_book, overlap_book)
@@ -159,9 +144,7 @@ class CorpusChunker:
             meta["chamber"] = m.group(1).strip()
         return meta
 
-    def _get_amendment_metadata(
-        self, raw_text: str, filename: str
-    ) -> Optional[Dict[str, str]]:
+    def _get_amendment_metadata(self, raw_text: str, filename: str) -> Optional[Dict[str, str]]:
         """
         Extract amendment law number, year, date, and type.
 

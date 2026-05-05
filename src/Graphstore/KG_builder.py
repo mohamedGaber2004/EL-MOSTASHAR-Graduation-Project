@@ -15,12 +15,10 @@ from neo4j import GraphDatabase
 from src.Config import get_settings
 from src.Utils import (
     _stable_id,
-    _to_western_digits,
     Amendment,
     norm_regu,
     LawExtractor,
     AmendmentExtractor,
-    reg,
 )
  
 logger = logging.getLogger(__name__)
@@ -77,7 +75,6 @@ def ingest_dataset(chunks: List[Document]) -> List[Dict]:
             summaries.append({"law_key": law_key, "articles": [], "error": str(e)})
     return summaries
  
- 
 def ingest_amendments(chunks: List[Document]) -> Dict[str, List[Amendment]]:
     groups: Dict[tuple, Dict] = {}
     for chunk in chunks:
@@ -103,7 +100,6 @@ def ingest_amendments(chunks: List[Document]) -> Dict[str, List[Amendment]]:
             amendment.amended_article_numbers = data["articles"] or amendment.amended_article_numbers
             result.setdefault(law_key, []).append(amendment)
     return result
- 
  
 def ingest_tables(chunks: List[Document]) -> Dict[str, List[Dict]]:
     """
@@ -135,21 +131,11 @@ def ingest_tables(chunks: List[Document]) -> Dict[str, List[Dict]]:
         )
     return result
 
-
-
 # =============================================================================
 # SECTION 5: KNOWLEDGE GRAPH
 # =============================================================================
- 
 class LegalKnowledgeGraph:
-    """
-    Neo4j knowledge graph for Egyptian criminal law.
- 
-    All Cypher goes through ``_run()`` — one session per call, auto-closed.
-    Schema and statistics lists are read from ``norm_regu`` — single source
-    of truth, no duplication.
-    """
- 
+
     def __init__(self, uri: str, user: str, password: str):
         self._uri = uri
         self._user = user
@@ -483,10 +469,7 @@ class LegalKnowledgeGraph:
             """, law_id=law_id, article_number=article_number)
             return [dict(r) for r in result]
         
-
-    def search_articles_by_keyword(
-        self, keyword: str, law_id: Optional[str] = None, k: int = 3
-    ) -> List[Dict]:
+    def search_articles_by_keyword(self, keyword: str, law_id: Optional[str] = None, k: int = 3) -> List[Dict]:
         with self.driver.session() as s:
             if law_id:
                 result = s.run("""
@@ -518,27 +501,15 @@ class LegalKnowledgeGraph:
 # =============================================================================
 # PIPELINE
 # =============================================================================
- 
-
-
 
 def build_knowledge_graph(
-    neo4j_uri:      str,
+neo4j_uri:      str,
     neo4j_user:     str,
     neo4j_password: str,
     chunks:         Optional[List[Document]] = None,
     drop_existing:  bool = True,
     verbose:        bool = True,
 ) -> LegalKnowledgeGraph:
-    """
-    Full pipeline. Calls ``get_chunks()`` once internally.
- 
-    Phase 0 — chunk all law files.
-    Phase 1 — extract structured data from article chunks.
-    Phase 2 — import laws + articles + NLP data into Neo4j.
-    Phase 3 — import amendments from amended_article chunks.
-    Phase 4 — import schedules/tables from table chunks.
-    """
     # ── Phase 0 ───────────────────────────────────────────────────────────
     if chunks is None:
         logger.info("PHASE 0: chunking — invoking get_chunks()")
@@ -625,7 +596,6 @@ def build_knowledge_graph(
     except Exception:
         logger.exception("Failed to fetch KG statistics")
     return graph
-
 
 def run_KG():
     graph = None
