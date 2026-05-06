@@ -101,7 +101,7 @@ def default_pipeline_manager() -> PipelineManager:
         data_path=Path(settings.DataPath),
         na2d_data_path=Path(getattr(settings, 'na2d_data_path', getattr(settings, 'NA2DPath', ''))),
         faiss_index_path=Path(getattr(settings, 'FAISS_INDEX_PATH', 'legal_faiss_index')),
-        embedding_model=getattr(settings, 'EMBEDDING_MODEL', None),
+        embedding_model=getattr(settings, 'ARABIC_NATIVE_EMBEDDING_MODEL', None),
         neo4j_uri=getattr(settings, 'NEO4J_URI', None),
         neo4j_user=getattr(settings, 'NEO4J_USER', None),
         neo4j_password=getattr(settings, 'NEO4J_PASSWORD', None),

@@ -32,7 +32,7 @@ def get_kg() -> Optional[LegalKnowledgeGraph]:
 def get_vector_store():
     cfg = get_settings()
     faiss_path  = getattr(cfg, "FAISS_INDEX_PATH", None)
-    embed_model = getattr(cfg, "EMBEDDING_MODEL", None)
+    embed_model = getattr(cfg, "ARABIC_NATIVE_EMBEDDING_MODEL", None)
 
     if not faiss_path or not embed_model:
         logger.warning("FAISS_INDEX_PATH or EMBEDDING_MODEL not found — VectorStore is disabled.")

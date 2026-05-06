@@ -77,4 +77,3 @@ class norm_regu(Enum) :
         "CREATE CONSTRAINT amendment_id_unique  IF NOT EXISTS FOR (am:Amendment) REQUIRE am.amendment_id IS UNIQUE",
         "CREATE INDEX supersedes_date_idx IF NOT EXISTS FOR ()-[r:SUPERSEDES]-() ON (r.amendment_date)",
     ]
-
