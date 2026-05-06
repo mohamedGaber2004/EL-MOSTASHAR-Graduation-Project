@@ -41,6 +41,7 @@ class GraphRAGSource(BaseModel):
     law_title: Optional[str] = None
     article_number: str
     score: str
+    text: str
 
 class GraphRAGQueryResponse(BaseModel):
     query: str

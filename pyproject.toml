@@ -21,6 +21,7 @@ dependencies = [
     "pydantic-settings==2.14.0",
     "pytest==9.0.3",
     "python-dotenv==1.2.1",
+    "rank-bm25==0.2.2",
     "sentence-transformers==5.4.1",
     "uvicorn==0.41.0",
 ]

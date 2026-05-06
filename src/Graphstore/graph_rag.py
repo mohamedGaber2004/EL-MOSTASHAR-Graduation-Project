@@ -5,17 +5,17 @@ from __future__ import annotations
 # =============================================================================
 
 import logging
-import textwrap
+import textwrap, re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel , Field
+from pydantic import BaseModel, Field
 from langchain_core.embeddings import Embeddings
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.Graphstore.KG_builder import LegalKnowledgeGraph
+from rank_bm25 import BM25Okapi
 
 logger = logging.getLogger(__name__)
+
 
 # =============================================================================
 # 0. Queries
@@ -39,7 +39,7 @@ FOR (a:Article)
 ON (a.embedding)
 OPTIONS {
     indexConfig: {
-        `vector.dimensions`:   $dimensions,
+        `vector.dimensions`:          $dimensions,
         `vector.similarity_function`: 'cosine'
     }
 }
@@ -117,24 +117,19 @@ def _infer_embedding_dimension(embeddings: Embeddings) -> int:
     return len(sample)
 
 def _get_existing_index_dimension(driver, index_name: str = "article_embeddings") -> Optional[int]:
-    """
-    Checks the existing vector index in Neo4j 5.x+ to retrieve its dimensions.
-    """
+    """Checks the existing vector index in Neo4j 5.x+ to retrieve its dimensions."""
     with driver.session() as s:
         rec = s.run(
             "SHOW INDEXES YIELD name, options WHERE name = $name RETURN options",
             name=index_name,
         ).single()
-    
+
     if not rec:
         return None
-        
+
     options = rec.get("options") or {}
     index_config = options.get("indexConfig", {})
-    
-    # Vector dimensions are stored under the 'vector.dimensions' key
     dim = index_config.get("vector.dimensions")
-    
     return int(dim) if dim is not None else None
 
 def _drop_vector_index(driver, index_name: str = "article_embeddings") -> None:
@@ -152,26 +147,10 @@ def create_table_vector_index(driver, dimensions: int) -> None:
         s.run(TABLE_VECTOR_INDEX_QUERY, dimensions=dimensions)
     logger.info("Vector index 'table_chunk_embeddings' ready (dim=%d)", dimensions)
 
-def embed_and_store_tables(driver, embeddings: Embeddings,
-                           batch_size: int = 64, max_workers: int = 4) -> int:
-    return _run_embedding(
-        driver, embeddings,
-        fetch_query="""
-            MATCH (t:TableChunk)
-            WHERE t.embedding IS NULL AND t.text IS NOT NULL
-            RETURN t.chunk_id AS id, t.text AS text
-        """,
-        batch_size=batch_size,
-        max_workers=max_workers,
-        node_label="TableChunk",
-        id_property="chunk_id",
-    )
 
 # =============================================================================
-# 2. FAST PARALLEL BATCH EMBEDDING  (~1500 articles)
+# 2. FAST PARALLEL BATCH EMBEDDING
 # =============================================================================
-
-# graph_rag.py
 
 def _run_embedding(
     driver,
@@ -179,8 +158,8 @@ def _run_embedding(
     fetch_query: str,
     batch_size: int = 128,
     max_workers: int = 4,
-    node_label: str = "Article",      # ← add this
-    id_property: str = "article_id",  # ← add this
+    node_label: str = "Article",
+    id_property: str = "article_id",
 ) -> int:
 
     with driver.session() as s:
@@ -206,7 +185,6 @@ def _run_embedding(
             logger.info("  Encoded batch %d/%d (%d nodes)",
                         idx + 1, len(batches), len(vectors))
 
-    # ✅ Use parameterized label and id_property
     store_q = f"""
         UNWIND $rows AS row
         MATCH (n:{node_label} {{{id_property}: row.id}})
@@ -265,7 +243,7 @@ def embed_and_store_tables(driver, embeddings, batch_size=64, max_workers=4):
     )
 
 # =============================================================================
-# 3. VECTOR SEARCH  — searches across ALL 9 laws, no filter
+# 3. VECTOR SEARCH
 # =============================================================================
 
 def vector_search(driver, query_vector: List[float], k: int = 5) -> List[Dict[str, Any]]:
@@ -275,8 +253,100 @@ def vector_search(driver, query_vector: List[float], k: int = 5) -> List[Dict[st
     logger.debug("Vector search → %d hits", len(records))
     return records
 
+
 # =============================================================================
-# 4. GRAPH EXPAND  — enrich each ANN hit with related graph nodes
+# 3b. BM25 IN-MEMORY INDEX
+# =============================================================================
+
+def _tokenize_arabic(text: str) -> List[str]:
+    """Simple whitespace + punctuation tokenizer for Arabic text."""
+    text = re.sub(r'[^\w\s]', ' ', text or '')
+    return text.split()
+
+class ArticleBM25Index:
+
+    FETCH_QUERY = """
+        MATCH (a:Article)
+        WHERE a.text IS NOT NULL
+        RETURN
+            a.article_id     AS article_id,
+            a.article_number AS article_number,
+            a.law_id         AS law_id,
+            a.text           AS text
+    """
+
+    def __init__(self, driver):
+        with driver.session() as s:
+            self._records: List[Dict[str, Any]] = s.run(self.FETCH_QUERY).data()
+
+        if not self._records:
+            raise RuntimeError("BM25: no Article nodes found in Neo4j.")
+
+        corpus = [_tokenize_arabic(r["text"]) for r in self._records]
+        self._bm25 = BM25Okapi(corpus)
+        logger.info("BM25 index built — %d articles", len(self._records))
+
+    def search(self, query: str, k: int = 15) -> List[Dict[str, Any]]:
+        tokens = _tokenize_arabic(query)
+        scores = self._bm25.get_scores(tokens)
+
+        ranked = sorted(
+            zip(self._records, scores),
+            key=lambda x: x[1],
+            reverse=True,
+        )[:k]
+
+        return [
+            {**rec, "score": float(score)}
+            for rec, score in ranked
+            if score > 0
+        ]
+
+def _rrf_merge(
+    bm25_hits: List[Dict[str, Any]],
+    vector_hits: List[Dict[str, Any]],
+    k: int = 60,
+    bm25_weight: float = 0.4,
+    vector_weight: float = 0.6,
+) -> List[Dict[str, Any]]:
+    """
+    Reciprocal Rank Fusion.
+    k=60 is the standard smoothing constant (Robertson 2009).
+    Returns deduplicated hits sorted by fused score.
+    """
+    scores: Dict[str, float]          = {}
+    meta:   Dict[str, Dict[str, Any]] = {}
+
+    for rank, hit in enumerate(bm25_hits, start=1):
+        aid = hit["article_id"]
+        scores[aid] = scores.get(aid, 0.0) + bm25_weight / (k + rank)
+        meta[aid]   = {**hit, "bm25_score": hit["score"], "score": 0.0}
+
+    for rank, hit in enumerate(vector_hits, start=1):
+        aid = hit["article_id"]
+        scores[aid] = scores.get(aid, 0.0) + vector_weight / (k + rank)
+        if aid in meta:
+            meta[aid]["vector_score"] = hit["score"]
+        else:
+            meta[aid] = {**hit, "vector_score": hit["score"], "score": 0.0}
+
+    for aid, fused in scores.items():
+        meta[aid]["score"] = fused
+
+    sorted_hits = sorted(meta.values(), key=lambda x: x["score"], reverse=True)
+
+    if sorted_hits:
+        max_score = sorted_hits[0]["score"]
+        min_score = sorted_hits[-1]["score"]
+        spread = max_score - min_score or 1e-9
+        for hit in sorted_hits:
+            hit["score"] = (hit["score"] - min_score) / spread
+
+    return sorted_hits
+
+
+# =============================================================================
+# 4. GRAPH EXPAND
 # =============================================================================
 
 class ArticleContext(BaseModel):
@@ -286,14 +356,14 @@ class ArticleContext(BaseModel):
     article_number:      str
     text:                str
     score:               float
-    version:             Optional[str]      = "original"
-    promulgation_date:   Optional[str]      = None
-    amendments:          List[Dict]         = Field(default_factory=list)
-    penalties:           List[Dict]         = Field(default_factory=list)
-    definitions:         List[Dict]         = Field(default_factory=list)
-    referenced_articles: List[Dict]         = Field(default_factory=list)
-    topics:              List[str]          = Field(default_factory=list)
-    tables:              List[Dict]         = Field(default_factory=list)
+    version:             Optional[str]  = "original"
+    promulgation_date:   Optional[str]  = None
+    amendments:          List[Dict]     = Field(default_factory=list)
+    penalties:           List[Dict]     = Field(default_factory=list)
+    definitions:         List[Dict]     = Field(default_factory=list)
+    referenced_articles: List[Dict]     = Field(default_factory=list)
+    topics:              List[str]      = Field(default_factory=list)
+    tables:              List[Dict]     = Field(default_factory=list)
 
 class TableContext(BaseModel):
     chunk_id:     str
@@ -309,14 +379,14 @@ def _to_dict(obj: Any) -> Dict:
     """Safely convert Pydantic model, dataclass, or plain dict to dict."""
     if isinstance(obj, dict):
         return obj
-    if hasattr(obj, "model_dump"):      # Pydantic v2
+    if hasattr(obj, "model_dump"):
         return obj.model_dump()
-    if hasattr(obj, "dict"):            # Pydantic v1
+    if hasattr(obj, "dict"):
         return obj.dict()
-    if hasattr(obj, "__dataclass_fields__"):  # dataclass
+    if hasattr(obj, "__dataclass_fields__"):
         from dataclasses import asdict
         return asdict(obj)
-    return vars(obj)                    # fallback
+    return vars(obj)
 
 def _clean(raw: List[Any], required_key: str) -> List[Dict]:
     """Normalize to plain dicts and drop entries missing the required key."""
@@ -346,7 +416,8 @@ def expand_article(driver, hit: Dict[str, Any]) -> ArticleContext:
         topics              = [t for t in (rec["topics"] if rec else []) if t],
     )
 
-def retrieve_context(driver, query_vector, k:int):
+def retrieve_context(driver, query_vector, query_text, k, bm25_index=None):
+    # --- vector hits ---
     article_hits = []
     with driver.session() as s:
         for record in s.run(ANN_QUERY, query_vector=query_vector, k=k):
@@ -357,7 +428,13 @@ def retrieve_context(driver, query_vector, k:int):
                 "text":           record["text"],
                 "score":          record["score"],
             })
-    logger.info("Article ANN hits: %d", len(article_hits))
+    logger.info("Vector hits: %d", len(article_hits))
+
+    # --- BM25 hits + RRF merge ---
+    if bm25_index is not None:
+        bm25_hits    = bm25_index.search(query_text, k=k)
+        article_hits = _rrf_merge(bm25_hits, article_hits)
+        logger.info("After RRF merge: %d unique articles", len(article_hits))
 
     article_contexts = []
     for hit in article_hits:
@@ -451,25 +528,17 @@ def assemble_prompt_context(contexts: List[ArticleContext]) -> str:
     blocks = [build_context_block(ctx, i + 1) for i, ctx in enumerate(contexts)]
     return "\n\n" + sep.join(blocks) + "\n"
 
-def _dedupe_top_tables(table_contexts: List[TableContext], max_tables: int = 2) -> List[TableContext]:
+def _dedupe_top_tables(table_contexts: List[TableContext], max_tables: int = 5) -> List[TableContext]:
     """
-    Keep only the highest scoring chunk per table_id, then cap the final number of tables.
+    Keep only the highest-scoring chunk per table_id, then cap the result.
     """
     best_by_table: Dict[str, TableContext] = {}
-
     for t in sorted(table_contexts, key=lambda x: x.score, reverse=True):
         if t.table_id not in best_by_table:
             best_by_table[t.table_id] = t
         if len(best_by_table) >= max_tables:
             break
-
     return list(best_by_table.values())
-
-def assemble_prompt_context(contexts: List[ArticleContext]) -> str:
-    sep = "\n\n" + "-" * 60 + "\n\n"
-    blocks = [build_context_block(ctx, i + 1) for i, ctx in enumerate(contexts)]
-    return "\n\n" + sep.join(blocks) + "\n"
-
 
 # =============================================================================
 # 6. LLM GENERATION
@@ -489,8 +558,6 @@ SYSTEM_PROMPT = """أنت مستشار قانوني رقمي خبير في ال�
 """
 
 def generate_answer(llm, question, contexts, system_prompt: str):
-    # If for some reason system_prompt is still None here, 
-    # Pydantic will throw the error you saw.
     if system_prompt is None:
         system_prompt = "أنت مستشار قانوني متخصص."
 
@@ -501,18 +568,64 @@ def generate_answer(llm, question, contexts, system_prompt: str):
     response = llm.invoke(messages)
     return response.content
 
+
 # =============================================================================
 # 7. GRAPH RAG CHAIN
 # =============================================================================
 
+MAX_CONTEXT_CHARS = 9_000
+
+def _budget_aware_context(article_contexts: List[ArticleContext],table_contexts:List[TableContext],budget:int = MAX_CONTEXT_CHARS) -> str:
+    """
+    Build the context string block-by-block so we never cut a block in half.
+    Articles are already sorted by score descending; tables likewise.
+    """
+    sep = "\n\n" + "-" * 60 + "\n\n"
+    parts: List[str] = []
+    used = 0
+
+    for i, ctx in enumerate(article_contexts):
+        block = build_context_block(ctx, i + 1)
+        chunk = (sep if parts else "\n\n") + block + "\n"
+        if used + len(chunk) > budget:
+            logger.info(
+                "Context budget reached after %d/%d articles",
+                i, len(article_contexts),
+            )
+            break
+        parts.append(chunk)
+        used += len(chunk)
+
+    if table_contexts and used < budget:
+        header = "\n\n" + "=" * 60 + "\nالجداول القانونية ذات الصلة:\n"
+        if used + len(header) <= budget:
+            parts.append(header)
+            used += len(header)
+
+        for t in table_contexts:
+            table_text = (t.text or "").strip()[:700]
+            block = (
+                f"\n[جدول {t.table_number}] من {t.law_id} "
+                f"| درجة الصلة: {t.score:.3f}\n"
+                + table_text + "\n"
+            )
+            if used + len(block) > budget:
+                break
+            parts.append(block)
+            used += len(block)
+
+    return "".join(parts)
+
 class LegalGraphRAG:
 
-    def __init__(self, graph: LegalKnowledgeGraph, embeddings: Embeddings, llm: BaseChatModel, k: int = 15, default_system_prompt: Optional[str] = None):
-        self.graph = graph
+    def __init__(self, graph, embeddings, llm, k=15, default_system_prompt=None):
+        self.graph      = graph
         self.embeddings = embeddings
-        self.llm = llm
-        self.k = k
+        self.llm        = llm
+        self.k          = k
         self.default_system_prompt = default_system_prompt or SYSTEM_PROMPT
+
+        self._bm25_index = ArticleBM25Index(graph.driver)
 
     def close(self):
         self.graph.close()
@@ -521,7 +634,7 @@ class LegalGraphRAG:
 
     def setup_vector_index(self, dimensions=None):
         dimensions = dimensions or _infer_embedding_dimension(self.embeddings)
-        existing = _get_existing_index_dimension(self.graph.driver)
+        existing   = _get_existing_index_dimension(self.graph.driver)
 
         if existing and existing != dimensions:
             raise RuntimeError(f"Dimension mismatch: {existing} vs {dimensions}")
@@ -566,78 +679,73 @@ class LegalGraphRAG:
 
     # ── main query ────────────────────────────────────────────────────────
 
-    def query(self, question, k=None, threshold=0.6, system_prompt=None):
-        top_k = min(k or self.k, 15)
-        query_vector = self.embeddings.embed_query(question)
+    def query(self, question, k=None, threshold=0.5, system_prompt=None):
+        top_k            = min(k or self.k, 15)
+        query_vector     = self.embeddings.embed_query(question)
         effective_prompt = system_prompt or self.default_system_prompt or SYSTEM_PROMPT
 
         article_contexts, table_contexts = retrieve_context(
-            self.graph.driver, query_vector, k=top_k
+            self.graph.driver,
+            query_vector,
+            question,
+            k=top_k,
+            bm25_index=self._bm25_index,
         )
 
         logger.info(
             "Before threshold — articles: %d | tables: %d",
-            len(article_contexts),
-            len(table_contexts),
+            len(article_contexts), len(table_contexts),
         )
         logger.info("Table scores: %s", [f"{t.score:.3f}" for t in table_contexts])
 
         valid_articles = [c for c in article_contexts if c.score >= threshold]
-        valid_tables = [t for t in table_contexts if t.score >= threshold]
-        valid_tables = _dedupe_top_tables(valid_tables, max_tables=2)
+        valid_tables   = [t for t in table_contexts   if t.score >= threshold]
+        valid_tables   = _dedupe_top_tables(valid_tables, max_tables=5)
 
         logger.info(
             "After threshold (%.2f) — articles: %d | tables: %d",
-            threshold,
-            len(valid_articles),
-            len(valid_tables),
+            threshold, len(valid_articles), len(valid_tables),
         )
 
         if not valid_articles and not valid_tables:
             return {
-                "query": question,
-                "answer": "لم أجد نصوصاً أو جداول قانونية ذات صلة مباشرة بسؤالك.",
+                "query":   question,
+                "answer":  "لم أجد نصوصاً أو جداول قانونية ذات صلة مباشرة بسؤالك.",
                 "sources": [],
             }
 
-        context_text = assemble_prompt_context(valid_articles)
+        context_text = _budget_aware_context(valid_articles, valid_tables)
+        answer       = generate_answer(self.llm, question, context_text, effective_prompt)
 
-        if valid_tables:
-            context_text += "\n\n" + "=" * 60 + "\nالجداول القانونية ذات الصلة:\n"
-            for t in valid_tables:
-                table_text = (t.text or "").strip()[:700]
-                context_text += (
-                    f"\n[جدول {t.table_number}] من {t.law_id} "
-                    f"| درجة الصلة: {t.score:.3f}\n"
-                    + table_text
-                    + "\n"
-                )
-
-        MAX_CONTEXT_CHARS = 9000
-        if len(context_text) > MAX_CONTEXT_CHARS:
-            context_text = context_text[:MAX_CONTEXT_CHARS]
-
-        answer = generate_answer(self.llm, question, context_text, effective_prompt)
+        # ── deduplicate by article_id, keep highest-score entry ──────────────
+        seen_ids: set = set()
+        unique_articles = []
+        for c in valid_articles:
+            if c.article_id not in seen_ids:
+                seen_ids.add(c.article_id)
+                unique_articles.append(c)
 
         sources = [
             {
-                "law_id": c.law_id,
+                "law_id":         c.law_id,
                 "article_number": c.article_number,
-                "law_title": c.law_title,
-                "score": f"{c.score:.3f}",
+                "law_title":      c.law_title,
+                "score":          f"{c.score:.3f}",
+                "text":           c.text,
             }
-            for c in valid_articles
+            for c in unique_articles
         ] + [
             {
-                "law_id": t.law_id,
+                "law_id":         t.law_id,
                 "article_number": f"جدول-{t.table_number}",
-                "law_title": t.law_title,
-                "score": f"{t.score:.3f}",
+                "law_title":      t.law_title,
+                "score":          f"{t.score:.3f}",
+                "text":           t.text,
             }
             for t in valid_tables
         ]
 
         return {"query": question, "answer": answer, "sources": sources}
 
-    def __enter__(self):    return self
-    def __exit__(self, *_): self.close()
+    def __enter__(self):     return self
+    def __exit__(self, *_):  self.close()

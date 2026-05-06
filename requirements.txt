@@ -19,3 +19,4 @@ sentence-transformers==5.4.1
 pydantic-settings==2.14.0
 cachetools==7.1.1
 langchain-cohere==0.5.1
+rank-bm25==0.2.2
