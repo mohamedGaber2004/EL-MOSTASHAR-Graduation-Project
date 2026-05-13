@@ -1,5 +1,6 @@
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 from src.Config import get_settings
 
@@ -16,16 +17,16 @@ class ProceduralModel :
             max_tokens=2000
         )
         self.as_open_router_llm = ChatOpenAI(
-        self.as_google_llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
-            temperature=self.temperature,
-            google_api_key=self.cfg.GOOGLE_API_KEY
-        )
             model=self.model_name,
             temperature=self.temperature,
             max_completion_tokens=2000,
             base_url=self.cfg.OPENAI_BASE_URL,
             api_key=self.cfg.OPENAI_BASE_ROUTER_API_KEY
+        )
+        self.as_google_llm = ChatGoogleGenerativeAI(
+            model="gemini-1.5-flash",
+            temperature=self.temperature,
+            google_api_key=self.cfg.GOOGLE_API_KEY
         )
 
     def get_as_llm(self):

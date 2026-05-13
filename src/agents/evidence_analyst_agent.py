@@ -21,7 +21,7 @@ class EvidenceAnalystAgent(AgentBase):
     """
 
     def __init__(self):
-        super().__init__("EVIDENCE_ANALYST_MODEL","EVIDENCE_ANALYST_TEMP",EVIDENCE_ANALYST_AGENT_PROMPT,llm_provider="llama")
+        super().__init__("EVIDENCE_SCORING_MODEL","EVIDENCE_SCORING_TEMP",EVIDENCE_ANALYST_AGENT_PROMPT)
 
     # ── helpers ───────────────────────────────────────────────────────
 

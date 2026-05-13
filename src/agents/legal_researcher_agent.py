@@ -22,7 +22,7 @@ class LegalResearcherAgent(AgentBase):
     """Builds a legal research package for every charge."""
 
     def __init__(self, kg: LegalKnowledgeGraph, vector_store):
-        super().__init__("LEGAL_RESEARCHER_MODEL","LEGAL_RESEARCHER_TEMP",LEGAL_RESEARCHER_AGENT_PROMPT,llm_provider="llama")
+        super().__init__("LEGAL_RESEARCHER_MODEL","LEGAL_RESEARCHER_TEMP",LEGAL_RESEARCHER_AGENT_PROMPT)
         self.kg = kg
         self.vs = vector_store
 

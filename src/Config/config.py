@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     FAISS_INDEX_PATH: str 
 
     # API Keys
+    GOOGLE_API_KEY: Optional[str] = None
     COHERE_API_KEY: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None
     HUGGINGFACE_API_TOKEN: Optional[str] = None

@@ -21,7 +21,7 @@ class DefenseAnalystAgent(AgentBase):
     """
 
     def __init__(self):
-        super().__init__("DEFENSE_ANALYST_MODEL","DEFENSE_ANALYST_TEMP",DEFENSE_ANALYSIS_AGENT_PROMPT,llm_provider="llama")
+        super().__init__("DEFENSE_AGENT_MODEL","DEFENSE_AGENT_TEMP",DEFENSE_ANALYSIS_AGENT_PROMPT)
 
     # ── helpers ───────────────────────────────────────────────────────
 

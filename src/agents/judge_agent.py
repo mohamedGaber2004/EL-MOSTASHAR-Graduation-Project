@@ -6,7 +6,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from .agent_base import AgentBase
 from src.Graph.graph_helpers import _parse_llm_json, _now
 from src.Prompts.judge_agent import JUDGE_AGENT_PROMPT, EXPECTED_OUTPUT_SCHEMA
-from src.Utils import VerdictType
 from src.Utils.agents_enums import AgentsEnums
 
 logger = logging.getLogger(__name__)
@@ -16,7 +15,7 @@ class JudgeAgent(AgentBase):
     """Issues the final verdict after receiving the outputs of all preceding agents."""
 
     def __init__(self):
-        super().__init__("JUDGE_MODEL","JUDGE_TEMP",JUDGE_AGENT_PROMPT,llm_provider="llama")
+        super().__init__("JUDGE_MODEL","JUDGE_TEMP",JUDGE_AGENT_PROMPT)
 
     # ── context builder ───────────────────────────────────────────────
 
@@ -98,18 +97,6 @@ class JudgeAgent(AgentBase):
             f"{EXPECTED_OUTPUT_SCHEMA}"
         )
 
-    # ── verdict helpers ───────────────────────────────────────────────
-
-    def _parse_verdict(self, verdict_text: str) -> VerdictType:
-        if not verdict_text:
-            return VerdictType.ACQUITTAL
-        mapped = AgentsEnums.VERDICT_MAP.value.get(verdict_text.strip())
-        if mapped:
-            return mapped
-        for key, value in AgentsEnums.VERDICT_MAP.value.items():
-            if key in verdict_text:
-                return value
-        return VerdictType.ACQUITTAL
 
     def _build_reasoning_trace(self, judgment: dict) -> list[dict]:
         trace = []
@@ -160,7 +147,7 @@ class JudgeAgent(AgentBase):
                 "raw_response":      str(judgment),
             }
 
-        verdict         = self._parse_verdict(judgment.get("verdict", ""))
+        verdict         = judgment.get("verdict", "")
         reasoning_trace = self._build_reasoning_trace(judgment)
 
         logger.info(

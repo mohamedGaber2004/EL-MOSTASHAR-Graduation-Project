@@ -12,21 +12,7 @@ from .files_extractors import (
     Amendment , 
     ExtractedLaw , 
 )
-from .legal_enumerations import (
-    Gender,
-    MentalState,
-    LawCode,
-    ComplicityRole,
-    EvidenceType,
-    CourtLevel,
-    ValidityStatus,
-    VerdictType,
-    WitnessRelation,
-    WitnessType,
-    ProcedureType,
-    NullityType,
-    IncidentType
-)
+
 from .main_entity_classes import (
     Defendant,
     Charge,
@@ -36,7 +22,6 @@ from .main_entity_classes import (
     Confession,
     ProceduralIssue,
     DefenseDocument,
-    PriorJudgment,
     CaseIncident,
     EvidenceAnalysis,
     DefenseArgument,
@@ -49,4 +34,5 @@ from .main_entity_classes import (
     AqwalShuhudExtraction,
     TaqrirTibbiExtraction,
     MozakaretDifaExtraction,
+    CriminalRecord
 )

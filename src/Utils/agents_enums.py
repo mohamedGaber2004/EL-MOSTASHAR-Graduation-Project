@@ -1,28 +1,19 @@
 from enum import Enum
-from src.Utils import VerdictType
 
 
 class LegalDocType(str, Enum):
     AMR_IHALA       = "amr_ihala"
     MAHDAR_DABT     = "mahdar_dabt"
     MAHDAR_ISTIJWAB = "mahdar_istijwab"
-    AQWAL_SHUHUD    = "aqwal_shuhud"
+    AQWAL_SHUHUD    = "aqual_elshuhud"
     TAQRIR_TIBBI    = "taqrir_tibbi"
-    MOZAKARET_DIFA  = "mozakaret_difa"
+    MOZAKARET_DIFA  = "mozakeret_difa"
+    SAWABIQ         = "sgl_genaey"
 
 
 class AgentsEnums:
     AGENT_INVOKATION_ERRORS  = ("429", "rate_limit", "rate_limit_exceeded", "tokens per minute", "please try again")
     AGENT_INGESTION_TXT_FILES_ENCODING = ("utf-8", "cp1256", "latin-1")
-
-    VERDICT_MAP = {
-        "إدانة":         VerdictType.CONVICTION,
-        "براءة":         VerdictType.ACQUITTAL,
-        "إدانة جزئية":  VerdictType.PARTIAL_GUILTY,
-        "guilty":        VerdictType.CONVICTION,
-        "acquittal":     VerdictType.ACQUITTAL,
-        "partial_guilty": VerdictType.PARTIAL_GUILTY,
-    }
 
     
     CRIMINAL_PROCEDURE_LAW_ID = "criminal_procedure"  # was "egyptian_criminal_procedure"

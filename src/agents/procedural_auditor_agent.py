@@ -127,7 +127,7 @@ class ProceduralAuditorAgent(AgentBase):
     # ── prompt builder ────────────────────────────────────────────────
 
     def _build_prompt(self, state, legal_references: str, fetched_articles: list[str]) -> str:
-        ingestion_data    = state.agent_outputs.get("data_ingestion", {})
+        
         procedural_issues = state.procedural_issues or []
         confessions       = getattr(state, "confessions", [])
         incidents         = getattr(state, "incidents", [])
