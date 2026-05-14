@@ -23,7 +23,7 @@ from src.Graph.graph_helpers import (
     _apply_extracted_to_state,
     _now,
 )
-from src.Utils.agents_enums import AgentsEnums, LegalDocType
+from src.Utils.Enums.agents_enums import AgentsEnums, LegalDocType
 
 logger = logging.getLogger(__name__)
 

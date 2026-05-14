@@ -298,21 +298,12 @@ DATA_INGESTION_AGENT_PROMPT_mozakeret_difa = f"""\
 - alibi_claimed: true إن ادّعى الدفاع صراحةً وجود المتهم في مكان آخر وقت الحادث.
 - alibi_description: وصف الألبي إن وُجد (المكان، الزمان، الشهود الداعمون).
 
-[defense_procedural_issues]  — الدفوع الإجرائية بتفصيل قانوني
-  حوّل كل دفع شكلي إلى سجل إجرائي مفصّل:
-- procedure_type: ضبط / تفتيش / قبض / استجواب / إجراءات النيابة / إحالة.
-- issue_description: وصف المخالفة الإجرائية التي يدّعيها الدفاع.
-- warrant_present: false إن يزعم الدفاع غياب الإذن أو بطلانه.
-- conducting_officer: اسم الضابط أو الجهة موضع الطعن إن ذُكر.
-- nullity_type: "بطلان مطلق" أو "بطلان نسبي".
-- article_basis: المادة القانونية التي يستند إليها الدفاع.
 
 تحذيرات:
-- الدفع الشكلي الواحد قد يظهر في formal_defenses وفي defense_procedural_issues معاً — هذا مطلوب.
-- لا تضع الدفوع الموضوعية ضمن defense_procedural_issues.
+- لا تضع الدفوع الموضوعية ضمن formal_defenses.
 - مبادئ النقض المُستشهد بها → supporting_principles فقط.
 
-المخرجات المطلوبة: defense_documents, defense_procedural_issues
+المخرجات المطلوبة: defense_documents
 """
 
 # ─────────────────────────────────────────────────────────────────

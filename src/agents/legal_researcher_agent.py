@@ -5,7 +5,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from .agent_base import AgentBase
 from src.Graphstore.KG_builder import LegalKnowledgeGraph
-from src.Utils.agents_enums import AgentsEnums
+from src.Utils.Enums.agents_enums import AgentsEnums
 from src.Prompts.legal_researcher_agent import (
     LEGAL_RESEARCHER_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,

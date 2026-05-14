@@ -10,7 +10,7 @@ from src.Prompts.procedural_auditor_agent import (
     PROCEDURAL_AUDITOR_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
 )
-from src.Utils.agents_enums import AgentsEnums
+from src.Utils.Enums.agents_enums import AgentsEnums
 
 logger = logging.getLogger(__name__)
 

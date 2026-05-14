@@ -1,19 +1,19 @@
-from .text_loader import _read_file , MultiEncodingTextLoader
-from .norm_and_regu import norm_regu
-from .regex_utils import (
+from .file_utils.text_loader import _read_file , MultiEncodingTextLoader
+from .Enums.norm_and_regu import norm_regu
+from .Enums.regex_utils import (
     _to_western_digits,
     _stable_id,
     _normalize_article_no,
     reg
 )
-from .files_extractors import (
+from .file_utils.files_extractors import (
     AmendmentExtractor,
     LawExtractor ,
     Amendment , 
     ExtractedLaw , 
 )
 
-from .main_entity_classes import (
+from ..Graph.main_entity_classes import (
     Defendant,
     Charge,
     Evidence,

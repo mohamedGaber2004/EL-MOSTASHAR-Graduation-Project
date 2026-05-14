@@ -6,7 +6,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from .agent_base import AgentBase
 from src.Graph.graph_helpers import _parse_llm_json, _now
 from src.Prompts.judge_agent import JUDGE_AGENT_PROMPT, EXPECTED_OUTPUT_SCHEMA
-from src.Utils.agents_enums import AgentsEnums
+from src.Utils.Enums.agents_enums import AgentsEnums
 
 logger = logging.getLogger(__name__)
 

@@ -38,7 +38,6 @@ class AgentState(BaseModel):
     lab_reports:               List[LabReport]        = Field(default_factory=list)
     criminal_records:          List[CriminalRecord]   = Field(default_factory=list)
     defense_documents:         List[DefenseDocument]  = Field(default_factory=list)
-    defense_procedural_issues: List[ProceduralIssue]  = Field(default_factory=list)
 
     # ── Structured Analysis Outputs ───────────────────  (from downstream agents)
     procedural_issues:  List[ProceduralIssue]   = Field(default_factory=list)
