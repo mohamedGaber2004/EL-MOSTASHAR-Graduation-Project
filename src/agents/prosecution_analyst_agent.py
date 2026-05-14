@@ -5,78 +5,16 @@ import logging
 from typing import Any
 
 from src.Graph.states_and_schemas.state import AgentState
+from src.agents.agent_base import AgentBase
+from src.Prompts.prosecution_analyst_agent import PROSECUTION_ANALYST_PROMPT
 from src.Graph.states_and_schemas.Agents_output_models import (
     ProsecutionNarrative,
     ProsecutionArgument,
     ProsecutionArgumentStrength,
 )
-from src.agents.agent_base import AgentBase
+
 
 logger = logging.getLogger(__name__)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Prompt
-# ─────────────────────────────────────────────────────────────────────────────
-
-PROSECUTION_ANALYST_PROMPT = """
-أنت محلل اتهامي متخصص في القانون الجنائي المصري، مهمتك بناء نظرية الاتهام الكاملة
-استناداً إلى كافة الأدلة والشهادات والتقارير الفنية والاعترافات الواردة في ملف القضية.
-
-## دورك
-- تمثّل موقف النيابة العامة المصرية وليس القاضي ولا الدفاع.
-- تقيّم قوة ملف الاتهام بموضوعية وتُشير إلى نقاط ضعفه.
-- تربط كل تهمة بعناصرها القانونية المستوفاة والمنقوصة من واقع الأوراق.
-- لا تتجاهل ثغرات الاتهام — القاضي يحتاج صورة كاملة.
-
-## السياق
-{context}
-
-## التعليمات
-بناءً على سياق القضية أعلاه، أنتج JSON واحداً بالهيكل الآتي بالضبط:
-
-```json
-{{
-  "prosecution_narrative": {{
-    "summary": "ملخص وقائع الاتهام (3-5 جمل)",
-    "incident_reconstruction": "تسلسل الحادثة زمنياً من منظور النيابة",
-    "motive": "الدافع المزعوم أو null",
-    "evidence_chain": ["الدليل الأول", "الدليل الثاني"],
-    "confession_role": "دور الاعتراف أو null",
-    "witness_summary": "ملخص إسهام الشهود أو null",
-    "lab_report_summary": "ملخص التقارير الفنية أو null",
-    "charge_element_mapping": [
-      {{
-        "charge_description": "وصف التهمة",
-        "article": "المادة القانونية",
-        "elements_proven": ["عنصر ثابت 1", "عنصر ثابت 2"],
-        "elements_missing": ["عنصر ناقص 1"]
-      }}
-    ],
-    "overall_strength": "قوية | متوسطة | ضعيفة",
-    "weaknesses": ["نقطة ضعف 1", "نقطة ضعف 2"],
-    "recommended_verdict_direction": "توجيه الحكم المقترح من منظور الاتهام"
-  }},
-  "prosecution_arguments": [
-    {{
-      "charge_description": "وصف التهمة",
-      "article_reference": "المادة أو null",
-      "argument_text": "نص الحجة الاتهامية",
-      "supporting_evidence_ids": ["id1", "id2"],
-      "strength": "قوية | متوسطة | ضعيفة",
-      "rebuttal_risk": "ما قد يرد به الدفاع أو null"
-    }}
-  ]
-}}
-```
-
-## قواعد صارمة
-- أجب بـ JSON فقط بلا مقدمات ولا شرح خارجه.
-- استخدم اللغة العربية في جميع القيم النصية.
-- لا تخترع وقائع غير واردة في الأوراق.
-- إذا كان دليل ما ضعيفاً قانونياً، صرّح بذلك في weaknesses.
-- لكل تهمة في قائمة charges يجب أن يوجد argument مقابل.
-- overall_strength يجب أن تكون إحدى القيم بالضبط: "قوية" أو "متوسطة" أو "ضعيفة".
-""".strip()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

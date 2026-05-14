@@ -6,79 +6,11 @@ from typing import Any
 
 from src.Graph.states_and_schemas.state import AgentState
 from src.Graph.states_and_schemas.Agents_output_models import CivilClaim, CivilClaimStatus
+from src.Prompts.sentencing_agent import  SENTENCING_PROMPT
 from src.agents.agent_base import AgentBase
 
 logger = logging.getLogger(__name__)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Prompt
-# ─────────────────────────────────────────────────────────────────────────────
-
-SENTENCING_PROMPT = """
-أنت مستشار قانوني متخصص في تقدير العقوبات وفقاً للقانون الجنائي المصري.
-مهمتك تحليل ملف القضية وتقديم توصيات تقديرية مفصّلة للقاضي قبل إصدار الحكم.
-
-## مهامك
-1. تحديد الظروف المشددة (قانونية وقضائية) وأثرها.
-2. تحديد الظروف المخففة وأثرها، بما فيها المادة 17 عقوبات.
-3. تقييم تأثير السوابق الجنائية على مقدار العقوبة.
-4. تحديد كيفية التعامل مع تعدد الجرائم (المادة 32 عقوبات).
-5. إعداد توصية بخصوص الدعوى المدنية التبعية وتقدير التعويض.
-6. بناء خريطة واضحة: لكل تهمة → "إدانة" أو "براءة" بناءً على تحليل سابقيك.
-
-## سياق القضية الكامل
-{context}
-
-## التعليمات
-أرجع JSON واحداً بالهيكل الآتي بالضبط:
-
-```json
-{{
-  "aggravating_factors": [
-    "ظرف مشدد 1 مع المرجع القانوني",
-    "ظرف مشدد 2"
-  ],
-  "mitigating_factors": [
-    "ظرف مخفف 1",
-    "ظرف مخفف 2"
-  ],
-  "applicable_article_17": true,
-  "article_17_reasoning": "سبب تطبيق أو عدم تطبيق المادة 17 عقوبات",
-  "recidivism_impact": "أثر السوابق الجنائية على تقدير العقوبة أو null",
-  "multiple_charges_treatment": "كيفية التعامل مع تعدد الجرائم وفق المادة 32 أو null",
-  "execution_suspension_eligible": false,
-  "execution_suspension_reasoning": "مبرر وقف التنفيذ أو null",
-  "charge_conviction_map": {{
-    "وصف التهمة 1": "إدانة",
-    "وصف التهمة 2": "براءة"
-  }},
-  "civil_claim": {{
-    "plaintiff_name": "اسم المدّعي المدني",
-    "plaintiff_capacity": "صفة المدّعي أو null",
-    "compensation_requested": 50000.0,
-    "compensation_basis": "أضرار مادية ومعنوية",
-    "material_damages": 30000.0,
-    "moral_damages": 20000.0,
-    "supporting_documents": ["وثيقة 1", "وثيقة 2"],
-    "status": "مقامة | لم تُقَم | محجوزة للفصل | مقضي بها | مرفوضة",
-    "suggested_award": 40000.0,
-    "award_reasoning": "أسباب التقدير المقترح",
-    "award_against_defendant": "اسم المتهم الملزَم أو null",
-    "solidarity_liability": false
-  }},
-  "sentencing_recommendation": "التوصية التقديرية الإجمالية للقاضي في فقرة واحدة",
-  "suggested_penalty_range": "نطاق العقوبة المقترح لكل تهمة ثبتت إدانتها"
-}}
-```
-
-## قواعد صارمة
-- أجب بـ JSON فقط بلا أي نص خارجه.
-- استخدم اللغة العربية في جميع القيم النصية.
-- civil_claim يكون null إذا لم تُقَم دعوى مدنية أصلاً.
-- applicable_article_17 يكون true فقط إذا توفرت أسباب قانونية واضحة.
-- charge_conviction_map يشمل جميع التهم الواردة في ملف القضية.
-- لا تخترع وقائع — استند فقط إلى ما في السياق.
-""".strip()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
