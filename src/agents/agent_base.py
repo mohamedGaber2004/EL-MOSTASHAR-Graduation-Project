@@ -521,30 +521,85 @@ class AgentBase:
 
     # ── LLM factory ───────────────────────────────────────────────────
 
+    AGENT_CONFIG: dict[str, tuple[str, str]] = {
+        "DATA_INGESTION_MODEL":      ("DATA_INGESTION_MODEL",      "DATA_INGESTION_PROVIDER"),
+        "PROCEDURAL_AUDITOR_MODEL":  ("PROCEDURAL_AUDITOR_MODEL",  "PROCEDURAL_AUDITOR_PROVIDER"),
+        "LEGAL_RESEARCHER_MODEL":    ("LEGAL_RESEARCHER_MODEL",    "LEGAL_RESEARCHER_PROVIDER"),
+        "EVIDENCE_SCORING_MODEL":    ("EVIDENCE_SCORING_MODEL",    "EVIDENCE_SCORING_PROVIDER"),
+        "DEFENSE_AGENT_MODEL":       ("DEFENSE_AGENT_MODEL",       "DEFENSE_AGENT_PROVIDER"),
+        "JUDJICAL_PRINCIPLE_AGENT":  ("JUDJICAL_PRINCIPLE_AGENT",  "JUDJICAL_PRINCIPLE_PROVIDER"),
+        "JUDGE_MODEL":               ("JUDGE_MODEL",               "JUDGE_PROVIDER"),
+        "CONFESSION_VALIDITY_MODEL": ("CONFESSION_VALIDITY_MODEL", "CONFESSION_VALIDITY_PROVIDER"),
+        "WITNESS_CREDIBILITY_MODEL": ("WITNESS_CREDIBILITY_MODEL", "WITNESS_CREDIBILITY_PROVIDER"),
+        "PROSECUTION_ANALYST_MODEL": ("PROSECUTION_ANALYST_MODEL", "PROSECUTION_ANALYST_PROVIDER"),
+        "SENTENCING_MODEL":          ("SENTENCING_MODEL",          "SENTENCING_PROVIDER"),
+    }
+
     def _init_llm(self, agent_name:str):
         """Instantiate only the requested LLM provider."""
-        if agent_name == "DATA_INGESTION_MODEL":
-            from src.LLMs.DATA_INGESTION_MODEL import get_ingesion_model
-            return get_ingesion_model()['open_router_llm']
-        if agent_name == "PROCEDURAL_AUDITOR_MODEL":
-            from src.LLMs.PROCEDURAL_AUDITOR_MODEL import get_procedural_model
-            return get_procedural_model()['open_router_llm']
-        if agent_name == "LEGAL_RESEARCHER_MODEL":
-            from src.LLMs.LEGAL_RESEARCHER_MODEL import get_legal_reasearcher_model
-            return get_legal_reasearcher_model()['open_router_llm']
-        if agent_name == "EVIDENCE_SCORING_MODEL":
-            from src.LLMs.EVIDENCE_SCORING_MODEL import get_evidence_scoring_model
-            return get_evidence_scoring_model()['open_router_llm']
-        if agent_name == "DEFENSE_AGENT_MODEL":
-            from src.LLMs.DEFENSE_AGENT_MODEL import get_defense_model
-            return get_defense_model()['open_router_llm']
-        if agent_name == "JUDJICAL_PRINCIPLE_AGENT":
-            from src.LLMs.JUDJICAL_PRINCIPLE_AGENT import get_judjical_principle_model
-            return get_judjical_principle_model()['open_router_llm']
-        if agent_name == "JUDGE_MODEL":
-            from src.LLMs.JUDGE_MODEL import get_judge_model
-            return get_judge_model()['open_router_llm']
-        raise ValueError(f"Unknown LLM provider: {agent_name!r}")
+
+        if agent_name not in self.AGENT_CONFIG:
+            raise ValueError(
+                f"Unknown agent key: {agent_name!r}. "
+                f"Add it to AgentBase.AGENT_CONFIG."
+            )
+        
+        model_attr, provider_attr = self.AGENT_CONFIG[agent_name]
+        model_name   = getattr(self.cfg, model_attr)
+        provider     = getattr(self.cfg, provider_attr, "open_router").strip().lower()
+        temperature  = self.temperature
+
+        logger.debug(
+            "Initialising LLM — agent=%s | provider=%s | model=%s | temp=%s",
+            agent_name, provider, model_name, temperature,
+        )
+
+        factory_map = {
+            "DATA_INGESTION_MODEL":      ("src.LLMs.DATA_INGESTION_MODEL",      "get_ingesion_model"),
+            "PROCEDURAL_AUDITOR_MODEL":  ("src.LLMs.PROCEDURAL_AUDITOR_MODEL",  "get_procedural_model"),
+            "LEGAL_RESEARCHER_MODEL":    ("src.LLMs.LEGAL_RESEARCHER_MODEL",    "get_legal_reasearcher_model"),
+            "EVIDENCE_SCORING_MODEL":    ("src.LLMs.EVIDENCE_SCORING_MODEL",    "get_evidence_scoring_model"),
+            "DEFENSE_AGENT_MODEL":       ("src.LLMs.DEFENSE_AGENT_MODEL",       "get_defense_model"),
+            "JUDJICAL_PRINCIPLE_AGENT":  ("src.LLMs.JUDJICAL_PRINCIPLE_AGENT",  "get_judjical_principle_model"),
+            "JUDGE_MODEL":               ("src.LLMs.JUDGE_MODEL",               "get_judge_model"),
+            "CONFESSION_VALIDITY_MODEL": ("src.LLMs.CONFESSION_VALIDITY_MODEL", "get_confession_validity_model"),
+            "WITNESS_CREDIBILITY_MODEL": ("src.LLMs.WITNESS_CREDIBILITY_MODEL", "get_witness_credibility_model"),
+            "PROSECUTION_ANALYST_MODEL": ("src.LLMs.PROSECUTION_ANALYST_MODEL", "get_prosecution_analyst_model"),
+            "SENTENCING_MODEL":          ("src.LLMs.SENTENCING_MODEL",           "get_sentencing_model"),
+        }
+
+        module_path, func_name = factory_map[agent_name]
+        import importlib
+        module  = importlib.import_module(module_path)
+        factory = getattr(module, func_name)
+        llm_map = factory() 
+
+
+        provider_key_map = {
+            "open_router": "open_router_llm",
+            "groq":        "groq_llm",
+            "google":      "google_llm",
+        }
+
+        if provider not in provider_key_map:
+            raise ValueError(
+                f"Unknown provider {provider!r} for agent {agent_name!r}. "
+                f"Choose from: {list(provider_key_map.keys())}"
+            )
+ 
+        key = provider_key_map[provider]
+ 
+        if key not in llm_map:
+            raise KeyError(
+                f"Factory for {agent_name!r} did not return key {key!r}. "
+                f"Available keys: {list(llm_map.keys())}"
+            )
+ 
+        logger.info(
+            "✅ LLM ready — agent=%s | provider=%s | model=%s",
+            agent_name, provider, model_name,
+        )
+        return llm_map[key]
 
     # ── retry wrapper ─────────────────────────────────────────────────
 

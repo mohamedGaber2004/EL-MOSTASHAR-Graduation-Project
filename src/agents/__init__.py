@@ -4,3 +4,7 @@ from .legal_researcher_agent import LegalResearcherAgent
 from .evidence_analyst_agent import EvidenceAnalystAgent
 from .defense_analyst_agent import DefenseAnalystAgent
 from .judge_agent import JudgeAgent
+from .confession_validity_agent import ConfessionValidityAgent
+from .prosecution_analyst_agent import ProsecutionAnalystAgent
+from .sentencing_agent import SentencingAgent
+from .witness_credibility_agent import WitnessCredibilityAgent

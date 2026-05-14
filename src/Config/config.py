@@ -33,22 +33,49 @@ class Settings(BaseSettings):
     
     # Free/open LLM model config for each agent node
     DATA_INGESTION_MODEL: str 
-    PROCEDURAL_AUDITOR_MODEL: str 
-    LEGAL_RESEARCHER_MODEL: str 
-    EVIDENCE_SCORING_MODEL: str 
-    DEFENSE_AGENT_MODEL: str 
-    JUDJICAL_PRINCIPLE_AGENT: str
-    JUDGE_MODEL: str 
-
-    # Optional: temperature per agent
     DATA_INGESTION_TEMP: float
+    DATA_INGESTION_PROVIDER: str = "open_router"
+
+    PROCEDURAL_AUDITOR_MODEL: str 
     PROCEDURAL_AUDITOR_TEMP: float
+    PROCEDURAL_AUDITOR_PROVIDER: str = "open_router"
+
+    LEGAL_RESEARCHER_MODEL: str 
     LEGAL_RESEARCHER_TEMP: float
+    LEGAL_RESEARCHER_PROVIDER: str = "open_router"
+
+    EVIDENCE_SCORING_MODEL: str 
     EVIDENCE_SCORING_TEMP: float
+    EVIDENCE_SCORING_PROVIDER: str = "open_router"
+
+    DEFENSE_AGENT_MODEL: str 
     DEFENSE_AGENT_TEMP: float
+    DEFENSE_AGENT_PROVIDER: str = "open_router"
+
+    JUDJICAL_PRINCIPLE_AGENT: str
     JUDJICAL_PRINCIPLE_TEMP: float
+    JUDJICAL_PRINCIPLE_PROVIDER: str = "open_router"
+
+    CONFESSION_VALIDITY_MODEL: str
+    CONFESSION_VALIDITY_TEMP: float
+    CONFESSION_VALIDITY_PROVIDER: str = "open_router"
+
+    WITNESS_CREDIBILITY_MODEL: str
+    WITNESS_CREDIBILITY_TEMP: float
+    WITNESS_CREDIBILITY_PROVIDER: str = "open_router"
+
+    PROSECUTION_ANALYST_MODEL: str
+    PROSECUTION_ANALYST_TEMP: float
+    PROSECUTION_ANALYST_PROVIDER: str = "open_router"
+
+    SENTENCING_MODEL: str
+    SENTENCING_TEMP: float
+    SENTENCING_PROVIDER: str = "open_router"
+
+    JUDGE_MODEL: str
     JUDGE_TEMP: float
-    
+    JUDGE_PROVIDER: str = "open_router"
+
     # Neo4j KG
     NEO4J_URI: Optional[str] = None
     NEO4J_USERNAME: Optional[str] = None

@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import logging
 from functools import lru_cache
-from typing import Union
+from typing import Literal, Union
 
 from langgraph.graph import END, START, StateGraph
 
@@ -12,16 +14,20 @@ from src.agents import (
     ProceduralAuditorAgent,
     LegalResearcherAgent,
     EvidenceAnalystAgent,
+    ConfessionValidityAgent,
+    WitnessCredibilityAgent,
+    ProsecutionAnalystAgent,
     DefenseAnalystAgent,
+    SentencingAgent,
     JudgeAgent,
 )
 
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Error wrapper
-# =============================================================================
+# ─────────────────────────────────────────────────────────────────────────────
+# Error wrapper  (بدون agent_outputs)
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _safe_run(agent_key: str, agent):
     def _wrapped(state: AgentState) -> AgentState:
@@ -33,17 +39,44 @@ def _safe_run(agent_key: str, agent):
                 "errors":           state.errors + [f"[{agent_key}] {e}"],
                 "completed_agents": state.completed_agents + [agent_key],
                 "current_agent":    agent_key,
-                "agent_outputs": {
-                    **state.agent_outputs,
-                    agent_key: {"error": str(e), "status": "failed"},
-                },
             })
     return _wrapped
 
 
-# =============================================================================
-# Graph builder — @lru_cache يضمن بناء الـ graph مرة واحدة فقط
-# =============================================================================
+# ─────────────────────────────────────────────────────────────────────────────
+# Conditional routing
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _route_after_procedural_audit(state: AgentState) -> Literal["legal_researcher", "judge"]:
+    """
+    إذا اكتشف المدقق الإجرائي مشكلة قاتلة (سقوط بالتقادم / بطلان مطلق /
+    عدم اختصاص) تجاوز بقية العملاء وأرسل القضية مباشرة إلى القاضي.
+    """
+    fatal_keywords = {
+        "سقوط", "تقادم", "بطلان مطلق", "عدم اختصاص",
+        "انقضاء الدعوى", "وفاة المتهم",
+    }
+    for issue in state.procedural_issues:
+        desc = getattr(issue, "issue_description", "") or ""
+        if any(kw in desc for kw in fatal_keywords):
+            logger.warning(
+                "⚡ مشكلة إجرائية قاتلة — تجاوز مباشر إلى القاضي: %s", desc[:80]
+            )
+            return "judge"
+    return "legal_researcher"
+
+
+def _route_after_parallel_analysis(state: AgentState) -> Literal["prosecution_analyst"]:
+    """
+    بعد اكتمال المرحلة الموازية (evidence + confession + witness)
+    يُحال الملف دائماً إلى محلل الاتهام.
+    الدالة موجودة للتوسعة المستقبلية.
+    """
+    return "prosecution_analyst"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Graph builder
+# ─────────────────────────────────────────────────────────────────────────────
 
 @lru_cache(maxsize=1)
 def build_legal_graph():
@@ -56,23 +89,46 @@ def build_legal_graph():
         "legal_researcher":   LegalResearcherAgent(kg=kg, vector_store=vs),
         "evidence_analyst":   EvidenceAnalystAgent(),
         "defense_analyst":    DefenseAnalystAgent(),
+        "confession_validity":  ConfessionValidityAgent(),
+        "witness_credibility":  WitnessCredibilityAgent(),
+        "prosecution_analyst":  ProsecutionAnalystAgent(),
+        "sentencing":           SentencingAgent(),
         "judge":              JudgeAgent(),
     }
 
     builder = StateGraph(AgentState)
 
+    # ── The Nodes ───────────────────────────────────────────────
     for name, agent in agents.items():
         builder.add_node(name, _safe_run(name, agent))
 
-    builder.add_edge(START,                "data_ingestion")
-    builder.add_edge("data_ingestion",     "procedural_auditor")
-    builder.add_edge("procedural_auditor", "legal_researcher")
-    builder.add_edge("legal_researcher",   "evidence_analyst")
-    builder.add_edge("evidence_analyst",   "defense_analyst")
-    builder.add_edge("defense_analyst",    "judge")
-    builder.add_edge("judge",              END)
+    # ── The Edges ────────────────────────────────────────────────────
 
-    logger.info("✅ Legal graph built")
+    builder.add_edge(START, "data_ingestion")
+
+    builder.add_edge("data_ingestion", "procedural_auditor")
+
+    builder.add_conditional_edges(
+        "procedural_auditor",
+        _route_after_procedural_audit,
+        {
+            "legal_researcher": "legal_researcher",
+            "judge":            "judge",
+        },
+    )
+
+    builder.add_edge("legal_researcher", "evidence_analyst")
+    builder.add_edge("legal_researcher", "confession_validity")
+    builder.add_edge("legal_researcher", "witness_credibility")
+    builder.add_edge("evidence_analyst",  "prosecution_analyst")
+    builder.add_edge("confession_validity", "prosecution_analyst")
+    builder.add_edge("witness_credibility", "prosecution_analyst")
+    builder.add_edge("prosecution_analyst", "defense_analyst")
+    builder.add_edge("defense_analyst", "sentencing")
+    builder.add_edge("sentencing", "judge")
+    builder.add_edge("judge", END)
+
+    logger.info("✅ Legal graph built — 10 agents | conditional routing active")
     return builder.compile()
 
 
@@ -81,9 +137,9 @@ def get_graph_visualization():
     return g, g.get_graph().draw_mermaid_png()
 
 
-# =============================================================================
-# run_case — نقطة الدخول الوحيدة للـ pipeline
-# =============================================================================
+# ─────────────────────────────────────────────────────────────────────────────
+# run_case
+# ─────────────────────────────────────────────────────────────────────────────
 
 def run_case(state: AgentState) -> AgentState:
     logger.info("🚀 بدء معالجة القضية: %s", state.case_id)
