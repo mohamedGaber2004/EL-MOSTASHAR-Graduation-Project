@@ -4,7 +4,7 @@ from typing import Union
 
 from langgraph.graph import END, START, StateGraph
 
-from src.Graph.state import AgentState
+from src.Graph.states_and_schemas.state import AgentState
 from src.Graph.shared_resources import get_kg, get_vector_store
 
 from src.agents import (

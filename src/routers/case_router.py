@@ -4,7 +4,7 @@ from typing import List, Optional, Any
 from threading import Lock
 
 from src.Graph.graph_builder import run_case
-from src.Graph.state import AgentState
+from src.Graph.states_and_schemas.state import AgentState
 
 
 # Create router

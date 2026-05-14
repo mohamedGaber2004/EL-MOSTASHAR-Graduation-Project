@@ -5,7 +5,7 @@ from typing import Any, Callable, List, Dict
 
 from src.Config import get_settings
 from src.Utils.Enums.agents_enums import AgentsEnums
-from src.Graph.state import AgentState
+from src.Graph.states_and_schemas.state import AgentState
 from src.Config.log_config import logging
 
 try:
