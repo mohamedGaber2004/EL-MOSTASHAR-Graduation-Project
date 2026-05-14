@@ -17,12 +17,7 @@ from src.Prompts.data_ingestion_agent import (
     DATA_INGESTION_AGENT_PROMPT_mozakeret_difa,
     DATA_INGESTION_AGENT_PROMPT_sawabiq,
 )
-from src.Graph.graph_helpers import (
-    _parse_llm_json,
-    _merge_extracted,
-    _apply_extracted_to_state,
-    _now,
-)
+
 from src.Utils.Enums.agents_enums import AgentsEnums, LegalDocType
 
 logger = logging.getLogger(__name__)
@@ -310,7 +305,7 @@ class DataIngestionAgent(AgentBase):
                         HumanMessage(content=f"النص:\n\n{chunk_content}"),
                     ],
                 )
-                result = _parse_llm_json(response.content)
+                result = self._parse_llm_json(response.content)
 
                 is_valid, reason = _validate_extracted(result)
                 if not is_valid:
@@ -323,7 +318,7 @@ class DataIngestionAgent(AgentBase):
                             if isinstance(item, dict) and not item.get("source_document_id"):
                                 item["source_document_id"] = chunk_id
 
-                all_extracted = _merge_extracted(all_extracted, result)
+                all_extracted = self._merge_extracted(all_extracted, result)
                 any_success = True
 
             except Exception as exc:
@@ -375,7 +370,7 @@ class DataIngestionAgent(AgentBase):
                 update={
                     "completed_agents": state.completed_agents + ["data_ingestion"],
                     "current_agent":    "data_ingestion",
-                    "last_updated":     _now(),
+                    "last_updated":     self._now(),
                 }
             )
 
@@ -408,10 +403,10 @@ class DataIngestionAgent(AgentBase):
                 file_errors.append(msg)
 
         # ── apply to state ────────────────────────────────────────
-        state_updates = _apply_extracted_to_state(state, all_extracted)
+        state_updates = self._apply_extracted_to_state(state, all_extracted)
 
         provenance = {
-            "processed_at":     _now().isoformat(),
+            "processed_at":     self._now().isoformat(),
             "processed_docs":   processed_docs,
             "failed_docs":      file_errors,
             "extracted_counts": {
@@ -437,6 +432,6 @@ class DataIngestionAgent(AgentBase):
                 "completed_agents": state.completed_agents + ["data_ingestion"],
                 "current_agent":    "data_ingestion",
                 "errors":           state.errors + file_errors,
-                "last_updated":     _now(),
+                "last_updated":     self._now(),
             }
         )

@@ -4,7 +4,6 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from .agent_base import AgentBase
-from src.Graph.graph_helpers import _parse_llm_json
 from src.Prompts.defense_analysis_agent import (
     DEFENSE_ANALYSIS_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
@@ -144,7 +143,7 @@ class DefenseAnalystAgent(AgentBase):
             [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
         )
 
-        defense_analysis = _parse_llm_json(response.content)
+        defense_analysis = self._parse_llm_json(response.content)
 
         if not isinstance(defense_analysis, dict):
             logger.error("Defense analysis — LLM response could not be parsed as dict")

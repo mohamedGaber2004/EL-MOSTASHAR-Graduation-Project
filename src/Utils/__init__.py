@@ -12,27 +12,3 @@ from .file_utils.files_extractors import (
     Amendment , 
     ExtractedLaw , 
 )
-
-from ..Graph.main_entity_classes import (
-    Defendant,
-    Charge,
-    Evidence,
-    LabReport,
-    WitnessStatement,
-    Confession,
-    ProceduralIssue,
-    DefenseDocument,
-    CaseIncident,
-    EvidenceAnalysis,
-    DefenseArgument,
-    JudicialPrinciple,
-    FinalJudgment,
-    CaseMeta,
-    AmrIhalaExtraction,
-    MahdarDabtExtraction,
-    MahdarIstijwabExtraction,
-    AqwalShuhudExtraction,
-    TaqrirTibbiExtraction,
-    MozakaretDifaExtraction,
-    CriminalRecord
-)

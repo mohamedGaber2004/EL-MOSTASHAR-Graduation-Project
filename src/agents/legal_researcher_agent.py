@@ -10,10 +10,7 @@ from src.Prompts.legal_researcher_agent import (
     LEGAL_RESEARCHER_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
 )
-from src.Graph.graph_helpers import (
-    _build_fallback_package,
-    _parse_llm_json,
-)
+
 
 logger = logging.getLogger(__name__)
 
@@ -199,7 +196,7 @@ class LegalResearcherAgent(AgentBase):
 
         if len(failed_charges) == charges_count:
             logger.warning("All charges failed context retrieval — using fallback")
-            legal_package = _build_fallback_package(all_contexts)
+            legal_package = self._build_fallback_package(all_contexts)
             legal_package["_meta"] = {
                 "source":         "fallback",
                 "failed_charges": failed_charges,
@@ -214,14 +211,14 @@ class LegalResearcherAgent(AgentBase):
                 self._llm,
                 [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
             )
-            legal_package = _parse_llm_json(response.content)
+            legal_package = self._parse_llm_json(response.content)
         except Exception as e:
             logger.error("LLM invocation failed: %s — using fallback", e)
-            legal_package = _build_fallback_package(all_contexts)
+            legal_package = self._build_fallback_package(all_contexts)
 
         if not isinstance(legal_package, dict):
             logger.error("LLM response not a dict — using fallback")
-            legal_package = _build_fallback_package(all_contexts)
+            legal_package = self._build_fallback_package(all_contexts)
         else:
             logger.info(
                 "Legal research complete — %d package(s)",

@@ -4,8 +4,6 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from .agent_base import AgentBase
-from src.Graph.graph_helpers import _parse_llm_json
-from src.Utils.agent_output_utils import clean_agent_output
 from src.Prompts.evidence_analyst_agent import (
     EVIDENCE_ANALYST_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
@@ -143,7 +141,7 @@ class EvidenceAnalystAgent(AgentBase):
             [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
         )
 
-        evidence_matrix = clean_agent_output(_parse_llm_json(response.content))
+        evidence_matrix = self.clean_agent_output(self._parse_llm_json(response.content))
 
         if not isinstance(evidence_matrix, dict):
             logger.error("Evidence analysis — LLM response could not be parsed as dict")

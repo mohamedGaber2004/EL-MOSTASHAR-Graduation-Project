@@ -5,7 +5,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from .agent_base import AgentBase
 from src.Graphstore.KG_builder import LegalKnowledgeGraph
-from src.Graph.graph_helpers import _parse_llm_json
 from src.Prompts.procedural_auditor_agent import (
     PROCEDURAL_AUDITOR_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
@@ -127,7 +126,7 @@ class ProceduralAuditorAgent(AgentBase):
     # ── prompt builder ────────────────────────────────────────────────
 
     def _build_prompt(self, state, legal_references: str, fetched_articles: list[str]) -> str:
-        
+        ingestion_data = None
         procedural_issues = state.procedural_issues or []
         confessions       = getattr(state, "confessions", [])
         incidents         = getattr(state, "incidents", [])
@@ -181,7 +180,7 @@ class ProceduralAuditorAgent(AgentBase):
             [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
         )
 
-        audit_report = _parse_llm_json(response.content)
+        audit_report = self._parse_llm_json(response.content)
 
         if isinstance(audit_report, dict):
             logger.info(
