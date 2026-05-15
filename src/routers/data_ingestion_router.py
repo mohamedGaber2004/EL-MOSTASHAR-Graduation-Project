@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
-from src.Graph.states_and_schemas.state import AgentState
 
+from src.Graph.states_and_schemas.state import AgentState
 from src.agents.data_ingestion_agent import DataIngestionAgent
 
 # Create router
@@ -11,7 +11,6 @@ data_ingestion_router = APIRouter(prefix="/agents", tags=["Agents Pipeline"])
 class InvokeDataIngestion(BaseModel):
     case_id: str
     source_documents: Optional[List[str]] = None
-
 
 @data_ingestion_router.post("/ingest_data")
 async def ingest_data(payload: InvokeDataIngestion):

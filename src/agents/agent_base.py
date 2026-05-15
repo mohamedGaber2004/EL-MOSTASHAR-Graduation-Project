@@ -130,10 +130,9 @@ class AgentBase:
         Pydantic models inside lists are constructed here so AgentState
         receives typed objects rather than raw dicts.
         """
-        from src.Utils import (
+        from src.Graph.states_and_schemas.main_entity_classes import (
             Defendant, Charge, CaseIncident, Evidence, LabReport,
-            WitnessStatement, Confession, ProceduralIssue,
-            DefenseDocument, CriminalRecord, CriminalProceedings,  # ← added
+            WitnessStatement, Confession,DefenseDocument, CriminalRecord, CriminalProceedings,
         )
 
         def safe_make(cls, data: dict) -> Any:
@@ -167,9 +166,7 @@ class AgentBase:
             "lab_reports":               (LabReport,           "lab_reports"),
             "witness_statements":        (WitnessStatement,    "witness_statements"),
             "confessions":               (Confession,          "confessions"),
-            "criminal_proceedings":      (CriminalProceedings, "criminal_proceedings"),  # ← added
-            "procedural_issues":         (ProceduralIssue,     "procedural_issues"),
-            "defense_procedural_issues": (ProceduralIssue,     "defense_procedural_issues"),
+            "criminal_proceedings":      (CriminalProceedings, "criminal_proceedings"),
             "defense_documents":         (DefenseDocument,     "defense_documents"),
             "criminal_records":          (CriminalRecord,      "criminal_records"),
         }
@@ -555,7 +552,7 @@ class AgentBase:
             Evidence,
             LabReport,
             WitnessStatement,
-            CriminalProceedings,  # ← added
+            CriminalProceedings
         )
 
         result = {}
