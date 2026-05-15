@@ -1,6 +1,5 @@
 import logging, time, random, json 
 from datetime import datetime, timezone
-
 from typing import Any, Callable, List, Dict
 
 from src.Config import get_settings
@@ -80,7 +79,7 @@ class AgentBase:
         return existing + incoming
 
     # _merge_extracted
-    def _merge_extracted(self,base: dict, incoming: dict) -> dict:
+    def _merge_extracted(self, base: dict, incoming: dict) -> dict:
         """
         Merge `incoming` extraction result into `base`.
         List fields are appended with deduplication where meaningful keys exist.
@@ -88,7 +87,7 @@ class AgentBase:
         """
         merged = dict(base)
 
-        # ── case_meta: first-write-wins per sub-key ──────────────────────────────
+        # ── case_meta: first-write-wins per sub-key ───────────────────────────────
         if "case_meta" in incoming and isinstance(incoming["case_meta"], dict):
             base_meta = merged.get("case_meta") or {}
             for k, v in incoming["case_meta"].items():
@@ -105,6 +104,7 @@ class AgentBase:
             "lab_reports":               ("report_type", "examiner_name", "examination_date"),
             "witness_statements":        ("witness_name", "statement_date"),
             "confessions":               ("defendant_name", "confession_date", "text"),
+            "criminal_proceedings":      ("procedure_type", "description", "conducting_officer"),  # ← added
             "procedural_issues":         ("procedure_type", "issue_description"),
             "defense_procedural_issues": ("procedure_type", "issue_description"),
             "criminal_records":          ("defendant_name",),
@@ -122,7 +122,7 @@ class AgentBase:
         return merged
 
     # _apply_extracted_to_state
-    def _apply_extracted_to_state(self,state: Any, extracted: dict) -> dict:
+    def _apply_extracted_to_state(self, state: Any, extracted: dict) -> dict:
         """
         Convert the raw `extracted` dict (from _merge_extracted) to the
         keyword arguments needed for state.model_copy(update={...}).
@@ -133,7 +133,7 @@ class AgentBase:
         from src.Utils import (
             Defendant, Charge, CaseIncident, Evidence, LabReport,
             WitnessStatement, Confession, ProceduralIssue,
-            DefenseDocument, CriminalRecord,
+            DefenseDocument, CriminalRecord, CriminalProceedings,  # ← added
         )
 
         def safe_make(cls, data: dict) -> Any:
@@ -160,17 +160,18 @@ class AgentBase:
 
         # ── entity lists ──────────────────────────────────────────────────────────
         mapping = {
-            "defendants":                (Defendant,        "defendants"),
-            "charges":                   (Charge,           "charges"),
-            "incidents":                 (CaseIncident,     "incidents"),
-            "evidences":                 (Evidence,         "evidences"),
-            "lab_reports":               (LabReport,        "lab_reports"),
-            "witness_statements":        (WitnessStatement, "witness_statements"),
-            "confessions":               (Confession,       "confessions"),
-            "procedural_issues":         (ProceduralIssue,  "procedural_issues"),
-            "defense_procedural_issues": (ProceduralIssue,  "defense_procedural_issues"),
-            "defense_documents":         (DefenseDocument,  "defense_documents"),
-            "criminal_records":          (CriminalRecord,   "criminal_records"),
+            "defendants":                (Defendant,           "defendants"),
+            "charges":                   (Charge,              "charges"),
+            "incidents":                 (CaseIncident,        "incidents"),
+            "evidences":                 (Evidence,            "evidences"),
+            "lab_reports":               (LabReport,           "lab_reports"),
+            "witness_statements":        (WitnessStatement,    "witness_statements"),
+            "confessions":               (Confession,          "confessions"),
+            "criminal_proceedings":      (CriminalProceedings, "criminal_proceedings"),  # ← added
+            "procedural_issues":         (ProceduralIssue,     "procedural_issues"),
+            "defense_procedural_issues": (ProceduralIssue,     "defense_procedural_issues"),
+            "defense_documents":         (DefenseDocument,     "defense_documents"),
+            "criminal_records":          (CriminalRecord,      "criminal_records"),
         }
 
         for raw_key, (cls, state_field) in mapping.items():
@@ -349,50 +350,137 @@ class AgentBase:
             "completed_agents":  state.completed_agents,
         }, ensure_ascii=False, indent=2)
 
-    def _agent_context(self,state: AgentState, agent_name: str) -> str:
+    def _agent_context(self, state: AgentState, agent_name: str) -> str:
+        """
+        Build a JSON context string for the given agent by reading directly
+        from the typed AgentState fields (no agent_outputs dict).
+        """
         base  = self._state_summary(state)
         extra: Dict[str, Any] = {}
 
         if agent_name == "procedural_auditor":
             extra = {
-                "procedural_issues":         [self._safe_dump(p) for p in state.procedural_issues],
-                "defense_procedural_issues": [self._safe_dump(p) for p in state.defense_procedural_issues],
-                "confessions":               [self._safe_dump(c) for c in state.confessions],
+                "criminal_proceedings":      [self._safe_dump(p) for p in state.criminal_proceedings],
                 "evidences":                 [self._safe_dump(e) for e in state.evidences],
+                "confessions":               [self._safe_dump(c) for c in state.confessions],
+                "defendants":                [self._safe_dump(d) for d in state.defendants],
+                "incidents":                 [self._safe_dump(i) for i in state.incidents],
             }
+
         elif agent_name == "legal_researcher":
             extra = {
-                "charges":          [self._safe_dump(c) for c in state.charges],
-                "incidents":        [self._safe_dump(i) for i in state.incidents],
-                "criminal_records": [self._safe_dump(r) for r in state.criminal_records],  # was prior_judgments
+                "charges":                   [self._safe_dump(c) for c in state.charges],
+                "incidents":                 [self._safe_dump(i) for i in state.incidents],
+                "criminal_records":          [self._safe_dump(r) for r in state.criminal_records],
+                "procedural_issues":         [self._safe_dump(p) for p in state.procedural_issues],
             }
+
         elif agent_name == "evidence_analyst":
             extra = {
-                "evidences":          [self._safe_dump(e) for e in state.evidences],
-                "lab_reports":        [self._safe_dump(r) for r in state.lab_reports],
-                "witness_statements": [self._safe_dump(w) for w in state.witness_statements],
-                "confessions":        [self._safe_dump(c) for c in state.confessions],
-                "incidents":          [self._safe_dump(i) for i in state.incidents],
-                "procedural_audit":   state.agent_outputs.get("procedural_auditor", {}),
+                "evidences":                 [self._safe_dump(e) for e in state.evidences],
+                "lab_reports":               [self._safe_dump(r) for r in state.lab_reports],
+                "witness_statements":        [self._safe_dump(w) for w in state.witness_statements],
+                "confessions":               [self._safe_dump(c) for c in state.confessions],
+                "incidents":                 [self._safe_dump(i) for i in state.incidents],
+                "procedural_issues":         [self._safe_dump(p) for p in state.procedural_issues],
             }
+
+        elif agent_name == "confession_validity":
+            extra = {
+                "confessions":               [self._safe_dump(c) for c in state.confessions],
+                "criminal_proceedings":      [self._safe_dump(p) for p in state.criminal_proceedings],
+                "defendants":                [self._safe_dump(d) for d in state.defendants],
+                "procedural_issues":         [self._safe_dump(p) for p in state.procedural_issues],
+            }
+
+        elif agent_name == "witness_credibility":
+            extra = {
+                "witness_statements":        [self._safe_dump(w) for w in state.witness_statements],
+                "evidences":                 [self._safe_dump(e) for e in state.evidences],
+                "evidence_scores":           [self._safe_dump(s) for s in state.evidence_scores],
+                "incidents":                 [self._safe_dump(i) for i in state.incidents],
+            }
+
+        elif agent_name == "prosecution_analyst":
+            extra = {
+                "charges":                   [self._safe_dump(c) for c in state.charges],
+                "incidents":                 [self._safe_dump(i) for i in state.incidents],
+                "evidences":                 [self._safe_dump(e) for e in state.evidences],
+                "evidence_scores":           [self._safe_dump(s) for s in state.evidence_scores],
+                "chain_of_custody_issues":   state.chain_of_custody_issues,
+                "lab_reports":               [self._safe_dump(r) for r in state.lab_reports],
+                "confessions":               [self._safe_dump(c) for c in state.confessions],
+                "confession_assessments":    [self._safe_dump(a) for a in state.confession_assessments],
+                "witness_statements":        [self._safe_dump(w) for w in state.witness_statements],
+                "witness_credibility_scores":[self._safe_dump(s) for s in state.witness_credibility_scores],
+                "applied_principles":        [self._safe_dump(p) for p in state.applied_principles],
+                "case_articles":             state.case_articles,
+                "procedural_issues":         [self._safe_dump(p) for p in state.procedural_issues],
+            }
+
         elif agent_name == "defense_analyst":
             extra = {
                 "defense_documents":         [self._safe_dump(d) for d in state.defense_documents],
-                "defense_procedural_issues": [self._safe_dump(p) for p in state.defense_procedural_issues],
-                "procedural_audit":          state.agent_outputs.get("procedural_auditor", {}),
-                "evidence_matrix":           state.agent_outputs.get("evidence_analyst", {}),
                 "defendants":                [self._safe_dump(d) for d in state.defendants],
+                "procedural_issues":         [self._safe_dump(p) for p in state.procedural_issues],
+                "defense_procedural_issues": [self._safe_dump(p) for p in state.defense_procedural_issues],
+                "confession_assessments":    [self._safe_dump(a) for a in state.confession_assessments],
+                "witness_credibility_scores":[self._safe_dump(s) for s in state.witness_credibility_scores],
+                "evidence_scores":           [self._safe_dump(s) for s in state.evidence_scores],
+                "chain_of_custody_issues":   state.chain_of_custody_issues,
+                "applied_principles":        [self._safe_dump(p) for p in state.applied_principles],
+                "case_articles":             state.case_articles,
+                "prosecution_theory":        self._safe_dump(state.prosecution_theory) if state.prosecution_theory else None,
+                "prosecution_arguments":     [self._safe_dump(a) for a in state.prosecution_arguments],
             }
+
+        elif agent_name == "sentencing":
+            extra = {
+                "charges":                   [self._safe_dump(c) for c in state.charges],
+                "defendants":                [self._safe_dump(d) for d in state.defendants],
+                "criminal_records":          [self._safe_dump(r) for r in state.criminal_records],
+                "incidents":                 [self._safe_dump(i) for i in state.incidents],
+                "prosecution_theory":        self._safe_dump(state.prosecution_theory) if state.prosecution_theory else None,
+                "prosecution_arguments":     [self._safe_dump(a) for a in state.prosecution_arguments],
+                "defense_arguments":         [self._safe_dump(a) for a in state.defense_arguments],
+                "confession_assessments":    [self._safe_dump(a) for a in state.confession_assessments],
+                "evidence_scores":           [self._safe_dump(s) for s in state.evidence_scores],
+                "witness_credibility_scores":[self._safe_dump(s) for s in state.witness_credibility_scores],
+                "applied_principles":        [self._safe_dump(p) for p in state.applied_principles],
+                "case_articles":             state.case_articles,
+                "procedural_issues":         [self._safe_dump(p) for p in state.procedural_issues],
+            }
+
         elif agent_name == "judge":
             extra = {
-                "procedural_audit":  state.agent_outputs.get("procedural_auditor", {}),
-                "legal_research":    state.agent_outputs.get("legal_researcher", {}),
-                "evidence_matrix":   state.agent_outputs.get("evidence_analyst", {}),
-                "defense_analysis":  state.agent_outputs.get("defense_analyst", {}),
-                "charges":           [self._safe_dump(c) for c in state.charges],
-                "defendants":        [self._safe_dump(d) for d in state.defendants],
-                "incidents":         [self._safe_dump(i) for i in state.incidents],
-                "criminal_records":  [self._safe_dump(r) for r in state.criminal_records],
+                "charges":                   [self._safe_dump(c) for c in state.charges],
+                "defendants":                [self._safe_dump(d) for d in state.defendants],
+                "incidents":                 [self._safe_dump(i) for i in state.incidents],
+                "criminal_records":          [self._safe_dump(r) for r in state.criminal_records],
+                "referral_order_text":       state.referral_order_text,
+                # ── evidence layer ────────────────────────────────────────────────
+                "evidence_scores":           [self._safe_dump(s) for s in state.evidence_scores],
+                "chain_of_custody_issues":   state.chain_of_custody_issues,
+                # ── credibility layer ─────────────────────────────────────────────
+                "confession_assessments":    [self._safe_dump(a) for a in state.confession_assessments],
+                "witness_credibility_scores":[self._safe_dump(s) for s in state.witness_credibility_scores],
+                # ── procedural layer ──────────────────────────────────────────────
+                "procedural_issues":         [self._safe_dump(p) for p in state.procedural_issues],
+                "defense_procedural_issues": [self._safe_dump(p) for p in state.defense_procedural_issues],
+                # ── legal layer ───────────────────────────────────────────────────
+                "applied_principles":        [self._safe_dump(p) for p in state.applied_principles],
+                "case_articles":             state.case_articles,
+                # ── argument layer ────────────────────────────────────────────────
+                "prosecution_theory":        self._safe_dump(state.prosecution_theory) if state.prosecution_theory else None,
+                "prosecution_arguments":     [self._safe_dump(a) for a in state.prosecution_arguments],
+                "defense_arguments":         [self._safe_dump(a) for a in state.defense_arguments],
+                # ── sentencing layer ──────────────────────────────────────────────
+                "aggravating_factors":       state.aggravating_factors,
+                "mitigating_factors":        state.mitigating_factors,
+                "applicable_article_17":     state.applicable_article_17,
+                "charge_conviction_map":     state.charge_conviction_map,
+                "civil_claim":               self._safe_dump(state.civil_claim) if state.civil_claim else None,
+                "civil_award_suggested":     state.civil_award_suggested,
             }
 
         return json.dumps({"summary": json.loads(base), **extra}, ensure_ascii=False, indent=2)
@@ -452,31 +540,37 @@ class AgentBase:
 
         return result
 
-    def _extract_with_entity_validation(self,data: dict) -> dict:
+    def _extract_with_entity_validation(self, data: dict) -> dict:
         """
         Validate each entity list in `data` using the appropriate Pydantic model.
         Falls back to including the raw item dict if validation fails.
         """
-        from src.Utils import (
-            Defendant, Charge, CaseIncident, Evidence, LabReport,
-            WitnessStatement, Confession, ProceduralIssue,
-            DefenseDocument, CriminalRecord, CaseMeta,
+        from src.Graph.states_and_schemas.main_entity_classes import (
+            Charge,
+            CaseIncident,
+            Confession,
+            CriminalRecord,
+            DefenseDocument,
+            Defendant,
+            Evidence,
+            LabReport,
+            WitnessStatement,
+            CriminalProceedings,  # ← added
         )
 
         result = {}
 
         entity_mappings = {
-            "defendants":                Defendant,
-            "charges":                   Charge,
-            "incidents":                 CaseIncident,
-            "evidences":                 Evidence,
-            "lab_reports":               LabReport,
-            "witness_statements":        WitnessStatement,
-            "confessions":               Confession,
-            "procedural_issues":         ProceduralIssue,
-            "defense_procedural_issues": ProceduralIssue,
-            "defense_documents":         DefenseDocument,
-            "criminal_records":          CriminalRecord,
+            "defendants":           Defendant,
+            "charges":              Charge,
+            "incidents":            CaseIncident,
+            "evidences":            Evidence,
+            "lab_reports":          LabReport,
+            "witness_statements":   WitnessStatement,
+            "confessions":          Confession,
+            "defense_documents":    DefenseDocument,
+            "criminal_records":     CriminalRecord,
+            "criminal_proceedings": CriminalProceedings,  # ← added
         }
 
         for key, pydantic_class in entity_mappings.items():
@@ -500,7 +594,6 @@ class AgentBase:
                     )
                     validated_items.append(item)
 
-            # Always write the key even if list is empty — key presence != parse failure
             result[key] = validated_items
             if not validated_items and raw_list:
                 logger.warning(
@@ -508,14 +601,9 @@ class AgentBase:
                     key, len(raw_list), repr(raw_list[0])[:200],
                 )
 
-        # case_meta
+        # case_meta — no CaseMeta Pydantic model exists; pass through as raw dict
         if "case_meta" in data and isinstance(data["case_meta"], dict):
-            try:
-                validated_meta = CaseMeta(**{k: v for k, v in data["case_meta"].items() if v is not None})
-                result["case_meta"] = validated_meta.model_dump(exclude_none=True)
-            except Exception as e:
-                logger.debug("case_meta validation failed: %s", str(e)[:100])
-                result["case_meta"] = data["case_meta"]
+            result["case_meta"] = data["case_meta"]
 
         return result
 
@@ -607,38 +695,41 @@ class AgentBase:
         if max_retries is None:
             max_retries = self.cfg.INVOKATION_MAX_RETRIES
 
-        logger.debug(
-            "Invoking LLM for %s (max_retries=%d)",
-            self.__class__.__name__,
-            max_retries,
-        )
-
         for attempt in range(1, max_retries + 1):
             try:
                 result = llm_callable.invoke(messages)
                 if attempt > 1:
                     logger.info("LLM succeeded on attempt %d", attempt)
                 return result
+
             except Exception as e:
-                err = str(e).lower()
-                is_rate = any(
-                    k in err for k in AgentsEnums.AGENT_INVOKATION_ERRORS
-                )
-                if is_rate and attempt < max_retries:
-                    wait = (
-                        min(60.0, backoff_base * (2 ** (attempt - 1)))
-                        + random.random()
+                err     = str(e).lower()
+                err_raw = str(e)
+
+                # ── Insufficient credits: no point retrying same provider ─────────
+                if "402" in err_raw and "credits" in err_raw:
+                    logger.error(
+                        "OpenRouter 402 — insufficient credits for %s. "
+                        "Top up at https://openrouter.ai/settings/credits "
+                        "or switch DATA_INGESTION_PROVIDER to 'groq' or 'google'.",
+                        self.__class__.__name__,
                     )
+                    raise RuntimeError(
+                        f"Insufficient OpenRouter credits — cannot invoke {self.__class__.__name__}. "
+                        "Add credits or change provider."
+                    ) from e
+
+                # ── Rate-limit / transient timeout: exponential backoff ──────────
+                is_rate = any(k in err for k in AgentsEnums.AGENT_INVOKATION_ERRORS)
+                if is_rate and attempt < max_retries:
+                    wait = min(60.0, backoff_base * (2 ** (attempt - 1))) + random.random()
                     logger.warning(
-                        "Rate-limit / timeout on attempt %d — waiting %.2fs",
-                        attempt,
-                        wait,
+                        "Rate-limit / timeout on attempt %d — waiting %.2fs", attempt, wait
                     )
                     time.sleep(wait)
                     continue
-                logger.error(
-                    "LLM invocation failed after %d attempt(s): %s", attempt, e
-                )
+
+                logger.error("LLM invocation failed after %d attempt(s): %s", attempt, e)
                 raise
 
     # ── state update helper ───────────────────────────────────────────

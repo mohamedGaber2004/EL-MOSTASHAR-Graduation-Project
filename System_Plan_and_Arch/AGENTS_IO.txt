@@ -1,0 +1,52 @@
+
+[1] DataIngestionAgent
+Role  : Parses and extracts all structured entities from raw case documents (police minutes, referral orders, lab reports, defense memos). Populates the entire initial state — every downstream agent depends on its output.
+INPUT : source_documents (text)
+OUTPUT: case_id, case_number, court, jurisdiction, filing_date, referral_order_text, defendants[], charges[], incidents[], evidences[], witness_statements[], confessions[], lab_reports[],criminal_records[], criminal_proceedings[], defense_documents[], extraction_notes
+
+[2] ProceduralAuditorAgent
+Role  : Inspects every arrest, search, and seizure procedure for constitutional and legal validity under Egyptian Criminal Procedure Law. Flags nullities (بطلان مطلق / نسبي) that may suppress evidence or invalidate charges.
+Note  : Early exit → JudgeAgent directly if absolute nullities (بطلان مطلق) render the entire case void
+INPUT : criminal_proceedings[], evidences[], confessions[], defendants[], incidents[]
+OUTPUT: procedural_issues[], defense_procedural_issues[]
+
+[3] LegalResearcherAgent
+Role   : Retrieves applicable judicial principles from the Egyptian Court of Cassation and maps relevant articles (Penal Code, Drug Law, etc.) to the charges at hand. Feeds authoritative legal grounding to all later agents.
+INPUT  : charges[], procedural_issues[], incidents[]
+OUTPUT : applied_principles[], case_articles[]
+
+[4] EvidenceAnalystAgent
+Role   : Scores each piece of physical evidence for admissibility and evidentiary weight. Tracks chain-of-custody gaps that could be exploited by the defense or weaken the prosecution.
+INPUT  : evidences[], lab_reports[], charges[], procedural_issues[]
+OUTPUT : evidence_scores[], chain_of_custody_issues[]
+
+[5] ConfessionValidityAgent
+Role  : Evaluates whether each confession satisfies Art. 302 CPC requirements: voluntariness, competent authority, legal counsel, absence of coercion. Determines admissibility and its impact on the case.
+INPUT : confessions[], criminal_proceedings[], defendants[]
+OUTPUT: confession_assessments[] (admissibility_status, coercion_type, standalone_confession, corroborating_evidence, impact_on_case)
+
+[6] WitnessCredibilityAgent
+Role  : Scores each witness for internal consistency, alignment with physical evidence, and potential bias. Assigns a reliability level and suggested evidentiary weight (ركيزة أساسية / مساند / استئناسي / يُهمَل).
+INPUT : witness_statements[], evidences[], evidence_scores[]
+OUPUT : witness_credibility_scores[] (reliability_level, contradictions_found, weight_in_case)
+
+[7] ProsecutionAnalystAgent
+Role   : Builds the full prosecution theory: incident reconstruction, motive, evidence chain, element-by-element charge mapping, and overall strength assessment. Also identifies weaknesses the judge should weigh.
+INPUT  : charges[], evidences[], evidence_scores[], confessions[], confession_assessments[], witness_statements[], witness_credibility_scores[], lab_reports[], incidents[], applied_principles[],procedural_issues[]
+OUTPUT : prosecution_theory (ProsecutionNarrative), prosecution_arguments[] (per charge, with strength & rebuttal_risk)
+
+[8] DefenseAnalystAgent
+Role  : Synthesises all defense documents into structured formal (procedural) and substantive defense arguments. Leverages nullities, credibility scores, and prosecution weaknesses to craft counter-arguments.
+INPUT : defense_documents[], procedural_issues[], defense_procedural_issues[], confession_assessments[], witness_credibility_scores[], evidence_scores[], applied_principles[], prosecution_theory
+OUTPUT: defense_arguments[] (argument_type, description, legal_basis, strength)
+
+[9] SentencingAgent
+Role  : NEW — Bridges verdict deliberation and final sentencing. Identifies aggravating and mitigating factors, determines per-charge outcomes (إدانة / براءة), checks Art. 17 discretionary mitigation eligibility, and estimates a civil compensation award.
+INPUT : charges[], defendants[], criminal_records[], prosecution_arguments[], defense_arguments[], confession_assessments[], evidence_scores[], applied_principles[], prosecution_theory
+OUPUT : aggravating_factors[], mitigating_factors[], applicable_article_17 (bool), charge_conviction_map {charge → إدانة|براءة|None}, civil_claim (CivilClaim), civil_award_suggested
+
+[10] JudgeAgent
+Role  : Produces the final structured Arabic judgment in four mandatory sections (preamble → facts → reasoning → operative clause). Consumes every prior agent's output to write an authoritative حكم قضائي.
+INPUT : prosecution_theory, prosecution_arguments[], defense_arguments[], evidence_scores[], confession_assessments[], witness_credibility_scores[], procedural_issues[], applied_principles[]
+aggravating_factors[], mitigating_factors[], applicable_article_17, charge_conviction_map, civil_claim, civil_award_suggested
+OUTPUT: suggested_verdict (FinalJudgment), verdict_preamble, verdict_facts, verdict_reasoning, verdict_operative

@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
-
 from .agent_base import AgentBase
+from src.Utils.Enums.agents_enums import AgentsEnums, LegalDocType
 from src.Prompts.data_ingestion_agent import (
     DATA_INGESTION_AGENT_PROMPT_mahdar_dabt,
     DATA_INGESTION_AGENT_PROMPT_mahdar_istijwab,
@@ -18,7 +18,6 @@ from src.Prompts.data_ingestion_agent import (
     DATA_INGESTION_AGENT_PROMPT_sawabiq,
 )
 
-from src.Utils.Enums.agents_enums import AgentsEnums, LegalDocType
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +103,6 @@ _ROUTE_PATTERNS: list[tuple[str, set[str]]] = [
     ),
 ]
 
-
 def _route_stem(stem: str) -> Optional[str]:
     """
     Map a file stem to a LegalDocType value using keyword matching.
@@ -129,17 +127,10 @@ def _route_stem(stem: str) -> Optional[str]:
 
     return None
 
-
 # ─────────────────────────────────────────────────────────────────
 #  Text chunking with document-context header
 # ─────────────────────────────────────────────────────────────────
-
-def chunk_text(
-    text: str,
-    max_chars: int,
-    overlap: int = 500,
-    doc_id: str = "",
-) -> List[tuple[int, str]]:
+def chunk_text(text: str,max_chars: int,overlap: int = 500,doc_id: str = "") -> List[tuple[int, str]]:
     """
     Split text into (chunk_index, chunk_text) pairs with overlap.
 
@@ -188,11 +179,9 @@ def chunk_text(
 
     return result
 
-
 # ─────────────────────────────────────────────────────────────────
 #  Schema validation before merging
 # ─────────────────────────────────────────────────────────────────
-
 def _validate_extracted(result: dict) -> tuple[bool, str]:
     """
     Sanity check on LLM output before it enters the state.
@@ -220,9 +209,7 @@ def _validate_extracted(result: dict) -> tuple[bool, str]:
 # ─────────────────────────────────────────────────────────────────
 #  DataIngestionAgent
 # ─────────────────────────────────────────────────────────────────
-
 class DataIngestionAgent(AgentBase):
-
     def __init__(self):
         super().__init__(
             "DATA_INGESTION_MODEL",
@@ -248,7 +235,6 @@ class DataIngestionAgent(AgentBase):
         }
 
     # ── routing ───────────────────────────────────────────────────
-
     def _get_prompt(self, stem: str) -> Optional[str]:
         """Resolve file stem → prompt string. Returns None if unrecognised."""
         doc_type = _route_stem(stem)
@@ -257,16 +243,7 @@ class DataIngestionAgent(AgentBase):
         return self._prompt_map.get(doc_type)
 
     # ── single file processor ─────────────────────────────────────
-
-    def _process_file(
-        self,
-        path: Path,
-        doc_id: str,
-        all_extracted: dict,
-        file_errors: list,
-        processed_docs: list,
-        prompt: str,
-    ) -> dict:
+    def _process_file(self,path: Path,doc_id: str,all_extracted: dict,file_errors: list,processed_docs: list,prompt: str) -> dict:
         """
         Read, chunk, invoke LLM, validate, and merge a single .txt file.
         Always returns the (possibly updated) all_extracted dict.
@@ -332,15 +309,7 @@ class DataIngestionAgent(AgentBase):
         return all_extracted
 
     # ── route + process ───────────────────────────────────────────
-
-    def _route_and_process(
-        self,
-        path: Path,
-        doc_id: str,
-        all_extracted: dict,
-        file_errors: list,
-        processed_docs: list,
-    ) -> dict:
+    def _route_and_process(self,path: Path,doc_id: str,all_extracted: dict,file_errors: list,processed_docs: list) -> dict:
         """Resolve prompt for doc_id, then delegate to _process_file."""
         prompt = self._get_prompt(doc_id)
 
@@ -357,7 +326,6 @@ class DataIngestionAgent(AgentBase):
         return result
 
     # ── main entry ────────────────────────────────────────────────
-
     def run(self, state):
         logger.info(
             "DataIngestionAgent starting — %d source(s)",
