@@ -14,13 +14,16 @@ logger = logging.getLogger(__name__)
 
 class DefenseAnalystAgent(AgentBase):
     """
-    Evaluates the defense documents against procedural nullities and the
-    evidence matrix produced by earlier agents.
-    Uses qwen (unchanged from original).
+    Synthesises defense documents into formal and substantive arguments.
+
+    INPUT : defense_documents[], procedural_issues[], confession_assessments[],
+            witness_credibility_scores[], evidence_scores[], applied_principles[],
+            prosecution_theory
+    OUTPUT: defense_arguments[]
     """
 
     def __init__(self):
-        super().__init__("DEFENSE_AGENT_MODEL","DEFENSE_AGENT_TEMP",DEFENSE_ANALYSIS_AGENT_PROMPT)
+        super().__init__("DEFENSE_AGENT_MODEL", "DEFENSE_AGENT_TEMP", DEFENSE_ANALYSIS_AGENT_PROMPT)
 
     # ── helpers ───────────────────────────────────────────────────────
 
@@ -44,44 +47,70 @@ class DefenseAnalystAgent(AgentBase):
 
     def _build_prior_agents_context(self, state) -> dict:
         """
-        Collects only the fields that are actually used in the prompt —
-        keeps the payload lean and avoids leaking raw LLM internals.
+        Read directly from typed AgentState fields — no agent_outputs needed.
         """
-        procedural = state.agent_outputs.get("procedural_auditor", {})
-        nullities  = [
+        # procedural nullities from typed list
+        nullities = [
             {
-                "violation":    v.get("violation_type"),
-                "article":      v.get("article"),
-                "nullity_type": v.get("nullity_type"),
-                "effect":       v.get("effect_on_evidence"),
+                "procedure_type":    getattr(p, "procedure_type", None),
+                "issue_description": getattr(p, "issue_description", None),
+                "nullity_type":      getattr(p, "nullity_type", None),
+                "article_basis":     getattr(p, "article_basis", None),
             }
-            for v in procedural.get("violations", [])
-            if v.get("nullity") is True
+            for p in (state.procedural_issues or [])
+            if getattr(p, "nullity_type", None)  # only confirmed nullities
         ]
-        critical_nullities = procedural.get("critical_nullities", [])
 
-        evidence_output = state.agent_outputs.get("evidence_analyst", {})
-        evidence_matrix = evidence_output.get("evidence_matrix", [])
-        overall_proof   = evidence_output.get("overall_proof_assessment", "غير متاح")
-        invalidated_ids = evidence_output.get("_meta", {}).get("invalidated_ids", [])
+        critical_nullities = [
+            p for p in nullities
+            if getattr(p, "nullity_type", None) == "بطلان مطلق"
+        ]
+
+        # evidence scores from typed list
+        evidence_scores = [self._safe_dump(s) for s in (state.evidence_scores or [])]
+
+        # chain of custody issues
+        chain_issues = state.chain_of_custody_issues or []
+
+        # invalidated evidence ids — source_document_ids of nullified issues
+        invalidated_ids = [
+            getattr(p, "source_document_id", None)
+            for p in (state.procedural_issues or [])
+            if getattr(p, "nullity_type", None) and getattr(p, "source_document_id", None)
+        ]
+
+        # confession assessments
+        confession_assessments = [self._safe_dump(c) for c in (state.confession_assessments or [])]
+
+        # witness credibility scores
+        witness_scores = [self._safe_dump(w) for w in (state.witness_credibility_scores or [])]
+
+        # applied principles from legal researcher
+        applied_principles = [self._safe_dump(p) for p in (state.applied_principles or [])]
+
+        # prosecution theory
+        prosecution_theory = (
+            self._safe_dump(state.prosecution_theory)
+            if state.prosecution_theory else {}
+        )
 
         return {
-            "procedural_nullities": nullities,
-            "critical_nullities":   critical_nullities,
-            "evidence_matrix":      evidence_matrix,
-            "overall_proof":        overall_proof,
-            "invalidated_evidence": invalidated_ids,
+            "procedural_nullities":   nullities,
+            "critical_nullities":     critical_nullities,
+            "evidence_scores":        evidence_scores,
+            "chain_of_custody_issues": chain_issues,
+            "invalidated_evidence":   invalidated_ids,
+            "confession_assessments": confession_assessments,
+            "witness_credibility_scores": witness_scores,
+            "applied_principles":     applied_principles,
+            "prosecution_theory":     prosecution_theory,
         }
 
     def _build_prompt(self, defense_data: dict, prior_context: dict, state) -> str:
         case_basics = json.dumps(
             {
-                "defendants": [
-                    getattr(d, "name", str(d)) for d in (state.defendants or [])
-                ],
-                "charges": [
-                    getattr(c, "statute", str(c)) for c in (state.charges or [])
-                ],
+                "defendants": [getattr(d, "name", str(d)) for d in (state.defendants or [])],
+                "charges":    [getattr(c, "statute", str(c)) for c in (state.charges or [])],
             },
             ensure_ascii=False,
             indent=2,
@@ -94,13 +123,26 @@ class DefenseAnalystAgent(AgentBase):
             "## دفوع المتهم:\n"
             f"{json.dumps(defense_data, ensure_ascii=False, indent=2)}\n\n"
 
-            "## نتائج المدقق الإجرائي (بطلانيات مؤكدة):\n"
+            "## البطلانيات الإجرائية المؤكدة:\n"
             f"{json.dumps(prior_context['procedural_nullities'], ensure_ascii=False, indent=2)}\n\n"
 
-            "## مصفوفة الأدلة من محلل الأدلة:\n"
-            f"{json.dumps(prior_context['evidence_matrix'], ensure_ascii=False, indent=2)}\n\n"
+            "## مصفوفة الأدلة:\n"
+            f"{json.dumps(prior_context['evidence_scores'], ensure_ascii=False, indent=2)}\n\n"
 
-            f"## تقييم الإثبات الإجمالي: {prior_context['overall_proof']}\n\n"
+            "## مشكلات سلسلة الحيازة:\n"
+            f"{json.dumps(prior_context['chain_of_custody_issues'], ensure_ascii=False, indent=2)}\n\n"
+
+            "## تقييم الاعترافات:\n"
+            f"{json.dumps(prior_context['confession_assessments'], ensure_ascii=False, indent=2)}\n\n"
+
+            "## موثوقية الشهود:\n"
+            f"{json.dumps(prior_context['witness_credibility_scores'], ensure_ascii=False, indent=2)}\n\n"
+
+            "## المبادئ القانونية المطبقة:\n"
+            f"{json.dumps(prior_context['applied_principles'], ensure_ascii=False, indent=2)}\n\n"
+
+            "## نظرية الاتهام:\n"
+            f"{json.dumps(prior_context['prosecution_theory'], ensure_ascii=False, indent=2)}\n\n"
 
             f"## أدلة مستبعدة بالبطلان: {prior_context['invalidated_evidence']}\n\n"
 
@@ -110,7 +152,8 @@ class DefenseAnalystAgent(AgentBase):
             "2. قيّم قوته بناءً على الأدلة والبطلانيات — مع التسبيب.\n"
             "3. اربطه بأي بطلان إجرائي مؤكد إن وجد.\n"
             "4. حدد الأدلة التي تدحضه إن وجدت.\n"
-            "5. قيّم الـ alibi في ضوء مصفوفة الأدلة.\n\n"
+            "5. قيّم الـ alibi في ضوء مصفوفة الأدلة.\n"
+            "6. استثمر ضعف نظرية الاتهام ومشكلات سلسلة الحيازة.\n\n"
 
             "## صيغة الإجابة (JSON فقط — بلا مقدمة ولا شرح خارج JSON):\n"
             f"{EXPECTED_OUTPUT_SCHEMA}"
@@ -125,10 +168,7 @@ class DefenseAnalystAgent(AgentBase):
         if not docs_count:
             logger.info("No defense documents — returning empty output")
             return self._empty_update(state, "defense_analyst", {
-                "formal_defenses":          [],
-                "substantive_defenses":     [],
-                "alibi_analysis":           {"claimed": False},
-                "supporting_principles":    [],
+                "defense_arguments":        [],
                 "overall_defense_strength": "لا توجد دفوع",
                 "critical_defense_points":  [],
             })
@@ -148,10 +188,7 @@ class DefenseAnalystAgent(AgentBase):
         if not isinstance(defense_analysis, dict):
             logger.error("Defense analysis — LLM response could not be parsed as dict")
             defense_analysis = {
-                "formal_defenses":          [],
-                "substantive_defenses":     [],
-                "alibi_analysis":           {"claimed": defense_data["alibi_claimed"]},
-                "supporting_principles":    defense_data["supporting_principles"],
+                "defense_arguments":        [],
                 "overall_defense_strength": "فشل التحليل",
                 "critical_defense_points":  prior_context["critical_nullities"],
                 "raw_response":             str(defense_analysis),
@@ -170,4 +207,7 @@ class DefenseAnalystAgent(AgentBase):
             "alibi_claimed":     defense_data["alibi_claimed"],
         }
 
-        return self._empty_update(state, "defense_analyst", defense_analysis)
+        base_state = self._empty_update(state, "defense_analyst", defense_analysis)
+        return base_state.model_copy(update={
+            "defense_arguments": defense_analysis.get("defense_arguments", []),
+        })

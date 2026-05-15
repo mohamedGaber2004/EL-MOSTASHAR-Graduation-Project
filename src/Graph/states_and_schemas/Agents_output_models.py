@@ -188,6 +188,7 @@ class JudicialPrinciple(BaseModel):
 
 class ProceduralIssue(BaseModel):
     """دفع إجرائي / بطلان"""
+    procedure_source:   Optional[str] = None
     procedure_type:     Optional[str] = None   # ضبط / قبض / استجواب / تفتيش
     issue_description:  Optional[str] = None
     warrant_present:    bool          = False

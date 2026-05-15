@@ -4,18 +4,24 @@ LEGAL_RESEARCHER_AGENT_PROMPT = """أنت باحث قانوني متخصص في 
 
 EXPECTED_OUTPUT_SCHEMA = """
 {
-  "research_packages": [
+  "case_articles": [
     {
-      "charge":               "التهمة",
-      "statute":              "المادة القانونية",
-      "elements":             ["أركان الجريمة"],
-      "penalty_range":        "نطاق العقوبة من الـ KG",
-      "relevant_articles":    ["مواد ذات صلة"],
-      "cassation_principles": ["مبادئ نقض ذات صلة"],
-      "kg_source":            true
+      "charge":            "التهمة",
+      "statute":           "المادة القانونية",
+      "law_code":          "مصدر القانون (قانون العقوبات / قانون مكافحة المخدرات / ...)",
+      "elements":          ["أركان الجريمة"],
+      "penalty_range":     "نطاق العقوبة من الـ KG",
+      "relevant_articles": ["مواد ذات صلة من نفس القانون"],
+      "is_amended":        false,
+      "retrieval_strategy": "direct_lookup | keyword_search | embedding_search"
     }
   ],
-  "procedural_principles": ["مبادئ إجرائية عامة"],
-  "relevant_cassation_rulings": ["أحكام نقض مرتبطة"]
+  "applied_principles": [
+    {
+      "text":   "نص المبدأ أو الحكم",
+      "source": "charge | procedural_issue | incident_narrative",
+      "query":  "النص الذي أسفر عن استرجاع هذا المبدأ"
+    }
+  ]
 }
 """

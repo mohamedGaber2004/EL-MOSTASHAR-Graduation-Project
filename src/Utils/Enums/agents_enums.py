@@ -56,7 +56,7 @@ class AgentsEnums:
     AGENT_INGESTION_TXT_FILES_ENCODING = ("utf-8", "cp1256", "latin-1")
 
     
-    CRIMINAL_PROCEDURE_LAW_ID = "criminal_procedure"  # was "egyptian_criminal_procedure"
+    CRIMINAL_PROCEDURE_LAW_ID = "criminal_procedure"
 
     @staticmethod
     def law_code_to_kg_id(law_code: str) -> str:

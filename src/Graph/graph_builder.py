@@ -8,6 +8,9 @@ from langgraph.graph import END, START, StateGraph
 
 from src.Graph.states_and_schemas.state import AgentState
 from src.Graph.shared_resources import get_kg, get_vector_store
+from src.Config.config import get_settings
+from langchain_huggingface import HuggingFaceEmbeddings
+
 
 from src.agents import (
     DataIngestionAgent,
@@ -82,10 +85,11 @@ def _route_after_parallel_analysis(state: AgentState) -> Literal["prosecution_an
 def build_legal_graph():
     kg = get_kg()
     vs = get_vector_store()
+    emb= HuggingFaceEmbeddings(model_name=get_settings().ARABIC_NATIVE_EMBEDDING_MODEL)
 
     agents = {
         "data_ingestion":     DataIngestionAgent(),
-        "procedural_auditor": ProceduralAuditorAgent(kg=kg),
+        "procedural_auditor": ProceduralAuditorAgent(kg=kg,embeddings=emb),
         "legal_researcher":   LegalResearcherAgent(kg=kg, vector_store=vs),
         "evidence_analyst":   EvidenceAnalystAgent(),
         "defense_analyst":    DefenseAnalystAgent(),

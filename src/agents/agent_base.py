@@ -181,6 +181,63 @@ class AgentBase:
         return updates
 
     # _retrieve_for_charge  (للـ LegalResearcherAgent)
+    # ── law-scoped ANN query (add near top of file, alongside other constants) ──
+
+    def _retrieve_articles_for_issue(self,issue_text: str,k: int = 15,threshold: float = 0.45) -> list[str]:
+        """
+        Embed `issue_text` and run a law-scoped ANN query against
+        the 'article_embeddings' index in Neo4j.
+        Returns article_number strings whose cosine score >= threshold.
+        """
+        _PROCEDURAL_LAW_ANN_QUERY = """
+        CALL db.index.vector.queryNodes('article_embeddings', $k, $query_vector)
+        YIELD node AS article, score
+        WHERE article.law_id = $law_id
+        RETURN
+            article.article_id     AS article_id,
+            article.article_number AS article_number,
+            article.law_id         AS law_id,
+            article.text           AS text,
+            score
+        ORDER BY score DESC
+        """
+
+        if self.kg is None or self.embeddings is None:
+            logger.warning("KG or embeddings not available — skipping retrieval")
+            return []
+
+        try:
+            query_vector = self.embeddings.embed_query(issue_text)
+        except Exception as e:
+            logger.warning("embed_query failed for [%s...]: %s", issue_text[:60], e)
+            return []
+
+        law_id = AgentsEnums.CRIMINAL_PROCEDURE_LAW_ID.value
+
+        try:
+            with self.kg.driver.session() as s:
+                records = s.run(
+                    _PROCEDURAL_LAW_ANN_QUERY,
+                    k=k,
+                    query_vector=query_vector,
+                    law_id=law_id,
+                ).data()
+        except Exception as e:
+            logger.warning("ANN query failed for [%s...]: %s", issue_text[:60], e)
+            return []
+
+        article_nums = [
+            str(r["article_number"])
+            for r in records
+            if r.get("article_number") and float(r.get("score", 0)) >= threshold
+        ]
+
+        logger.info(
+            "Embedding retrieval — issue=[%s...] | law=%s | hits=%d (threshold=%.2f)",
+            issue_text[:60], law_id, len(article_nums), threshold,
+        )
+        return article_nums
+    
     def _build_charge_query(self,charge) -> str:
         parts = []
         if getattr(charge, "article_number", None):

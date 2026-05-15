@@ -8,7 +8,7 @@ OUTPUT: case_id, case_number, court, jurisdiction, filing_date, referral_order_t
 Role  : Inspects every arrest, search, and seizure procedure for constitutional and legal validity under Egyptian Criminal Procedure Law. Flags nullities (بطلان مطلق / نسبي) that may suppress evidence or invalidate charges.
 Note  : Early exit → JudgeAgent directly if absolute nullities (بطلان مطلق) render the entire case void
 INPUT : criminal_proceedings[], evidences[], confessions[], defendants[], incidents[]
-OUTPUT: procedural_issues[], defense_procedural_issues[]
+OUTPUT: procedural_issues[]
 
 [3] LegalResearcherAgent
 Role   : Retrieves applicable judicial principles from the Egyptian Court of Cassation and maps relevant articles (Penal Code, Drug Law, etc.) to the charges at hand. Feeds authoritative legal grounding to all later agents.

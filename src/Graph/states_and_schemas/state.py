@@ -35,7 +35,7 @@ from src.Graph.states_and_schemas.Agents_output_models import (
 class AgentState(BaseModel):
 
     # ── Case Meta ─────────────────────────────────────  (DataIngestionAgent)
-    case_id:             str
+    case_id:             Optional[str] = None
     case_number:         Optional[str] = None
     court:               Optional[str] = None
     court_level:         Optional[str] = None
@@ -62,7 +62,6 @@ class AgentState(BaseModel):
 
     # ── Procedural Analysis ───────────────────────────  (ProceduralAuditorAgent)
     procedural_issues:         List[ProceduralIssue] = Field(default_factory=list)
-    defense_procedural_issues: List[ProceduralIssue] = Field(default_factory=list)
 
     # ── Evidence Analysis ─────────────────────────────  (EvidenceAnalystAgent)
     evidence_scores: List[EvidenceScoring] = Field(default_factory=list)

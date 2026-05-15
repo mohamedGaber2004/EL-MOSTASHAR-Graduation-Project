@@ -5,6 +5,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from .agent_base import AgentBase
 from src.Graphstore.KG_builder import LegalKnowledgeGraph
+from src.routers.kg_router import fetch_article_text, get_statistics
 from src.Prompts.procedural_auditor_agent import (
     PROCEDURAL_AUDITOR_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
@@ -14,42 +15,34 @@ from src.Utils.Enums.agents_enums import AgentsEnums
 logger = logging.getLogger(__name__)
 
 
+
+
+
 class ProceduralAuditorAgent(AgentBase):
     """Audits procedural issues against articles retrieved from the KG."""
 
-    def __init__(self, kg: LegalKnowledgeGraph, vector_store=None):
-        super().__init__("PROCEDURAL_AUDITOR_MODEL","PROCEDURAL_AUDITOR_TEMP",PROCEDURAL_AUDITOR_AGENT_PROMPT)
-        self.kg = kg
-        self.vs = vector_store
+    def __init__(self, kg: LegalKnowledgeGraph, embeddings):
+        super().__init__(
+            "PROCEDURAL_AUDITOR_MODEL",
+            "PROCEDURAL_AUDITOR_TEMP",
+            PROCEDURAL_AUDITOR_AGENT_PROMPT,
+        )
+        self.kg         = kg
+        self.embeddings = embeddings
+
 
     # ── dynamic article discovery ─────────────────────────────────────
-    def _retrieve_articles_for_issue(self, issue_text: str, k: int = 5) -> list[str]:
-        if self.kg is None:
-            return []
-        # use first 2 words only for better match
-        short_keyword = " ".join(issue_text.strip().split()[:2])
-        try:
-            hits = self.kg.search_articles_by_keyword(
-                keyword=short_keyword,
-                law_id=AgentsEnums.CRIMINAL_PROCEDURE_LAW_ID.value,
-                k=k,
-            )
-            article_nums = [str(h["article_number"]) for h in hits if h.get("article_number")]
-            logger.info("KG retrieval for [%s]: %d article(s)", short_keyword, len(article_nums))
-            return article_nums
-        except Exception as e:
-            logger.warning("KG retrieval failed for [%s]: %s", short_keyword, e)
-            return []
 
     def _resolve_article_numbers(self, procedural_issues: list) -> list[str]:
         """
-        Purely dynamic — NO hardcoded baseline whatsoever.
+        Pass the full issue text to the embedder — no truncation needed
+        (unlike keyword search, embeddings benefit from complete context).
         """
         dynamic: list[str] = []
 
         for issue in procedural_issues:
-            # ── extract meaningful text from issue ──────────────────────
             if isinstance(issue, dict):
+                # prefer the most descriptive field available
                 issue_text = (
                     issue.get("issue_description")
                     or issue.get("procedure_type")
@@ -69,20 +62,22 @@ class ProceduralAuditorAgent(AgentBase):
 
         if not dynamic:
             logger.warning(
-                "No articles found from KG for any issue — "
+                "No articles found via embedding search for any issue — "
                 "LLM will rely on internal knowledge"
             )
+        else:
+            logger.info(
+                "Article resolution complete — %d unique article(s) from embedding search",
+                len(dynamic),
+            )
 
-        logger.info("Article resolution — dynamic from KG: %d", len(dynamic))
         return dynamic
 
     # ── KG fetcher ────────────────────────────────────────────────────
 
-    def _fetch_procedural_articles(
-        self, article_numbers: list[str]
-    ) -> tuple[str, list[str]]:
+    def _fetch_procedural_articles(self, article_numbers: list[str]) -> tuple[str, list[str]]:
         """Fetch article texts from the KG for the given article numbers."""
-        if self.kg is None:
+        if get_statistics() is None:
             logger.warning("KG not available — LLM will rely on internal knowledge")
             return "لا توجد مواد متاحة من قاعدة البيانات.", []
 
@@ -91,7 +86,7 @@ class ProceduralAuditorAgent(AgentBase):
 
         for article_num in article_numbers:
             try:
-                history = self.kg.query_article_history(
+                history = fetch_article_text(
                     AgentsEnums.CRIMINAL_PROCEDURE_LAW_ID.value, article_num
                 )
                 if not history:
@@ -126,23 +121,31 @@ class ProceduralAuditorAgent(AgentBase):
     # ── prompt builder ────────────────────────────────────────────────
 
     def _build_prompt(self, state, legal_references: str, fetched_articles: list[str]) -> str:
-        ingestion_data = None
-        procedural_issues = state.procedural_issues or []
-        confessions       = getattr(state, "confessions", [])
-        incidents         = getattr(state, "incidents", [])
+        incidents = getattr(state, "incidents", [])
+        defendents = getattr(state, "defendents", [])
+        evidences = getattr(state, "evidences", [])
+        confessions = getattr(state, "confessions", [])
+        criminal_proceedings = getattr(state, "criminal_proceedings", [])
+        defense_procedural_issues = getattr(state.defense_documents,"formal_defenses",[])
 
         return (
-            "## المسائل الإجرائية المرصودة:\n"
-            f"{procedural_issues}\n\n"
+            "## المسائل الإجرائية المرصودة من وقائع القضيه:\n"
+            f"{criminal_proceedings}\n\n"
+
+            "## المسائل الاجرائيه المرصوده من دفاع المتهم:"
+            f"{defense_procedural_issues}\n\n"
 
             "## تفاصيل الحوادث والقبض:\n"
             f"{incidents}\n\n"
 
+            "## المتهمين:\n"
+            f"{defendents}\n\n"
+
             "## الاعترافات (إن وجدت):\n"
             f"{confessions}\n\n"
 
-            "## بيانات استخلاص الوثائق:\n"
-            f"{ingestion_data}\n\n"
+            "## كل الادله:\n"
+            f"{evidences}\n\n"
 
             f"## النصوص القانونية المرجعية (مواد: {', '.join(fetched_articles)}):\n"
             f"{legal_references}\n\n"
