@@ -215,7 +215,7 @@ class JudgeAgent(AgentBase):
                 per_charge_rulings  = judgment.get("charges_rulings", []),
             ),
             "verdict_preamble":  judgment.get("verdict_preamble"),
-            "verdict_facts":     judgment.get("verdict_facts"),        # ✅
-            "verdict_reasoning": judgment.get("verdict_reasoning"),    # ✅
-            "verdict_operative": judgment.get("full_ruling_text"),     # ✅ full spoken ruling
+            "verdict_facts":     judgment.get("verdict_facts"),
+            "verdict_reasoning": judgment.get("verdict_reasoning"),
+            "verdict_operative": judgment.get("full_ruling_text"), 
         })
