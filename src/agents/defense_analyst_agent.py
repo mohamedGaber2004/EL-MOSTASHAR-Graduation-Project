@@ -4,13 +4,13 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from .agent_base import AgentBase
+from src.Graph.states_and_schemas.state import AgentState
 from src.Prompts.defense_analysis_agent import (
     DEFENSE_ANALYSIS_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
 )
 
 logger = logging.getLogger(__name__)
-
 
 class DefenseAnalystAgent(AgentBase):
     """
@@ -45,65 +45,56 @@ class DefenseAnalystAgent(AgentBase):
             "alibi_claimed":         any_alibi,
         }
 
-    def _build_prior_agents_context(self, state) -> dict:
-        """
-        Read directly from typed AgentState fields — no agent_outputs needed.
-        """
-        # procedural nullities from typed list
+    def _build_prior_agents_context(self, state: AgentState) -> dict:
+        audit      = state.procedural_audit
+        violations = audit.violations or []
+
         nullities = [
             {
-                "procedure_type":    getattr(p, "procedure_type", None),
-                "issue_description": getattr(p, "issue_description", None),
-                "nullity_type":      getattr(p, "nullity_type", None),
-                "article_basis":     getattr(p, "article_basis", None),
+                "procedure_source":  p.procedure_source,
+                "procedure_type":    p.procedure_type,
+                "issue_description": p.issue_description,
+                "warrant_present":   p.warrant_present,
+                "conducting_officer":p.conducting_officer,
+                "nullity_type":      p.nullity_type,
+                "nullity_effect":    p.nullity_effect,
+                "article_basis":     p.article_basis,
             }
-            for p in (state.procedural_issues or [])
-            if getattr(p, "nullity_type", None)  # only confirmed nullities
+            for p in violations
+            if p.nullity_type
         ]
 
-        critical_nullities = [
-            p for p in nullities
-            if getattr(p, "nullity_type", None) == "بطلان مطلق"
-        ]
-
-        # evidence scores from typed list
-        evidence_scores = [self._safe_dump(s) for s in (state.evidence_scores or [])]
-
-        # chain of custody issues
-        chain_issues = state.chain_of_custody_issues or []
-
-        # invalidated evidence ids — source_document_ids of nullified issues
         invalidated_ids = [
-            getattr(p, "source_document_id", None)
-            for p in (state.procedural_issues or [])
-            if getattr(p, "nullity_type", None) and getattr(p, "source_document_id", None)
+            p.source_document_id
+            for p in violations
+            if p.nullity_type and p.source_document_id
         ]
-
-        # confession assessments
-        confession_assessments = [self._safe_dump(c) for c in (state.confession_assessments or [])]
-
-        # witness credibility scores
-        witness_scores = [self._safe_dump(w) for w in (state.witness_credibility_scores or [])]
-
-        # applied principles from legal researcher
-        applied_principles = [self._safe_dump(p) for p in (state.applied_principles or [])]
-
-        # prosecution theory
-        prosecution_theory = (
-            self._safe_dump(state.prosecution_theory)
-            if state.prosecution_theory else {}
-        )
 
         return {
-            "procedural_nullities":   nullities,
-            "critical_nullities":     critical_nullities,
-            "evidence_scores":        evidence_scores,
-            "chain_of_custody_issues": chain_issues,
-            "invalidated_evidence":   invalidated_ids,
-            "confession_assessments": confession_assessments,
-            "witness_credibility_scores": witness_scores,
-            "applied_principles":     applied_principles,
-            "prosecution_theory":     prosecution_theory,
+            # ── procedural layer ──────────────────────────────────────────
+            "procedural_nullities":    nullities,
+            "critical_nullities":      audit.critical_nullities or [],
+            "overall_audit_assessment":audit.overall_assessment,
+            "excluded_defense_claims": [
+                {"claim": c.claim, "reason": c.reason}
+                for c in (audit.excluded_defense_claims or [])
+            ],
+            "invalidated_evidence":    invalidated_ids,
+            # ── evidence layer ────────────────────────────────────────────
+            "evidence_scores":         [self._safe_dump(s) for s in (state.evidence_scores or [])],
+            "chain_of_custody_issues": state.chain_of_custody_issues or [],
+            # ── credibility layer ─────────────────────────────────────────
+            "confession_assessments":     [self._safe_dump(c) for c in (state.confession_assessments or [])],
+            "witness_credibility_scores": [self._safe_dump(w) for w in (state.witness_credibility_scores or [])],
+            # ── legal layer ───────────────────────────────────────────────
+            "case_articles": [                                   # ← was missing
+                a.get("article_number", str(a)) if isinstance(a, dict) else a
+                for a in (state.case_articles or [])
+            ],
+            "applied_principles": [self._safe_dump(p) for p in (state.applied_principles or [])],
+            # ── prosecution layer ─────────────────────────────────────────
+            "prosecution_theory":    self._safe_dump(state.prosecution_theory) if state.prosecution_theory else {},
+            "prosecution_arguments": [self._safe_dump(a) for a in (state.prosecution_arguments or [])],  # ← was missing
         }
 
     def _build_prompt(self, defense_data: dict, prior_context: dict, state) -> str:
@@ -183,7 +174,7 @@ class DefenseAnalystAgent(AgentBase):
             [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
         )
 
-        defense_analysis = self._parse_llm_json(response.content)
+        defense_analysis = self._parse_agent_json(response.content)
 
         if not isinstance(defense_analysis, dict):
             logger.error("Defense analysis — LLM response could not be parsed as dict")
@@ -207,7 +198,6 @@ class DefenseAnalystAgent(AgentBase):
             "alibi_claimed":     defense_data["alibi_claimed"],
         }
 
-        base_state = self._empty_update(state, "defense_analyst", defense_analysis)
-        return base_state.model_copy(update={
+        return self._empty_update(state, "defense_analyst", {
             "defense_arguments": defense_analysis.get("defense_arguments", []),
         })

@@ -23,9 +23,9 @@ class Settings(BaseSettings):
     LANGSMITH_PROJECT: Optional[str] = None
     OPENAI_BASE_URL: Optional[str] = None
     OPENAI_BASE_ROUTER_API_KEY: Optional[str] = None
-    
+    MISTRAL_API_KEY: Optional[str] = None
+
     # Embedding Model
-    EMBEDDING_MODEL: str
     ARABIC_NATIVE_EMBEDDING_MODEL: str
 
     # GraphRAG Model
@@ -51,10 +51,6 @@ class Settings(BaseSettings):
     DEFENSE_AGENT_MODEL: str 
     DEFENSE_AGENT_TEMP: float
     DEFENSE_AGENT_PROVIDER: str = "open_router"
-
-    JUDJICAL_PRINCIPLE_AGENT: str
-    JUDJICAL_PRINCIPLE_TEMP: float
-    JUDJICAL_PRINCIPLE_PROVIDER: str = "open_router"
 
     CONFESSION_VALIDITY_MODEL: str
     CONFESSION_VALIDITY_TEMP: float

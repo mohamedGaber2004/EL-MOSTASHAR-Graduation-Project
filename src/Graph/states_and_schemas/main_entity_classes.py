@@ -1,6 +1,6 @@
 from typing import List, Optional
 from pydantic import BaseModel, Field
-
+from pydantic import BaseModel, field_validator
 
 # ══════════════════════════════════════════════════════
 #  Core Entities
@@ -61,6 +61,17 @@ class CaseIncident(BaseModel):
     perpetrator_names:    List[str]     = Field(default_factory=list)
     victim_names:         List[str]     = Field(default_factory=list)
     source_document_id:   Optional[str] = None
+    @field_validator("incident_date", mode="before")
+    @classmethod
+    def coerce_date(cls, v):
+        if isinstance(v, dict):
+            # ✅ convert range to readable string
+            start = v.get("start", "")
+            end   = v.get("end", "")
+            if start and end:
+                return f"{start} إلى {end}"
+            return start or end or None
+        return v
 
 
 class Evidence(BaseModel):
@@ -76,33 +87,75 @@ class Evidence(BaseModel):
     source_document_id:      Optional[str] = None
 
 
+class EvidenceItem(BaseModel):
+    description: str
+    evidence_number: Optional[str] = None
+
+class FingerprintAnalysis(BaseModel):
+    fingerprint_location: str
+    fingerprint_type: str
+    match_percentage: float
+    match_status: str
+
+class FacialRecognitionAnalysis(BaseModel):
+    source: str
+    match_percentage: float
+    observations: list[str]
+
+class WalletAnalysis(BaseModel):
+    description_match: str
+    contents: list[str]
+
+class LabResult(BaseModel):
+    fingerprint_analysis: Optional[FingerprintAnalysis] = None
+    facial_recognition_analysis: Optional[FacialRecognitionAnalysis] = None
+    wallet_analysis: Optional[WalletAnalysis] = None
+
 class LabReport(BaseModel):
-    """تقرير معملي / طبي شرعي / فني"""
-    report_type:            Optional[str] = None   # طبي شرعي / كيميائي / بلستي / رقمي / مروري
-    report_number:          Optional[str] = None   # رقم تقرير المعمل
-    examination_date:       Optional[str] = None
-    examiner_name:          Optional[str] = None
-    prosecutor_name:        Optional[str] = None   # وكيل النيابة مُرسِل التقرير
-    items_sent_for_analysis: List[str]    = Field(default_factory=list)  # الاستيناء المرسلة
-    result:                 Optional[str] = None
-    linked_defendant_name:  Optional[str] = None
-    source_document_id:     Optional[str] = None
+    report_type: str
+    report_number: str
+    examination_date: str
+    examiner_name: str
+    prosecutor_name: str
+    items_sent_for_analysis: list[EvidenceItem]
+    result: LabResult
+
+    @field_validator("items_sent_for_analysis", mode="before")
+    @classmethod
+    def coerce_items(cls, v):
+        coerced = []
+        for item in v:
+            if isinstance(item, str):
+                coerced.append({"description": item})
+            elif isinstance(item, dict):
+                coerced.append(item)
+        return coerced
+    
+    linked_defendant_name: Optional[str] = None
+    source_document_id: Optional[str] = None
 
 
 class WitnessStatement(BaseModel):
-    """شهادة شاهد"""
-    witness_name:          Optional[str] = None
-    witness_type:          Optional[str] = None   # عيان / خبير / ضابط / مجني عليه / شاهد نفي
-    age:                   Optional[int] = None
-    occupation:            Optional[str] = None
-    id_number:             Optional[str] = None   # رقم الكارنيه / البطاقة
-    relation_to_defendant: Optional[str] = None
-    statement_summary:     Optional[str] = None
-    statement_date:        Optional[str] = None
-    was_sworn_in:          bool          = False
-    presence_at_scene:     bool          = False
-    key_facts_mentioned:   List[str]     = Field(default_factory=list)
-    source_document_id:    Optional[str] = None
+    witness_name:           Optional[str]       = None
+    occupation:             Optional[str]       = None
+    id_number:              Optional[str]       = None
+    relation_to_defendant:  Optional[str]       = None
+    statement_date:         Optional[str]       = None
+    was_sworn_in:           Optional[bool]      = None
+    presence_at_scene:      Optional[bool]      = None
+    key_facts_mentioned:    List[str]           = []   # ← was bare List[str] with no coercion
+    age:                    Optional[int]       = None
+    source_document_id:     Optional[str]       = None
+
+    @field_validator("key_facts_mentioned", mode="before")
+    @classmethod
+    def coerce_to_list(cls, v):
+        """LLM sometimes returns a string instead of a list — wrap it."""
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [v] if v.strip() else []
+        return v
 
 
 class Confession(BaseModel):
@@ -118,14 +171,28 @@ class Confession(BaseModel):
     source_document_id:    Optional[str] = None
 
 
+class DefenseLawyer(BaseModel):
+    name: str
+    bar_association: Optional[str] = None
+    registration_number: Optional[str] = None
+
 class DefenseDocument(BaseModel):
-    """مذكرة دفاع"""
-    submitted_by:          Optional[str] = None   # اسم المحامي
-    defendant_name:        Optional[str] = None   # المتهم المدافَع عنه
-    defense_team:          Optional[str] = None   # هيئة الدفاع إن تعددوا
-    formal_defenses:       List[str]     = Field(default_factory=list)   # دفوع شكلية / إجرائية
-    substantive_defenses:  List[str]     = Field(default_factory=list)   # دفوع موضوعية
-    supporting_principles: List[str]     = Field(default_factory=list)   # مبادئ قانونية / نقض
-    alibi_claimed:         bool          = False
-    alibi_description:     Optional[str] = None   # وصف الألبي إن وُجد
-    source_document_id:    Optional[str] = None
+    submitted_by:          Optional[str]       = None
+    defendant_name:        Optional[str]       = None
+    defense_team:          List[DefenseLawyer] = Field(default_factory=list)
+    formal_defenses:       List[str]           = Field(default_factory=list)
+    substantive_defenses:  List[str]           = Field(default_factory=list)
+    supporting_principles: List[str]           = Field(default_factory=list)
+    alibi_claimed:         bool                = False
+    alibi_description:     Optional[str]       = None
+    source_document_id:    Optional[str]       = None
+
+    @field_validator("defense_team", mode="before")
+    @classmethod
+    def coerce_defense_team(cls, v):
+        if not isinstance(v, list):
+            return v
+        return [
+            {"name": item} if isinstance(item, str) else item
+            for item in v
+        ]

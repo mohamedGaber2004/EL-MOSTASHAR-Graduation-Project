@@ -6,7 +6,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from .agent_base import AgentBase
 from src.Graphstore.KG_builder import LegalKnowledgeGraph
 from src.Utils.Enums.agents_enums import AgentsEnums
-from src.routers.kg_router import fetch_article_text
+from src.Graph.states_and_schemas.state import AgentState
 from src.Prompts.legal_researcher_agent import (
     LEGAL_RESEARCHER_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
@@ -16,115 +16,78 @@ logger = logging.getLogger(__name__)
 
 
 class LegalResearcherAgent(AgentBase):
+    def __init__(self, kg: LegalKnowledgeGraph, embeddings, vector_store):
+        super().__init__(
+            "LEGAL_RESEARCHER_MODEL",
+            "LEGAL_RESEARCHER_TEMP",
+            LEGAL_RESEARCHER_AGENT_PROMPT,
+        )
+        self.kg         = kg
+        self.vs         = vector_store
+        self.embeddings = embeddings
+
+    # ── fallback ──────────────────────────────────────────────────────
+    def _build_fallback_package(self, all_contexts: list[dict]) -> dict:
+        return {
+            "case_articles":      [],
+            "applied_principles": [],
+            "_fallback":          True,
+        }
+
+    # ── ANN query ────────────
+    _CHARGE_ANN_QUERY = """
+        CALL db.index.vector.queryNodes('article_embeddings', $k, $query_vector)
+        YIELD node AS article, score
+        RETURN
+            article.article_id     AS article_id,
+            article.article_number AS article_number,
+            article.law_id         AS law_id,
+            article.text           AS text,
+            score
+        ORDER BY score DESC
     """
-    Maps charges → case_articles (KG) and applied_principles (VS).
-    INPUT : charges[], procedural_issues[], incidents[]
-    OUTPUT: case_articles[], applied_principles[]
-    """
 
-    def __init__(self, kg: LegalKnowledgeGraph, vector_store):
-        super().__init__("LEGAL_RESEARCHER_MODEL", "LEGAL_RESEARCHER_TEMP", LEGAL_RESEARCHER_AGENT_PROMPT)
-        self.kg = kg
-        self.vs = vector_store
-
-    # ── keyword extraction ────────────────────────────────────────────
-
-    def _extract_search_keywords(self, charge) -> list[str]:
-        candidates = []
-
-        if getattr(charge, "incident_type", None):
-            candidates.append(charge.incident_type)
-
-        desc = getattr(charge, "description", None)
-        if desc:
-            words = desc.strip().split()
-            candidates.append(" ".join(words[:3]))
-
-        if getattr(charge, "law_code", None):
-            law_map = {
-                "قانون مكافحة المخدرات":  "مخدر",
-                "قانون العقوبات":          "عقوبة",
-                "قانون الأسلحة والذخائر": "سلاح",
-            }
-            keyword = law_map.get(charge.law_code)
-            if keyword:
-                candidates.append(keyword)
-
-        return candidates
-
-    # ── KG retrieval → case_articles ─────────────────────────────────
-
-    def _retrieve_statute_from_kg(self, charge) -> list[dict]:
-        """
-        Three-strategy KG lookup:
-          1. Direct article number lookup
-          2. Embedding similarity search (semantic)
-        Returns a list of case_article dicts.
-        """
-        if self.kg is None:
+    def _retrieve_articles_for_charge(self,text: str, k: int= 15, threshold: float = 0.45) -> list[dict]:
+        if self.kg is None or self.embeddings is None:
+            logger.warning("KG or embeddings not available — skipping article retrieval")
             return []
 
-        results  = []
-        law_code = getattr(charge, "law_code", None)
-        law_id   = AgentsEnums.law_code_to_kg_id(law_code) if law_code else None
+        try:
+            query_vector = self.embeddings.embed_query(text)
+        except Exception as e:
+            logger.warning("embed_query failed for [%s...]: %s", text[:60], e)
+            return []
 
-        # ── strategy 1: direct article number lookup ──────────────────
-        article_number = getattr(charge, "article_number", None)
-        if article_number and law_id:
-            try:
-                history = fetch_article_text(law_id, str(article_number))
-                if history:
-                    latest = sorted(history, key=lambda x: x.get("version") or "0000-00-00")[-1]
-                    text   = (latest.get("text") or "").strip()
-                    if text:
-                        results.append(self._build_article_dict(
-                            article_number=article_number,
-                            law_code=law_code,
-                            text=text,
-                            is_amended=latest.get("is_amended", False),
-                            retrieval_strategy="direct_lookup",
-                        ))
-                        logger.info("KG direct lookup — found م%s من %s", article_number, law_code)
-                        return results
-            except Exception as e:
-                logger.warning("KG direct lookup failed for م%s: %s", article_number, e)
+        try:
+            with self.kg.driver.session() as s:
+                records = s.run(
+                    self._CHARGE_ANN_QUERY,
+                    k=k,
+                    query_vector=query_vector,
+                ).data()
+        except Exception as e:
+            logger.warning("ANN query failed for [%s...]: %s", text[:60], e)
+            return []
 
+        articles = [
+            {
+                "article_number":     str(r["article_number"]),
+                "law_id":             str(r["law_id"]),
+                "article_id":         str(r["article_id"]),
+                "text":               str(r["text"])[:400],
+            }
+            for r in records
+            if r.get("article_number") and float(r.get("score", 0)) >= threshold
+        ]
 
-        # ── strategy 2: embedding similarity search ────────────────────
-        if not results:
-            query_text = self._build_embedding_query(charge)
-            if query_text:
-                try:
-                    hits = self.kg.search_articles_by_embedding(
-                        query=query_text,
-                        law_id=law_id,
-                        k=3,
-                    )
-                    for hit in hits:
-                        text   = (hit.get("text") or "").strip()
-                        art_no = hit.get("article_number")
-                        score  = hit.get("score", 0.0)
-                        if text and art_no not in seen_articles and score >= 0.70:
-                            seen_articles.add(art_no)
-                            results.append(self._build_article_dict(
-                                article_number=art_no,
-                                law_code=hit.get("law_id") or law_code,
-                                text=text,
-                                is_amended=hit.get("is_amended", False),
-                                retrieval_strategy="embedding_search",
-                                similarity_score=round(score, 3),
-                            ))
-                    if results:
-                        logger.info("KG embedding [%s] → %d result(s)", query_text[:40], len(results))
-                    else:
-                        logger.info("KG embedding search — no results above threshold for: %s", query_text[:40])
-                except Exception as e:
-                    logger.warning("KG embedding search failed: %s", e)
+        logger.info(
+            "ANN retrieval — text=[%s...] | law=%s | hits=%d (threshold=%.2f)",
+            text[:60], len(articles), threshold,
+        )
+        return articles
 
-        return results
-
-    def _build_embedding_query(self, charge) -> str:
-        """Compose a semantic query from the charge's most descriptive fields."""
+    def _build_charge_query_text(self, charge) -> str:
+        """Compose a single query string from a charge's descriptive fields."""
         parts = []
         if getattr(charge, "description", None):
             parts.append(charge.description)
@@ -134,142 +97,107 @@ class LegalResearcherAgent(AgentBase):
             parts.append(charge.law_code)
         return " — ".join(parts)
 
-    def _build_article_dict(
-        self,
-        article_number,
-        law_code,
-        text,
-        is_amended,
-        retrieval_strategy,
-        similarity_score=None,
-    ) -> dict:
-        """Uniform case_article dict shape."""
-        d = {
-            "article_number":     article_number,
-            "law_code":           law_code,
-            "text":               text[:400],
-            "is_amended":         is_amended,
-            "retrieval_strategy": retrieval_strategy,
-        }
-        if similarity_score is not None:
-            d["similarity_score"] = similarity_score
-        return d
-
-    # ── VS retrieval → applied_principles ────────────────────────────
-
-    def _retrieve_applied_principles(self, charge, procedural_issues: list, incidents: list) -> list[dict]:
+    # ── KG retrieval: accumulate unique articles across all charges ────
+    def _resolve_articles_for_charges(self, charges: list) -> list[dict]:
         """
-        Retrieve cassation rulings and judicial principles from the
-        vector store, enriched with context from procedural_issues
-        and incidents.
+        For every charge, build a query text, resolve its law_id,
+        run the ANN query, and accumulate unique articles.
+        Mirrors ProceduralAuditorAgent._resolve_article_numbers.
         """
-        principles = []
-
-        # primary: charge-based cassation rulings
-        principles.extend(self._retrieve_cassation_rulings(charge))
-
-        # secondary: procedural issue based search
-        for issue in procedural_issues:
-            issue_desc = getattr(issue, "issue_description", None) or str(issue)
-            if not issue_desc:
-                continue
-            try:
-                hits = self.vs.similarity_search(issue_desc, k=2)
-                for hit in hits:
-                    content = getattr(hit, "page_content", None) or hit.get("text", "")
-                    if content:
-                        principles.append({
-                            "text":   content[:400],
-                            "source": "procedural_issue",
-                            "query":  issue_desc[:80],
-                        })
-            except Exception as e:
-                logger.warning("VS procedural issue search failed: %s", e)
-
-        # tertiary: incident narrative based search
-        for incident in incidents:
-            incident_desc = getattr(incident, "incident_description", None) or str(incident)
-            if not incident_desc:
-                continue
-            try:
-                hits = self.vs.similarity_search(incident_desc[:120], k=2)
-                for hit in hits:
-                    content = getattr(hit, "page_content", None) or hit.get("text", "")
-                    if content:
-                        principles.append({
-                            "text":   content[:400],
-                            "source": "incident_narrative",
-                            "query":  incident_desc[:80],
-                        })
-            except Exception as e:
-                logger.warning("VS incident search failed: %s", e)
-
-        # deduplicate by text prefix
-        seen, deduped = set(), []
-        for p in principles:
-            key = (p.get("text") or "")[:80]
-            if key not in seen:
-                seen.add(key)
-                deduped.append(p)
-
-        return deduped
-
-    # ── context assembly ──────────────────────────────────────────────
-
-    def _retrieve_all_contexts(
-        self,
-        charges: list,
-        procedural_issues: list,
-        incidents: list,
-    ) -> tuple[list, list]:
-        contexts: list = []
-        failed:   list = []
+        seen:   set[str]   = set()
+        result: list[dict] = []
 
         for charge in charges:
-            try:
-                # KG  → case_articles
-                case_articles = self._retrieve_statute_from_kg(charge)
+            query_text = self._build_charge_query_text(charge)
+            if not query_text.strip():
+                logger.warning("Skipping charge with no queryable text: %s", charge)
+                continue
 
-                # VS  → applied_principles
-                applied_principles = self._retrieve_applied_principles(
-                    charge, procedural_issues, incidents
-                )
+            law_code = getattr(charge, "law_code", None)
+            law_id   = AgentsEnums.law_code_to_kg_id(law_code) if law_code else None
 
-                contexts.append({
-                    "charge":            getattr(charge, "statute", str(charge)),
-                    "law_code":          getattr(charge, "law_code", None),
-                    "article_number":    getattr(charge, "article_number", None),
-                    "description":       getattr(charge, "description", None),
-                    "case_articles":     case_articles,       # ← from KG
-                    "applied_principles": applied_principles, # ← from VS
-                })
+            for article in self._retrieve_articles_for_charge(text=query_text):
+                key = article["article_number"]
+                if key not in seen:
+                    seen.add(key)
+                    result.append(article)
 
-            except Exception as e:
-                failed.append(getattr(charge, "statute", str(charge)))
-                contexts.append({
-                    "charge":             getattr(charge, "statute", str(charge)),
-                    "error":              str(e),
-                    "case_articles":      [],
-                    "applied_principles": [],
-                })
+        if not result:
+            logger.warning(
+                "No articles found via ANN for any charge — LLM will rely on internal knowledge"
+            )
+        else:
+            logger.info(
+                "Article resolution complete — %d unique article(s) from ANN search",
+                len(result),
+            )
 
-        return contexts, failed
+        return result
+
+    # ── VS retrieval: accumulate unique principles ────────────────────
+    def _resolve_principles_for_charges(self,charges: list,procedural_violations: list,incidents: list) -> list:
+        if self.vs is None:
+            logger.warning("No vector store — skipping principles retrieval.")
+            return []
+
+        seen:   set[str] = set()
+        result: list     = []
+
+        def _accumulate(query_text: str, source: str) -> None:
+            if not query_text or not query_text.strip():
+                return
+            docs = self.retrieve_principles(query_text, self.vs)
+            for doc in docs:
+                text = doc.page_content if hasattr(doc, "page_content") else str(doc)
+                key  = text[:80]
+                if key not in seen:
+                    seen.add(key)
+                    result.append({
+                        "principle_text": text,                                          # ✅ matches model
+                        "court_source":   doc.metadata.get("source_file", None) if hasattr(doc, "metadata") else None,
+                        "applicable_to":  source,                                        # charge / violation / incident
+                    })
+
+        for charge in charges:
+            _accumulate(self._build_charge_query_text(charge), "charge")
+
+        for violation in procedural_violations:
+            issue_desc = (
+                getattr(violation, "issue_description", None) or str(violation)
+            ).strip()
+            _accumulate(issue_desc, "procedural_violation")
+
+        for incident in incidents:
+            incident_desc = (
+                getattr(incident, "incident_description", None) or str(incident)
+            ).strip()
+            _accumulate(incident_desc[:120], "incident_narrative")
+
+        if not result:
+            logger.warning("No principles found via VS for any query source.")
+        else:
+            logger.info(
+                "Principles resolution complete — %d unique principle(s)", len(result)
+            )
+
+        return result
 
     # ── prompt builder ────────────────────────────────────────────────
-
-    def _build_prompt(self, state, all_contexts: list) -> str:
+    def _build_prompt(self, state: AgentState, case_articles: list[dict], applied_principles: list) -> str:
+        # ── charges + incidents only — no defendants, no procedural data ──────
         case_summary = json.dumps(
             {
-                "defendants":        [d.name for d in state.defendants],
-                "charges":           [c.statute for c in state.charges],
-                "procedural_issues": [
-                    getattr(pi, "issue_description", str(pi))
-                    for pi in (state.procedural_issues or [])
+                "charges": [
+                    {
+                        "statute":     getattr(c, "statute", None),
+                        "description": getattr(c, "description", None),
+                    }
+                    for c in (state.charges or [])
                 ],
                 "incidents": [
-                    i.incident_description
+                    getattr(i, "incident_description", None)
                     for i in (state.incidents or [])
-                    if i.incident_description
+                    if getattr(i, "incident_description", None)
                 ],
             },
             ensure_ascii=False,
@@ -280,67 +208,66 @@ class LegalResearcherAgent(AgentBase):
             "## معطيات القضية:\n"
             f"{case_summary}\n\n"
 
-            "## السياق المسترجع\n"
-            "• case_articles    : نصوص المواد القانونية من قاعدة المعرفة (KG)\n"
-            "• applied_principles: مبادئ محكمة النقض من الـ Vector Store\n"
-            f"{json.dumps(all_contexts, ensure_ascii=False, indent=2)}\n\n"
+            "## المواد القانونية المسترجعة من قاعدة المعرفة (KG):\n"
+            f"{json.dumps(case_articles, ensure_ascii=False, indent=2)}\n\n"
+
+            "## مبادئ محكمة النقض المسترجعة من الـ Vector Store:\n"
+            f"{json.dumps(applied_principles, ensure_ascii=False, indent=2)}\n\n"
 
             "## التعليمات:\n"
             "ابنِ حزمة بحث قانوني لكل تهمة من المعطيات أعلاه فقط.\n"
             "لكل تهمة:\n"
-            "  - حدد أركانها ونطاق عقوبتها من case_articles.\n"
-            "  - أدرج مبادئ النقض ذات الصلة من applied_principles.\n"
-            "  - راعِ الدفوع الإجرائية في procedural_issues عند تحديد المواد.\n"
+            "  - حدد أركانها ونطاق عقوبتها من المواد المسترجعة.\n"
+            "  - أدرج مبادئ النقض ذات الصلة من المبادئ المسترجعة.\n"
             "  - استند فقط إلى ما في السياق المسترجع — لا تخترع مواد أو أحكاماً.\n\n"
 
             "## صيغة الإجابة (JSON فقط — بلا مقدمة ولا شرح خارج JSON):\n"
             f"{EXPECTED_OUTPUT_SCHEMA}"
         )
 
-    # ── main entry ────────────────────────────────────────────────────
 
+
+    # ── main entry ────────────────────────────────────────────────────
     def run(self, state):
         charges_count = len(state.charges or [])
         logger.info("LegalResearcherAgent starting — %d charge(s)", charges_count)
 
         if not state.charges:
+            base_state = self._empty_update(state, "legal_researcher", {})
             return self._empty_update(state, "legal_researcher", {
                 "case_articles":      [],
                 "applied_principles": [],
             })
 
-        procedural_issues = state.procedural_issues or []
-        incidents         = state.incidents or []
+        procedural_violations = (
+            state.procedural_audit.violations
+            if state.procedural_audit
+            else []
+        )
+        incidents = state.incidents or []
 
-        all_contexts, failed_charges = self._retrieve_all_contexts(
-            state.charges, procedural_issues, incidents
+        # ── retrieval (no KG method call — pure ANN like ProceduralAuditorAgent) ──
+        case_articles      = self._resolve_articles_for_charges(state.charges)
+        applied_principles = self._resolve_principles_for_charges(
+            state.charges, procedural_violations, incidents
         )
 
-        if len(failed_charges) == charges_count:
-            logger.warning("All charges failed context retrieval — using fallback")
-            legal_package = self._build_fallback_package(all_contexts)
-            legal_package["_meta"] = {
-                "source":         "fallback",
-                "failed_charges": failed_charges,
-            }
-            return self._empty_update(state, "legal_researcher", legal_package)
-
-        prompt = self._build_prompt(state, all_contexts)
-        logger.debug("Prompt built — invoking LLM")
+        prompt = self._build_prompt(state, case_articles, applied_principles)
+        logger.debug("LegalResearcherAgent prompt built — invoking LLM")
 
         try:
-            response = self._llm_invoke_with_retries(
+            response      = self._llm_invoke_with_retries(
                 self._llm,
                 [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
             )
-            legal_package = self._parse_llm_json(response.content)
+            legal_package = self._parse_agent_json(response.content)
         except Exception as e:
             logger.error("LLM invocation failed: %s — using fallback", e)
-            legal_package = self._build_fallback_package(all_contexts)
+            legal_package = self._build_fallback_package([])
 
         if not isinstance(legal_package, dict):
-            logger.error("LLM response not a dict — using fallback")
-            legal_package = self._build_fallback_package(all_contexts)
+            logger.error("LLM response is not a dict — using fallback")
+            legal_package = self._build_fallback_package([])
         else:
             logger.info(
                 "Legal research complete — %d case_article(s), %d principle(s)",
@@ -348,18 +275,10 @@ class LegalResearcherAgent(AgentBase):
                 len(legal_package.get("applied_principles", [])),
             )
 
-        legal_package["_meta"] = {
-            "charges_count":        charges_count,
-            "procedural_issues_count": len(procedural_issues),
-            "incidents_count":      len(incidents),
-            "failed_charges":       failed_charges,
-            "contexts_count":       len(all_contexts),
-            "kg_connected":         self.kg is not None,
-            "vs_connected":         self.vs is not None,
-        }
-
-        base_state = self._empty_update(state, "legal_researcher", legal_package)
-        return base_state.model_copy(update={
+        return self._empty_update(state, "legal_researcher", {
             "case_articles":      legal_package.get("case_articles", []),
-            "applied_principles": legal_package.get("applied_principles", []),
+            "applied_principles": (
+                legal_package.get("applied_principles", [])   # from LLM
+                or applied_principles 
+            ),
         })

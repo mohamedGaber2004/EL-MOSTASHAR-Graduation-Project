@@ -6,22 +6,25 @@ EXPECTED_OUTPUT_SCHEMA = """
 {
   "case_articles": [
     {
-      "charge":            "التهمة",
-      "statute":           "المادة القانونية",
-      "law_code":          "مصدر القانون (قانون العقوبات / قانون مكافحة المخدرات / ...)",
-      "elements":          ["أركان الجريمة"],
-      "penalty_range":     "نطاق العقوبة من الـ KG",
-      "relevant_articles": ["مواد ذات صلة من نفس القانون"],
-      "is_amended":        false,
-      "retrieval_strategy": "direct_lookup | keyword_search | embedding_search"
+      "article_number": "رقم المادة",
+      "law_id":         "معرّف القانون (penal_code / criminal_procedure ...)",
+      "article_id":     "معرّف المادة في قاعدة المعرفة",
+      "text":           "نص المادة القانونية",
+      "charge_ref":     "التهمة التي تنتمي إليها هذه المادة"
     }
   ],
   "applied_principles": [
     {
-      "text":   "نص المبدأ أو الحكم",
-      "source": "charge | procedural_issue | incident_narrative",
-      "query":  "النص الذي أسفر عن استرجاع هذا المبدأ"
+      "principle_text": "نص المبدأ القانوني كاملاً",
+      "court_source":   "مصدر المبدأ — اسم الكتاب أو المجموعة",
+      "applicable_to":  "التهمة أو الموضوع الذي ينطبق عليه هذا المبدأ"
     }
   ]
 }
+
+قواعد صارمة:
+- case_articles يجب أن تكون قائمة مسطّحة — لا تجمّع المواد داخل كائن تهمة.
+- applied_principles يجب أن تحتوي على principle_text و court_source و applicable_to فقط.
+- لا تُدرج مفاتيح "charge" أو "strategy" أو "research_packages" أو "text" أو "source".
+- أجب بـ JSON فقط بلا أي نص خارجه.
 """

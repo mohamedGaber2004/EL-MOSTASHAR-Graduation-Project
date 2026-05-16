@@ -54,8 +54,6 @@ class ProsecutionArgumentStrength(str, Enum):
 class AgentsEnums:
     AGENT_INVOKATION_ERRORS  = ("429", "rate_limit", "rate_limit_exceeded", "tokens per minute", "please try again")
     AGENT_INGESTION_TXT_FILES_ENCODING = ("utf-8", "cp1256", "latin-1")
-
-    
     CRIMINAL_PROCEDURE_LAW_ID = "criminal_procedure"
 
     @staticmethod
@@ -69,6 +67,7 @@ class AgentsEnums:
             "قانون مكافحة جرائم المعلومات": "cybercrime",
             "قانون مكافحة غسيل الأموال":    "money_laundering",
             "قانون الطوارئ":                "emergency_law",
+            "الدستور الجنائي":              "criminal_constitution"
         }
         return mapping.get(law_code, law_code)
     

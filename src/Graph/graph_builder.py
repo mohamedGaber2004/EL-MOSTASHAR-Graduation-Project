@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 from typing import Literal, Union
+import functools
 
 from langgraph.graph import END, START, StateGraph
 
@@ -29,22 +30,33 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Error wrapper  (بدون agent_outputs)
+# Error wrapper 
 # ─────────────────────────────────────────────────────────────────────────────
-
 def _safe_run(agent_key: str, agent):
-    def _wrapped(state: AgentState) -> AgentState:
+    @functools.wraps(agent.run)          # ← preserves __name__, __doc__, etc.
+    def _wrapped(state):
         try:
-            return agent.run(state)
+            result = agent.run(state)
+            if isinstance(result, dict):
+                _PARALLEL_FORBIDDEN_KEYS = {
+                    "case_id", "case_number", "court", "court_level",
+                    "jurisdiction", "filing_date", "referral_date",
+                    "prosecutor_name", "referral_order_text",
+                    "current_agent", "last_updated",
+                    "extraction_notes", "source_documents",
+                }
+                return {k: v for k, v in result.items() if k not in _PARALLEL_FORBIDDEN_KEYS}
+            return result
         except Exception as e:
             logger.error("❌ Agent '%s' فشل: %s", agent_key, e, exc_info=True)
-            return state.model_copy(update={
-                "errors":           state.errors + [f"[{agent_key}] {e}"],
-                "completed_agents": state.completed_agents + [agent_key],
-                "current_agent":    agent_key,
-            })
-    return _wrapped
+            return {
+                "completed_agents": [],
+                "errors":           [f"{agent_key}: {str(e)[:200]}"],
+            }
 
+    _wrapped.__name__ = agent_key       # ← unique key LangGraph uses as node ID
+    _wrapped.__qualname__ = agent_key
+    return _wrapped
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Conditional routing
@@ -59,15 +71,31 @@ def _route_after_procedural_audit(state: AgentState) -> Literal["legal_researche
         "سقوط", "تقادم", "بطلان مطلق", "عدم اختصاص",
         "انقضاء الدعوى", "وفاة المتهم",
     }
-    for issue in state.procedural_issues:
-        desc = getattr(issue, "issue_description", "") or ""
-        if any(kw in desc for kw in fatal_keywords):
+
+    audit = getattr(state, "procedural_audit", None)
+    if not audit:
+        return "legal_researcher"
+
+    # fast path: check critical_nullities list first (agent already flagged these)
+    for nullity in (audit.critical_nullities or []):
+        if any(kw in (nullity or "") for kw in fatal_keywords):
+            logger.warning(
+                "⚡ بطلان مطلق حرج — تجاوز مباشر إلى القاضي: %s", nullity[:80]
+            )
+            return "judge"
+
+    # slow path: scan every violation's description and nullity_type
+    for issue in (audit.violations or []):
+        desc        = getattr(issue, "issue_description", "") or ""
+        nullity_type = getattr(issue, "nullity_type", "") or ""
+
+        if any(kw in desc or kw in nullity_type for kw in fatal_keywords):
             logger.warning(
                 "⚡ مشكلة إجرائية قاتلة — تجاوز مباشر إلى القاضي: %s", desc[:80]
             )
             return "judge"
-    return "legal_researcher"
 
+    return "legal_researcher"
 
 def _route_after_parallel_analysis(state: AgentState) -> Literal["prosecution_analyst"]:
     """
@@ -89,8 +117,8 @@ def build_legal_graph():
 
     agents = {
         "data_ingestion":     DataIngestionAgent(),
-        "procedural_auditor": ProceduralAuditorAgent(kg=kg,embeddings=emb),
-        "legal_researcher":   LegalResearcherAgent(kg=kg, vector_store=vs),
+        "procedural_auditor": ProceduralAuditorAgent(kg=kg, embeddings=emb, vector_store=vs),
+        "legal_researcher":   LegalResearcherAgent(kg=kg, embeddings=emb, vector_store=vs),
         "evidence_analyst":   EvidenceAnalystAgent(),
         "defense_analyst":    DefenseAnalystAgent(),
         "confession_validity":  ConfessionValidityAgent(),
@@ -145,16 +173,31 @@ def get_graph_visualization():
 # run_case
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_case(state: AgentState) -> AgentState:
+def run_case(state: AgentState) -> dict:
     logger.info("🚀 بدء معالجة القضية: %s", state.case_id)
 
     graph, _ = get_graph_visualization()
 
     try:
-        final_state = graph.invoke(state.model_dump())
+        raw = graph.invoke(state.model_dump())
     except Exception as e:
         logger.error("❌ Pipeline فشل كلياً: %s", e, exc_info=True)
         raise
+
+    # graph.invoke returns a merged dict — reconstruct typed state for safety
+    if isinstance(raw, AgentState):
+        final_state = raw
+    elif isinstance(raw, dict):
+        try:
+            final_state = AgentState(**raw)
+        except Exception as e:
+            logger.error(
+                "AgentState reconstruction failed: %s — returning raw dict", e
+            )
+            final_state = raw
+    else:
+        logger.error("Unexpected graph output type: %s", type(raw))
+        final_state = raw
 
     verdict = _extract_verdict(final_state)
     errors  = _extract_errors(final_state)
@@ -164,6 +207,18 @@ def run_case(state: AgentState) -> AgentState:
         logger.warning("⚠️ أخطاء أثناء التنفيذ (%d): %s", len(errors), errors)
 
     return final_state
+
+
+def _extract_verdict(final_state) -> str:
+    if isinstance(final_state, dict):
+        return str(final_state.get("suggested_verdict", "غير محدد"))
+    return str(getattr(final_state, "suggested_verdict", "غير محدد"))
+
+
+def _extract_errors(final_state) -> list:
+    if isinstance(final_state, dict):
+        return final_state.get("errors", [])
+    return getattr(final_state, "errors", [])
 
 
 def _extract_verdict(final_state: Union[AgentState, dict]) -> str:

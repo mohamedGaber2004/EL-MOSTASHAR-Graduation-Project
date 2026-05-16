@@ -55,50 +55,35 @@ class ConfessionValidityAgent(AgentBase):
             temp_config_key="CONFESSION_VALIDITY_TEMP",
             prompt=CONFESSION_VALIDITY_PROMPT,
         )
-
-    # ── public entry point ────────────────────────────────────────
-
-    def run(self, state: AgentState) -> AgentState:
-        logger.info(
-            "▶ [%s] بدء تقييم الاعترافات — القضية: %s | عدد الاعترافات: %d",
-            self.AGENT_KEY, state.case_id, len(state.confessions),
-        )
-
-        # لا توجد اعترافات → تخطٍّ آمن
-        if not state.confessions:
-            logger.info("[%s] لا توجد اعترافات — تخطٍّ.", self.AGENT_KEY)
-            return self._empty_update(state, self.AGENT_KEY, {})
-
-        context = self._build_context(state)
-        raw_output = self._call_llm(context)
-        parsed = self._parse_llm_json(raw_output)
-
-        assessments = self._extract_assessments(parsed)
-
-        updates: dict[str, Any] = {"confession_assessments": assessments}
-
-        logger.info(
-            "✔ [%s] اكتمل — %d اعتراف مقيَّم", self.AGENT_KEY, len(assessments)
-        )
-
-        base_state = self._empty_update(state, self.AGENT_KEY, updates)
-        return base_state.model_copy(update=updates)
-
+    
     # ── private helpers ───────────────────────────────────────────
-
     def _build_context(self, state: AgentState) -> str:
+        audit      = state.procedural_audit
+        violations = audit.violations if audit else []
+
+        # ── confession-related violations only ────────────────────────────────
+        confession_violations = [
+            {
+                "procedure_type":    p.procedure_type,
+                "issue_description": p.issue_description,
+                "nullity_type":      p.nullity_type,
+                "nullity_effect":    p.nullity_effect,
+            }
+            for p in violations
+            if p.procedure_type and "استجواب" in (p.procedure_type or "")
+            or "اعتراف" in (p.issue_description or "")
+        ]
+
         ctx: dict[str, Any] = {
-            "case_id":     state.case_id,
-            "case_number": state.case_number,
-            "defendants": [self._safe_dump(d) for d in state.defendants],
-            "confessions": [self._safe_dump(c) for c in state.confessions],
-            # الأدلة المادية لتقييم standalone_confession
-            "evidences":  [self._safe_dump(e) for e in state.evidences],
-            "lab_reports": [self._safe_dump(r) for r in state.lab_reports],
-            # المشكلات الإجرائية قد تشمل خلل أخذ الاعتراف
-            "procedural_issues": [self._safe_dump(p) for p in state.procedural_issues],
-            # نتائج تحليل الأدلة إن وُجدت
-            "evidence_scores": [self._safe_dump(s) for s in state.evidence_scores],
+            "case_id":              state.case_id,
+            "case_number":          state.case_number,
+            "defendants": [
+                {"name": getattr(d, "name", None), "id": getattr(d, "id", None)}
+                for d in (state.defendants or [])
+            ],
+            "confessions":          [self._safe_dump(c) for c in state.confessions],
+            "criminal_proceedings": [self._safe_dump(p) for p in state.criminal_proceedings],
+            "confession_related_violations": confession_violations,
         }
         return self.prompt.format(context=json.dumps(ctx, ensure_ascii=False, indent=2))
 
@@ -142,3 +127,40 @@ class ConfessionValidityAgent(AgentBase):
                 )
 
         return assessments
+
+    # ── public entry point ────────────────────────────────────────
+    def run(self, state: AgentState) -> AgentState:
+        logger.info(
+            "▶ [%s] بدء تقييم الاعترافات — القضية: %s | عدد الاعترافات: %d",
+            self.AGENT_KEY, state.case_id, len(state.confessions),
+        )
+
+        if not state.confessions:
+            logger.info("[%s] لا توجد اعترافات — تخطٍّ.", self.AGENT_KEY)
+            return self._empty_update(state, self.AGENT_KEY, {})
+
+        context = self._build_context(state)
+        try:
+            raw_output = self._call_llm(context)
+        except Exception as e:
+            logger.error("ConfessionValidityAgent LLM failed: %s — using fallback", e)
+            raw_output = {}
+
+        if not isinstance(raw_output, str) or not raw_output.strip():
+            logger.warning("ConfessionValidityAgent: empty/invalid output — using fallback")
+            raw_output = ""
+
+        parsed = self._parse_agent_json(raw_output)
+
+        assessments = self._extract_assessments(parsed)
+
+        updates: dict[str, Any] = {"confession_assessments": assessments}
+
+        logger.info(
+            "✔ [%s] اكتمل — %d اعتراف مقيَّم", self.AGENT_KEY, len(assessments)
+        )
+
+        return self._empty_update(state, self.AGENT_KEY, updates)
+
+
+

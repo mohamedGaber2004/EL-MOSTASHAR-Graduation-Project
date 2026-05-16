@@ -11,8 +11,6 @@ from src.agents.agent_base import AgentBase
 
 logger = logging.getLogger(__name__)
 
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Agent
 # ─────────────────────────────────────────────────────────────────────────────
@@ -37,52 +35,30 @@ class SentencingAgent(AgentBase):
             prompt=SENTENCING_PROMPT,
         )
 
-    # ── public entry point ────────────────────────────────────────
-
-    def run(self, state: AgentState) -> AgentState:
-        logger.info(
-            "▶ [%s] بدء التقدير — القضية: %s | تهم: %d",
-            self.AGENT_KEY, state.case_id, len(state.charges),
-        )
-
-        context = self._build_context(state)
-        raw_output = self._call_llm(context)
-        parsed = self._parse_llm_json(raw_output)
-
-        updates = self._extract_updates(parsed, state)
-
-        logger.info(
-            "✔ [%s] اكتمل — مشددات: %d | مخففات: %d | م.17: %s",
-            self.AGENT_KEY,
-            len(updates.get("aggravating_factors", [])),
-            len(updates.get("mitigating_factors", [])),
-            updates.get("applicable_article_17", False),
-        )
-
-        base_state = self._empty_update(state, self.AGENT_KEY, updates)
-        return base_state.model_copy(update=updates)
-
     # ── private helpers ───────────────────────────────────────────
 
     def _build_context(self, state: AgentState) -> str:
+        audit = state.procedural_audit
+
         ctx: dict[str, Any] = {
             "case_id":     state.case_id,
             "case_number": state.case_number,
             "court":       state.court,
             "court_level": state.court_level,
-            "defendants":  [self._safe_dump(d) for d in state.defendants],
-            "charges":     [self._safe_dump(c) for c in state.charges],
-            "incidents":   [self._safe_dump(i) for i in state.incidents],
-            "criminal_records": [self._safe_dump(r) for r in state.criminal_records],
-            # مخرجات العملاء السابقين
-            "evidence_scores":         [self._safe_dump(s) for s in state.evidence_scores],
-            "defense_arguments":        [self._safe_dump(a) for a in state.defense_arguments],
-            "prosecution_arguments":    [self._safe_dump(a) for a in state.prosecution_arguments],
-            "confession_assessments":   [self._safe_dump(a) for a in state.confession_assessments],
-            "witness_credibility_scores": [self._safe_dump(w) for w in state.witness_credibility_scores],
-            "procedural_issues":         [self._safe_dump(p) for p in state.procedural_issues],
-            "applied_principles":        [self._safe_dump(p) for p in state.applied_principles],
-            "case_articles":             state.case_articles,
+            "defendants":      [self._safe_dump(d) for d in state.defendants],
+            "charges":         [self._safe_dump(c) for c in state.charges],
+            "criminal_records":[self._safe_dump(r) for r in state.criminal_records],
+            # ── scored outputs only — no raw entity lists ─────────────────
+            "evidence_scores":        [self._safe_dump(s) for s in state.evidence_scores],
+            "confession_assessments": [self._safe_dump(a) for a in state.confession_assessments],
+            # ── arguments ─────────────────────────────────────────────────
+            "prosecution_arguments": [self._safe_dump(a) for a in state.prosecution_arguments],
+            "defense_arguments":     [self._safe_dump(a) for a in state.defense_arguments],
+            # ── legal layer ───────────────────────────────────────────────
+            "case_articles":      state.case_articles or [],
+            "applied_principles": [self._safe_dump(p) for p in state.applied_principles],
+            # ── procedural: critical nullities only, not full violations ──
+            "critical_nullities": audit.critical_nullities or [],
         }
         return self.prompt.format(context=json.dumps(ctx, ensure_ascii=False, indent=2))
 
@@ -99,11 +75,20 @@ class SentencingAgent(AgentBase):
         result = self._llm_invoke_with_retries(self._llm, messages)
         return result.content if hasattr(result, "content") else str(result)
 
+    def _parse_factor(self, item) -> str:
+        if isinstance(item, dict):
+            return item.get("factor") or item.get("description") or str(item)
+        return str(item)
+
     def _extract_updates(self, parsed: dict, state: AgentState) -> dict[str, Any]:
         updates: dict[str, Any] = {}
 
-        updates["aggravating_factors"] = parsed.get("aggravating_factors") or []
-        updates["mitigating_factors"]  = parsed.get("mitigating_factors")  or []
+        updates["aggravating_factors"] = [
+            self._parse_factor(f) for f in (parsed.get("aggravating_factors") or [])
+        ]
+        updates["mitigating_factors"] = [
+            self._parse_factor(f) for f in (parsed.get("mitigating_factors") or [])
+        ]
         updates["applicable_article_17"] = bool(parsed.get("applicable_article_17", False))
         updates["charge_conviction_map"] = parsed.get("charge_conviction_map") or {}
 
@@ -130,3 +115,27 @@ class SentencingAgent(AgentBase):
                 logger.warning("[%s] فشل بناء CivilClaim: %s", self.AGENT_KEY, exc)
 
         return updates
+    
+        # ── public entry point ────────────────────────────────────────
+
+    def run(self, state: AgentState) -> AgentState:
+        logger.info(
+            "▶ [%s] بدء التقدير — القضية: %s | تهم: %d",
+            self.AGENT_KEY, state.case_id, len(state.charges),
+        )
+
+        context = self._build_context(state)
+        raw_output = self._call_llm(context)
+        parsed = self._parse_agent_json(raw_output)
+
+        updates = self._extract_updates(parsed, state)
+
+        logger.info(
+            "✔ [%s] اكتمل — مشددات: %d | مخففات: %d | م.17: %s",
+            self.AGENT_KEY,
+            len(updates.get("aggravating_factors", [])),
+            len(updates.get("mitigating_factors", [])),
+            updates.get("applicable_article_17", False),
+        )
+
+        return self._empty_update(state, self.AGENT_KEY, updates)

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-import time
+import time , json
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from .agent_base import AgentBase
@@ -46,9 +46,8 @@ def _empty_extracted() -> dict:
         "witness_statements":        [],
         "confessions":               [],
         "criminal_records":          [],
+        "criminal_proceedings":         [],
         "defense_documents":         [],
-        "defense_procedural_issues": [],
-        "procedural_issues":         [],
     }
 
 
@@ -59,10 +58,8 @@ _LIST_KEYS = {
     "criminal_records", "defense_documents",
     "defense_procedural_issues", "procedural_issues",
 }
-
 # ─────────────────────────────────────────────────────────────────
 #  Routing: keyword sets per document type
-#  More specific patterns first
 # ─────────────────────────────────────────────────────────────────
 _ROUTE_PATTERNS: list[tuple[str, set[str]]] = [
     (
@@ -126,7 +123,6 @@ def _route_stem(stem: str) -> Optional[str]:
                 return doc_type
 
     return None
-
 # ─────────────────────────────────────────────────────────────────
 #  Text chunking with document-context header
 # ─────────────────────────────────────────────────────────────────
@@ -178,7 +174,6 @@ def chunk_text(text: str,max_chars: int,overlap: int = 500,doc_id: str = "") -> 
             result.append((i + 1, header + chunk))
 
     return result
-
 # ─────────────────────────────────────────────────────────────────
 #  Schema validation before merging
 # ─────────────────────────────────────────────────────────────────
@@ -204,8 +199,6 @@ def _validate_extracted(result: dict) -> tuple[bool, str]:
         return False, "case_meta يجب أن يكون قاموساً"
 
     return True, ""
-
-
 # ─────────────────────────────────────────────────────────────────
 #  DataIngestionAgent
 # ─────────────────────────────────────────────────────────────────
@@ -233,6 +226,154 @@ class DataIngestionAgent(AgentBase):
             LegalDocType.MOZAKARET_DIFA.value:  DATA_INGESTION_AGENT_PROMPT_mozakeret_difa,
             LegalDocType.SAWABIQ.value:         DATA_INGESTION_AGENT_PROMPT_sawabiq,
         }
+
+    # Dedup helpers
+    def _dedup_by_keys(self,existing: list[dict], new_items: list[dict], *keys: str) -> list[dict]:
+        """
+        Append items from new_items that don't already exist in existing,
+        using `keys` as the identity fields for deduplication.
+
+        If none of the keys are present in an item, the item is always appended.
+        """
+        def fingerprint(item: dict) -> tuple:
+            return tuple(
+                json.dumps(item.get(k), ensure_ascii=False) if isinstance(item.get(k), (dict, list))
+                else item.get(k)
+                for k in keys
+            )
+
+        seen: set[tuple] = set()
+        for item in existing:
+            fp = fingerprint(item)
+            if any(v is not None for v in fp):
+                seen.add(fp)
+
+        result = list(existing)
+        for item in new_items:
+            if not isinstance(item, dict):
+                continue
+            fp = fingerprint(item)
+            has_key = any(v is not None for v in fp)
+            if has_key and fp in seen:
+                continue
+            result.append(item)
+            seen.add(fp)
+
+        return result
+
+    def _merge_list(self,existing: list[dict], incoming: list[dict], *dedup_keys: str) -> list[dict]:
+        if not incoming:
+            return existing
+        if dedup_keys:
+            return self._dedup_by_keys(existing, incoming, *dedup_keys)
+        return existing + incoming
+
+    # _merge_extracted
+    def _merge_extracted(self, base: dict, incoming: dict) -> dict:
+        """
+        Merge `incoming` extraction result into `base`.
+        List fields are appended with deduplication where meaningful keys exist.
+        Scalar fields (case_meta) are merged with first-write-wins.
+        """
+        merged = dict(base)
+
+        # ── case_meta: first-write-wins per sub-key ───────────────────────────────
+        if "case_meta" in incoming and isinstance(incoming["case_meta"], dict):
+            base_meta = merged.get("case_meta") or {}
+            for k, v in incoming["case_meta"].items():
+                if v is not None and base_meta.get(k) is None:
+                    base_meta[k] = v
+            merged["case_meta"] = base_meta
+
+        # ── lists: merge with dedup ───────────────────────────────────────────────
+        LIST_DEDUP: dict[str, tuple[str, ...]] = {
+            "defendants":                ("national_id", "name"),
+            "charges":                   ("law_code", "article_number", "description"),
+            "incidents":                 ("incident_type", "incident_date", "incident_location"),
+            "evidences":                 ("evidence_type", "description", "seizure_date"),
+            "lab_reports":               ("report_type", "examiner_name", "examination_date"),
+            "witness_statements":        ("witness_name", "statement_date"),
+            "confessions":               ("defendant_name", "confession_date", "text"),
+            "criminal_proceedings":      ("procedure_type", "description", "conducting_officer"),  # ← added
+            "procedural_issues":         ("procedure_type", "issue_description"),
+            "defense_procedural_issues": ("procedure_type", "issue_description"),
+            "criminal_records":          ("defendant_name",),
+            "defense_documents":         ("submitted_by", "defendant_name"),
+        }
+
+        for key, dedup_keys in LIST_DEDUP.items():
+            if key in incoming:
+                val = incoming[key]
+                # ✅ coerce singular dict to list
+                if isinstance(val, dict):
+                    val = [val]
+                if isinstance(val, list):
+                    merged[key] = self._merge_list(
+                        merged.get(key, []),
+                        val,
+                        *dedup_keys,
+                    )
+
+        return merged
+
+    # _apply_extracted_to_state
+    def _apply_extracted_to_state(self, state: Any, extracted: dict) -> dict:
+        """
+        Convert the raw `extracted` dict (from _merge_extracted) to the
+        keyword arguments needed for state.model_copy(update={...}).
+
+        Pydantic models inside lists are constructed here so AgentState
+        receives typed objects rather than raw dicts.
+        """
+        from src.Graph.states_and_schemas.main_entity_classes import (
+            Defendant, Charge, CaseIncident, Evidence, LabReport,
+            WitnessStatement, Confession,DefenseDocument, CriminalRecord, CriminalProceedings,
+        )
+
+        def safe_make(cls, data: dict) -> Any:
+            try:
+                return cls(**{k: v for k, v in data.items() if v is not None})
+            except Exception as exc:
+                logger.warning("Could not construct %s from %s: %s", cls.__name__, data, exc)
+                return None
+
+        def make_list(cls, raw: list[dict]) -> list:
+            return [obj for d in raw if isinstance(d, dict) if (obj := safe_make(cls, d)) is not None]
+
+        updates: dict = {}
+
+        # ── case_meta scalars ─────────────────────────────────────────────────────
+        meta = extracted.get("case_meta") or {}
+        for field in (
+            "case_number", "court", "court_level", "jurisdiction",
+            "prosecutor_name", "referral_order_text", "filing_date", "referral_date",
+        ):
+            val = meta.get(field)
+            if val is not None:
+                updates[field] = val
+
+        # ── entity lists ──────────────────────────────────────────────────────────
+        mapping = {
+            "defendants":                (Defendant,           "defendants"),
+            "charges":                   (Charge,              "charges"),
+            "incidents":                 (CaseIncident,        "incidents"),
+            "evidences":                 (Evidence,            "evidences"),
+            "lab_reports":               (LabReport,           "lab_reports"),
+            "witness_statements":        (WitnessStatement,    "witness_statements"),
+            "confessions":               (Confession,          "confessions"),
+            "criminal_proceedings":      (CriminalProceedings, "criminal_proceedings"),
+            "defense_documents":         (DefenseDocument,     "defense_documents"),
+            "criminal_records":          (CriminalRecord,      "criminal_records"),
+        }
+
+        for raw_key, (cls, state_field) in mapping.items():
+            raw_list = extracted.get(raw_key, [])
+            if raw_list:
+                existing = getattr(state, state_field, [])
+                new_objs = make_list(cls, raw_list)
+                updates[state_field] = existing + new_objs
+
+        return updates
 
     # ── routing ───────────────────────────────────────────────────
     def _get_prompt(self, stem: str) -> Optional[str]:
@@ -394,12 +535,7 @@ class DataIngestionAgent(AgentBase):
             provenance["extracted_counts"],
         )
 
-        return state.model_copy(
-            update={
-                **state_updates,
-                "completed_agents": state.completed_agents + ["data_ingestion"],
-                "current_agent":    "data_ingestion",
-                "errors":           state.errors + file_errors,
-                "last_updated":     self._now(),
-            }
-        )
+        return self._empty_update(state, "data_ingestion", {
+            **state_updates,
+            "errors": file_errors,
+        })

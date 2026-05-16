@@ -145,7 +145,7 @@ class CivilClaim(BaseModel):
     """
  
     # ── بيانات المدّعي المدني ─────────────────────────────────────
-    plaintiff_name:     str           = Field(description="اسم المدّعي المدني (المجني عليه أو ورثته)")
+    plaintiff_name:     Optional[str] = Field(description="اسم المدّعي المدني (المجني عليه أو ورثته)")
     plaintiff_capacity: Optional[str] = Field(default=None,description="صفة المدّعي: مجني عليه / وارث / ولي / وكيل")
  
     # ── طلبات التعويض ─────────────────────────────────────────────
@@ -168,11 +168,15 @@ class CivilClaim(BaseModel):
 
 
 class EvidenceScoring(BaseModel):
-    evidence_id:   Optional[str] = None
-    admissibility: Optional[str] = None
-    weight:        Optional[str] = None
-    notes:         Optional[str] = None
-
+    evidence_id:    Optional[str] = None
+    type:           Optional[str] = None
+    description:    Optional[str] = None
+    strength:       Optional[str] = None   # قوي | متوسط | ضعيف
+    strength_reason:Optional[str] = None
+    admissibility:  Optional[str] = None   # مقبول | مستبعد (from invalidated check)
+    proof_degree:   Optional[str] = None   # قاطع | كافٍ | غير كافٍ | منعدم
+    notes:          Optional[str] = None
+    
 class DefenseArgument(BaseModel):
     argument_type: Optional[str] = None   # شكلي / موضوعي
     description:   Optional[str] = None
@@ -189,17 +193,36 @@ class JudicialPrinciple(BaseModel):
 class ProceduralIssue(BaseModel):
     """دفع إجرائي / بطلان"""
     procedure_source:   Optional[str] = None
-    procedure_type:     Optional[str] = None   # ضبط / قبض / استجواب / تفتيش
+    procedure_type:     Optional[str] = None    # ضبط / قبض / استجواب / تفتيش
     issue_description:  Optional[str] = None
     warrant_present:    bool          = False
     conducting_officer: Optional[str] = None
-    nullity_type:       Optional[str] = None   # بطلان مطلق / بطلان نسبي
+    nullity_type:       Optional[str] = None    # بطلان مطلق / بطلان نسبي
+    nullity_effect:     Optional[str] = None    # أثر البطلان على الأدلة المترتبة
     article_basis:      Optional[str] = None
     source_document_id: Optional[str] = None
+
+
+class ExcludedDefenseClaim(BaseModel):
+    """دفع إجرائي أثاره المحامي لكن تم استبعاده لعدم صحته"""
+    claim:  Optional[str] = None   # ملخص ادعاء المحامي
+    reason: Optional[str] = None   # سبب الاستبعاد
+
+
+class ProceduralAuditResult(BaseModel):
+    """المخرج الكامل لـ ProceduralAuditorAgent"""
+    violations:              List[ProceduralIssue]       = Field(default_factory=list)
+    excluded_defense_claims: List[ExcludedDefenseClaim]  = Field(default_factory=list)
+    overall_assessment:      Optional[str]               = None
+    critical_nullities:      List[str]                   = Field(default_factory=list)
+    kg_articles_used:        List[str]                   = Field(default_factory=list)
+    meta:                   dict                        = Field(default_factory=dict)
 
 
 class FinalJudgment(BaseModel):
     verdict:             Optional[str] = None   # إدانة / براءة / جزئية
     reasoning_summary:   Optional[str] = None
-    recommended_penalty: Optional[str] = None
+    recommended_penalty: Optional[str] = None   # العقوبة المحددة
     confidence_score:    float         = Field(default=0.0, ge=0, le=1)
+    full_ruling_text:    Optional[str] = None   # نص الحكم كاملاً كما يُنطق
+    per_charge_rulings:  List[dict]    = Field(default_factory=list)

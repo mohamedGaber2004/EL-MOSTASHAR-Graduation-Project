@@ -17,7 +17,6 @@ CONFESSION_VALIDITY_PROMPT = """
 لكل اعتراف وارد في قائمة confessions أعلاه، أنتج تقييماً مستقلاً.
 أرجع JSON واحداً بالهيكل الآتي بالضبط:
 
-```json
 {{
   "confession_assessments": [
     {{
@@ -40,7 +39,6 @@ CONFESSION_VALIDITY_PROMPT = """
   ],
   "overall_confession_impact": "ملخص الأثر الكلي للاعترافات على سير القضية"
 }}
-```
 
 ## قواعد صارمة
 - أجب بـ JSON فقط بلا أي نص خارجه.

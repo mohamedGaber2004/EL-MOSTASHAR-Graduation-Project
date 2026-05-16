@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Dict, List, Optional
-
+from typing import Dict, List, Optional, Annotated
+from operator import add
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic import field_validator
 
 from src.Graph.states_and_schemas.main_entity_classes import (
     Charge,
@@ -23,7 +24,7 @@ from src.Graph.states_and_schemas.Agents_output_models import (
     EvidenceScoring,
     FinalJudgment,
     JudicialPrinciple,
-    ProceduralIssue,
+    ProceduralAuditResult,
     ProsecutionNarrative,
     ProsecutionArgument,
     ConfessionAssessment,
@@ -43,10 +44,7 @@ class AgentState(BaseModel):
     filing_date:         Optional[str] = None
     referral_date:       Optional[str] = None
     prosecutor_name:     Optional[str] = None
-    referral_order_text: Optional[str] = Field(
-        default=None,
-        description="نص أمر الإحالة الحاكم لنطاق القضية",
-    )
+    referral_order_text: Optional[str] = Field(default=None)
 
     # ── Extracted Entities ────────────────────────────  (DataIngestionAgent)
     defendants:           List[Defendant]           = Field(default_factory=list)
@@ -60,79 +58,65 @@ class AgentState(BaseModel):
     criminal_proceedings: List[CriminalProceedings] = Field(default_factory=list)
     defense_documents:    List[DefenseDocument]     = Field(default_factory=list)
 
-    # ── Procedural Analysis ───────────────────────────  (ProceduralAuditorAgent)
-    procedural_issues:         List[ProceduralIssue] = Field(default_factory=list)
+    # ── Procedural Analysis ───────────────────────────  (ProceduralAuditorAgent — sequential)
+    procedural_audit: ProceduralAuditResult = Field(default_factory=ProceduralAuditResult)
 
-    # ── Evidence Analysis ─────────────────────────────  (EvidenceAnalystAgent)
-    evidence_scores: List[EvidenceScoring] = Field(default_factory=list)
-    chain_of_custody_issues: List[str]     = Field(
-        default_factory=list,
-        description="مشكلات سلسلة حيازة الأدلة",
-    )
+    # ── Evidence Analysis ─────────────────────────────  (EvidenceAnalystAgent — parallel)
+    evidence_scores:          Annotated[List[EvidenceScoring], add] = Field(default_factory=list)
+    chain_of_custody_issues:  Annotated[List[str], add]             = Field(default_factory=list)
 
-    # ── Legal Research ────────────────────────────────  (LegalResearcherAgent)
+    # ── Legal Research ────────────────────────────────  (LegalResearcherAgent — sequential)
     applied_principles: List[JudicialPrinciple] = Field(default_factory=list)
-    case_articles:      List[str]               = Field(default_factory=list)
+    case_articles:      List[dict]              = Field(default_factory=list)
 
-    # ── Confession Validity ───────────────────────────  (ConfessionValidityAgent)
-    confession_assessments: List[ConfessionAssessment] = Field(default_factory=list)
+    # ── Confession Validity ───────────────────────────  (ConfessionValidityAgent — parallel)
+    confession_assessments: Annotated[List[ConfessionAssessment], add] = Field(default_factory=list)
 
-    # ── Witness Credibility ───────────────────────────  (WitnessCredibilityAgent)
-    witness_credibility_scores: List[WitnessCredibility] = Field(default_factory=list)
+    # ── Witness Credibility ───────────────────────────  (WitnessCredibilityAgent — parallel)
+    witness_credibility_scores: Annotated[List[WitnessCredibility], add] = Field(default_factory=list)
 
-    # ── Prosecution Analysis ──────────────────────────  (ProsecutionAnalystAgent)
-    prosecution_theory:    Optional[ProsecutionNarrative] = None
-    prosecution_arguments: List[ProsecutionArgument]      = Field(default_factory=list)
+    # ── Prosecution Analysis ──────────────────────────  (ProsecutionAnalystAgent — sequential)
+    prosecution_theory:    Optional[ProsecutionNarrative]  = None
+    prosecution_arguments: List[ProsecutionArgument]       = Field(default_factory=list)
 
-    # ── Defense Analysis ──────────────────────────────  (DefenseAnalystAgent)
+    # ── Defense Analysis ──────────────────────────────  (DefenseAnalystAgent — sequential)
     defense_arguments: List[DefenseArgument] = Field(default_factory=list)
 
-    # ── Sentencing ────────────────────────────────────  (SentencingAgent) ✦ جديد
-    aggravating_factors:   List[str]                     = Field(default_factory=list)
-    mitigating_factors:    List[str]                     = Field(default_factory=list)
-    applicable_article_17: bool                          = Field(
-        default=False,
-        description="هل تنطبق المادة 17 عقوبات للتخفيف التقديري؟",
-    )
-    charge_conviction_map: Dict[str, Optional[str]]      = Field(
-        default_factory=dict,
-        description="وصف التهمة → 'إدانة' / 'براءة' / None إذا لم يُحسم",
-    )
-    civil_claim:           Optional[CivilClaim]          = None
-    civil_award_suggested: Optional[str]                 = Field(
-        default=None,
-        description="مبلغ التعويض المدني المقترح بالجنيه (نص)",
-    )
+    # ── Sentencing ────────────────────────────────────  (SentencingAgent — sequential)
+    aggravating_factors:   List[str]                = Field(default_factory=list)
+    mitigating_factors:    List[str]                = Field(default_factory=list)
 
-    # ── Final Verdict ─────────────────────────────────  (JudgeAgent)
+    @field_validator("aggravating_factors", "mitigating_factors", mode="before")
+    @classmethod
+    def coerce_factors(cls, v):
+        if not isinstance(v, list):
+            return v
+        return [
+            item.get("description", str(item)) if isinstance(item, dict) else item
+            for item in v
+        ]
+
+    applicable_article_17: bool                     = Field(default=False)
+    charge_conviction_map: Dict[str, Optional[str]] = Field(default_factory=dict)
+    civil_claim:           Optional[CivilClaim]     = None
+    civil_award_suggested: Optional[str]            = None
+
+    # ── Final Verdict ─────────────────────────────────  (JudgeAgent — sequential)
     suggested_verdict: Optional[FinalJudgment] = None
-
-    # ── Structured Verdict Sections ───────────────────  (JudgeAgent)
-    verdict_preamble:  Optional[str] = Field(
-        default=None,
-        description="البيانات الأولية للحكم (المحكمة / التاريخ / الأطراف)",
-    )
-    verdict_facts:     Optional[str] = Field(
-        default=None,
-        description="وقائع القضية كما استخلصتها المحكمة",
-    )
-    verdict_reasoning: Optional[str] = Field(
-        default=None,
-        description="أسباب الحكم التفصيلية",
-    )
-    verdict_operative: Optional[str] = Field(
-        default=None,
-        description="منطوق الحكم",
-    )
+    verdict_preamble:  Optional[str]           = None
+    verdict_facts:     Optional[str]           = None
+    verdict_reasoning: Optional[str]           = None
+    verdict_operative: Optional[str]           = None
 
     # ── Pipeline Status ───────────────────────────────
-    completed_agents: List[str]      = Field(default_factory=list)
-    current_agent:    Optional[str]  = None
-    errors:           List[str]      = Field(default_factory=list)
+    # Both written by every agent in every step → must use add reducer
+    completed_agents: Annotated[List[str], add] = Field(default_factory=list)
+    errors:           Annotated[List[str], add] = Field(default_factory=list)
+    current_agent:    Optional[str]             = None
+    last_updated:     Optional[datetime]        = Field(default_factory=datetime.now)
 
     # ── Metadata ──────────────────────────────────────
     source_documents: List[str]          = Field(default_factory=list)
-    last_updated:     Optional[datetime] = Field(default_factory=datetime.now)
     extraction_notes: Optional[str]      = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore")

@@ -39,7 +39,7 @@ def get_vector_store():
         return None
     try:
         from langchain_huggingface import HuggingFaceEmbeddings
-        from src.Vectorstore.vector_store_builder import build_vector_store, load_vector_store, filter_latest_versions
+        from src.Vectorstore.vector_store_builder import build_vector_store, load_vector_store
         from pathlib import Path
 
         embeddings = HuggingFaceEmbeddings(model_name=embed_model)
@@ -48,18 +48,23 @@ def get_vector_store():
         # If index exists, load it
         if index_faiss.exists():
             vs = load_vector_store(str(faiss_path), embeddings)
-            logger.info("VectorStore loaded")
+            logger.info("VectorStore loaded — %d vectors", vs.index.ntotal)
             return vs
 
         # If it does not exist, build it
         logger.warning("FAISS index not found - building now...")
-        from src.Chunking.chunking import get_chunks
+        from src.Chunking.chunking import get_na2d_chunks
 
-        chunks = get_chunks()
-        logger.info("📄 %d chunks loaded", len(chunks))
+        na2d = get_na2d_chunks()  # returns {"rulings": [...], "principles": [...]}
 
-        chunks = filter_latest_versions(chunks)
-        logger.info("📄 %d chunks after dedup", len(chunks))
+        chunks = na2d.get("rulings", []) + na2d.get("principles", [])
+
+        logger.info(
+            "📄 %d chunks loaded (rulings=%d, principles=%d)",
+            len(chunks),
+            len(na2d.get("rulings", [])),
+            len(na2d.get("principles", [])),
+        )
 
         if not chunks:
             logger.error("No chunks found - index will not be built")
