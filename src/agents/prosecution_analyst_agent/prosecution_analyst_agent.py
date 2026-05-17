@@ -9,7 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from src.Graph.state import AgentState
 from src.agents.agent_base import AgentBase
 from src.agents.prosecution_analyst_agent.prosecution_analyst_prompt import PROSECUTION_ANALYST_PROMPT
-from src.agents.Agents_output_models import (
+from src.agents.prosecution_analyst_agent.prosecution_analyst_output_model import (
     ProsecutionNarrative,
     ProsecutionArgument,
     ProsecutionArgumentStrength,

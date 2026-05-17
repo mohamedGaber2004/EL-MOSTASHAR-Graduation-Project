@@ -13,18 +13,16 @@ from src.Config.config import get_settings
 from langchain_huggingface import HuggingFaceEmbeddings
 
 
-from src.agents import (
-    DataIngestionAgent,
-    ProceduralAuditorAgent,
-    LegalResearcherAgent,
-    EvidenceAnalystAgent,
-    ConfessionValidityAgent,
-    WitnessCredibilityAgent,
-    ProsecutionAnalystAgent,
-    DefenseAnalystAgent,
-    SentencingAgent,
-    JudgeAgent,
-)
+from src.agents.data_ingestion_agent.data_ingestion_agent import DataIngestionAgent
+from src.agents.procedural_auditor_agent.procedural_auditor_agent import ProceduralAuditorAgent
+from src.agents.legal_research_agent.legal_researcher_agent import LegalResearcherAgent
+from src.agents.evidence_analyst_agent.evidence_analyst_agent import EvidenceAnalystAgent
+from src.agents.defense_analyst_agent.defense_analyst_agent import DefenseAnalystAgent
+from src.agents.confessoin_validity_agent.confession_validity_agent import ConfessionValidityAgent
+from src.agents.witness_credibility_agent.witness_credibility_agent import WitnessCredibilityAgent
+from src.agents.prosecution_analyst_agent.prosecution_analyst_agent import ProsecutionAnalystAgent
+from src.agents.sentencing_agent.sentencing_agent import SentencingAgent
+from src.agents.judge_agent.judge_agent import JudgeAgent
 
 logger = logging.getLogger(__name__)
 

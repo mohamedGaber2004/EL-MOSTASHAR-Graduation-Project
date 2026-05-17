@@ -6,7 +6,7 @@ from typing import Any
 
 from src.Graph.state import AgentState
 from src.agents.confessoin_validity_agent.confession_validity_prompt import CONFESSION_VALIDITY_PROMPT
-from src.agents.Agents_output_models import (
+from src.agents.confessoin_validity_agent.confession_validity_output_model import (
     ConfessionAssessment,
     ConfessionAdmissibilityStatus,
     CoercionType,

@@ -4,8 +4,8 @@ import logging
 from ..agent_base import AgentBase
 from langchain_core.messages import HumanMessage, SystemMessage
 from src.Graphstore.KG_builder import LegalKnowledgeGraph
-from src.Utils.Enums.agents_enums import AgentsEnums
-from src.agents.Agents_output_models import ProceduralAuditResult, ProceduralIssue, ExcludedDefenseClaim
+from src.agents.agents_enums import AgentsEnums
+from src.agents.procedural_auditor_agent.procedural_auditor_output_model import ProceduralAuditResult, ProceduralIssue, ExcludedDefenseClaim
 from src.Graph.state import AgentState
 from src.agents.procedural_auditor_agent.procedural_auditor_prompt import (
     PROCEDURAL_AUDITOR_AGENT_PROMPT,

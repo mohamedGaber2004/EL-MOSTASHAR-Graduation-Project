@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 from src.Graph.state import AgentState
-from src.agents.Agents_output_models import CivilClaim, CivilClaimStatus
+from src.agents.sentencing_agent.sentencing_output_model import CivilClaim, CivilClaimStatus
 from src.agents.sentencing_agent.sentencing_agent_prompt import  SENTENCING_PROMPT
 from src.agents.agent_base import AgentBase
 

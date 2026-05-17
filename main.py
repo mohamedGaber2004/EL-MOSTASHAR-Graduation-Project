@@ -6,8 +6,10 @@ from src.Config.config import get_settings
 from src.routers.case_router import router as case_router
 from src.routers.data_ingestion_router import data_ingestion_router
 from src.routers.chunking_router import chunking_router
-from src.routers.graph_rag_router import graph_rag_router
 from src.routers.kg_router import kg_router , get_graph
+from src.routers.kg_retriever_router import kg_retriever_router
+from src.routers.vs_router import vs_router
+from src.routers.vs_retriever_router import vs_retriever_router
 
 
 cfg = get_settings()
@@ -16,13 +18,9 @@ os.environ["LANGCHAIN_API_KEY"]     = cfg.LANGSMITH_API_KEY or ""
 os.environ["LANGCHAIN_ENDPOINT"]    = cfg.LANGSMITH_ENDPOINT or ""
 os.environ["LANGCHAIN_PROJECT"]     = cfg.LANGSMITH_PROJECT or ""
 
-
-
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield                        # app is running
+    yield
     graph = get_graph()
     if graph is not None:
         graph.close()
@@ -38,8 +36,10 @@ def read_root():
 app.include_router(case_router)
 app.include_router(data_ingestion_router)
 app.include_router(chunking_router)
-app.include_router(graph_rag_router)
 app.include_router(kg_router)
+app.include_router(kg_retriever_router)
+app.include_router(vs_router)
+app.include_router(vs_retriever_router)
 
 
 

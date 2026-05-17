@@ -109,16 +109,6 @@ class WitnessStatement(BaseModel):
     presence_at_scene:      Optional[bool]      = None # إن كان حاضراً في مكان الحادث.
     source_document_id:     Optional[str]       = None
 
-    @field_validator("key_facts_mentioned", mode="before")
-    @classmethod
-    def coerce_to_list(cls, v):
-        """LLM sometimes returns a string instead of a list — wrap it."""
-        if v is None:
-            return []
-        if isinstance(v, str):
-            return [v] if v.strip() else []
-        return v
-
 class Confession(BaseModel):
     """اعتراف / إنكار في محضر الاستجواب"""
     defendant_name:        Optional[str] = None  # اسم المتهم
@@ -154,13 +144,3 @@ class DefenseDocument(BaseModel):
     alibi_claimed:         bool                = False # إن ادّعى الدفاع صراحةً وجود المتهم في مكان آخر وقت الحادث.
     alibi_description:     Optional[str]       = None # وصف إن وُجد (المكان، الزمان، الشهود الداعمون).
     source_document_id:    Optional[str]       = None
-
-    @field_validator("defense_team", mode="before")
-    @classmethod
-    def coerce_defense_team(cls, v):
-        if not isinstance(v, list):
-            return v
-        return [
-            {"name": item} if isinstance(item, str) else item
-            for item in v
-        ]

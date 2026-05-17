@@ -1,7 +1,7 @@
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
-from src.Utils.Enums.agents_enums import (
+from src.agents.agents_enums import (
     WitnessReliabilityLevel
 )
 

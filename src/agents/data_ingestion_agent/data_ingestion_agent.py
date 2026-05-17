@@ -7,7 +7,7 @@ from typing import List, Optional, Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from ..agent_base import AgentBase
-from src.Utils.Enums.agents_enums import AgentsEnums, LegalDocType
+from src.agents.agents_enums import AgentsEnums, LegalDocType
 from src.agents.data_ingestion_agent.data_ingestion_prompt import (
     DATA_INGESTION_AGENT_PROMPT_mahdar_dabt,
     DATA_INGESTION_AGENT_PROMPT_mahdar_istijwab,

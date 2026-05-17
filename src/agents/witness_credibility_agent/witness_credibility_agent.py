@@ -6,7 +6,7 @@ from typing import Any
 
 from src.Graph.state import AgentState
 from src.agents.witness_credibility_agent.witness_credibility_prompt import WITNESS_CREDIBILITY_PROMPT
-from src.agents.Agents_output_models import (
+from src.agents.witness_credibility_agent.witness_credibility_output_model import (
     WitnessCredibility,
     WitnessReliabilityLevel,
 )

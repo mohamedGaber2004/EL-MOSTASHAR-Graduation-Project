@@ -25,9 +25,6 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # DATA STRUCTURES
 # =============================================================================
-
-
-
 @dataclass
 class Amendment:
     amendment_id:            str
@@ -38,7 +35,6 @@ class Amendment:
     amended_article_numbers: List[str]      = field(default_factory=list)
     description:             Optional[str]  = None
     effective_date:          Optional[str]  = None
-
 @dataclass
 class ExtractedLaw:
     law_meta:    Dict[str, Any]
@@ -48,7 +44,6 @@ class ExtractedLaw:
     references:  List[Dict[str, Any]]
     topics:      List[Dict[str, Any]]
     amendments:  List[Amendment] = field(default_factory=list)
-
 
 # =============================================================================
 # LAW EXTRACTOR
@@ -86,7 +81,6 @@ class LawExtractor:
         for old, new in norm_regu.NORMALIZING_ARABIC_LITTERS.value:
             text = text.replace(old, new)
         return re.sub(r"\s+", " ", text).strip()
-
 
     def _articles(self) -> List[Dict]:
         text    = self.raw_text

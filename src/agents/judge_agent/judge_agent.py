@@ -5,7 +5,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..agent_base import AgentBase
 from src.agents.judge_agent.judge_agent_prompt import JUDGE_AGENT_PROMPT, EXPECTED_OUTPUT_SCHEMA
-from src.agents.Agents_output_models import FinalJudgment
+from src.agents.judge_agent.judge_agent_output_model import FinalJudgment
 
 logger = logging.getLogger(__name__)
 
