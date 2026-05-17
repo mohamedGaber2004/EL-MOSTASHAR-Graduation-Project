@@ -8,64 +8,46 @@ from pydantic import BaseModel, field_validator
 
 class Defendant(BaseModel):
     """متهم في القضية"""
-    name:               Optional[str] = None
-    alias:              Optional[str] = None
-    national_id:        Optional[str] = None
+    name:               Optional[str] = None   # الاسم
+    alias:              Optional[str] = None   # اسم الشهره
+    national_id:        Optional[str] = None   # الرقم القومي
     gender:             Optional[str] = None   # ذكر / أنثى
-    date_of_birth:      Optional[str] = None
-    age:                Optional[int] = None
-    occupation:         Optional[str] = None
-    nationality:        Optional[str] = None
-    address:            Optional[str] = None
+    date_of_birth:      Optional[str] = None   # الميلاد
+    age:                Optional[int] = None   # السن
+    occupation:         Optional[str] = None   # العمل
+    nationality:        Optional[str] = "مصري" # الجنسيه
+    address:            Optional[str] = None   # العنوان
     complicity_role:    Optional[str] = None   # فاعل أصلي / شريك / محرّض / متدخل
-    source_document_id: Optional[str] = None
-
-
-class CriminalRecord(BaseModel):
-    """صحيفة السوابق الجنائية لمتهم"""
-    defendant_name:     Optional[str] = None
-    record_summary:     Optional[str] = None   # ملخص مختصر لمحتوى الصحيفة
-    prior_cases:        List[str]     = Field(default_factory=list)  # قضايا سابقة إن ذُكرت
-    source_document_id: Optional[str] = None
-
-
-class CriminalProceedings(BaseModel):
-    procedure_type:     Optional[str] = None   # ضبط / قبض / استجواب / تفتيش
-    description:        Optional[str] = None
-    conducting_officer: Optional[str] = None
-    warrant_present:    bool          = False
     source_document_id: Optional[str] = None
 
 
 class Charge(BaseModel):
     """تهمة موجهة"""
-    law_code:               Optional[str] = None   # قانون العقوبات / قانون المخدرات …
-    article_number:         Optional[str] = None
-    description:            Optional[str] = None
-    incident_type:          Optional[str] = None
-    charge_classification:  Optional[str] = None   # جناية / جنحة / مخالفة
-    attempt_flag:           bool          = False
-    charge_date:            Optional[str] = None
-    charge_location:        Optional[str] = None
-    linked_defendant_names: List[str]     = Field(default_factory=list)
-    complicity_role:        Optional[str] = None
+    law_code:               Optional[str] = None # قانون العقوبات / قانون المخدرات …
+    article_number:         Optional[str] = None # رقم الماده
+    description:            Optional[str] = None # وصف التهمه
+    incident_type:          Optional[str] = None # نوع الجريمة
+    charge_classification:  Optional[str] = None # جناية / جنحة / مخالفة
+    attempt_flag:           bool          = False # شروع ام لا
+    charge_date:            Optional[str] = None # التاريخ
+    charge_location:        Optional[str] = None # المكان
+    linked_defendant_names: List[str]     = Field(default_factory=list) # اسم المتهم
     source_document_id:     Optional[str] = None
 
 
 class CaseIncident(BaseModel):
     """واقعة / حادثة"""
-    incident_type:        Optional[str] = None
-    incident_date:        Optional[str] = None
-    incident_location:    Optional[str] = None
-    incident_description: Optional[str] = None
-    perpetrator_names:    List[str]     = Field(default_factory=list)
-    victim_names:         List[str]     = Field(default_factory=list)
+    incident_type:        Optional[str] = None # نوع الجريمة
+    incident_date:        Optional[str] = None # التاريخ
+    incident_location:    Optional[str] = None # المكان
+    incident_description: Optional[str] = None # وصف الجريمه
+    perpetrator_names:    List[str]     = Field(default_factory=list) # اسماء الجناه
+    victim_names:         List[str]     = Field(default_factory=list) # اسماء المجني عليهم
     source_document_id:   Optional[str] = None
     @field_validator("incident_date", mode="before")
     @classmethod
     def coerce_date(cls, v):
         if isinstance(v, dict):
-            # ✅ convert range to readable string
             start = v.get("start", "")
             end   = v.get("end", "")
             if start and end:
@@ -77,52 +59,36 @@ class CaseIncident(BaseModel):
 class Evidence(BaseModel):
     """دليل مادي / إجرائي (حرز)"""
     evidence_type:           Optional[str] = None   # سلاح / مخدر / مستند / هاتف …
-    description:             Optional[str] = None
+    description:             Optional[str] = None   # وصف الحرز المختصر
     detailed_text:           Optional[str] = None   # النص الكامل للوصف كما ورد في المحضر
-    seizure_date:            Optional[str] = None
-    seizure_location:        Optional[str] = None
+    seizure_date:            Optional[str] = None   # تاريخ ووقت الضبط
+    seizure_location:        Optional[str] = None   # مكان الضبط
     seized_by:               Optional[str] = None   # اسم وصفة الضابط
-    seizure_warrant_present: bool          = False
-    linked_defendant_name:   Optional[str] = None
+    seizure_warrant_present: bool          = False  # وجود امر او اذن نيابه
+    linked_defendant_name:   Optional[str] = None   # اسم المتهم الذي ضُبط الحرز بحوزته.
     source_document_id:      Optional[str] = None
 
 
 class EvidenceItem(BaseModel):
-    description: str
-    evidence_number: Optional[str] = None
-
-class FingerprintAnalysis(BaseModel):
-    fingerprint_location: str
-    fingerprint_type: str
-    match_percentage: float
-    match_status: str
-
-class FacialRecognitionAnalysis(BaseModel):
-    source: str
-    match_percentage: float
-    observations: list[str]
-
-class WalletAnalysis(BaseModel):
-    description_match: str
-    contents: list[str]
-
-class LabResult(BaseModel):
-    fingerprint_analysis: Optional[FingerprintAnalysis] = None
-    facial_recognition_analysis: Optional[FacialRecognitionAnalysis] = None
-    wallet_analysis: Optional[WalletAnalysis] = None
+    description: str                      # وصف العنصر المُرسَل للتحليل
+    evidence_number: Optional[str] = None # رقم الحرز المُسجَّل في محضر الضبط
 
 class LabReport(BaseModel):
-    report_type: str
-    report_number: str
-    examination_date: str
-    examiner_name: str
-    prosecutor_name: str
-    items_sent_for_analysis: list[EvidenceItem]
-    result: LabResult
-
+    report_type:     str # نوع التقرير (طبي شرعي / كيميائي / بلستي / غيره)
+    report_number:   str # رقم التقرير الرسمي الصادر من المعمل
+    examination_date:str # تاريخ إجراء الفحص بالمعمل
+    examiner_name:   str # اسم الخبير أو الطبيب الشرعي المُجري للفحص
+    prosecutor_name: str # اسم عضو النيابة الآمر بالفحص 
+    items_sent_for_analysis: list[EvidenceItem] = Field(default_factory=list) # قائمة العناصر المُرسَلة للمعمل للتحليل (أحراز، مستندات، تسجيلات)
+    result: Optional[str] = None # نتائج التحليل المختلفة (بصمات، فيديو، فحص مادي) — null لو لم تصدر نتائج بعد
+    linked_defendant_name: Optional[str] = None # اسم المتهم المرتبط بهذا التقرير لربطه بملفه في القضية
+    source_document_id: Optional[str] = None
+    
     @field_validator("items_sent_for_analysis", mode="before")
     @classmethod
     def coerce_items(cls, v):
+        if not isinstance(v, list):
+            return []
         coerced = []
         for item in v:
             if isinstance(item, str):
@@ -130,21 +96,17 @@ class LabReport(BaseModel):
             elif isinstance(item, dict):
                 coerced.append(item)
         return coerced
-    
-    linked_defendant_name: Optional[str] = None
-    source_document_id: Optional[str] = None
-
 
 class WitnessStatement(BaseModel):
-    witness_name:           Optional[str]       = None
-    occupation:             Optional[str]       = None
-    id_number:              Optional[str]       = None
-    relation_to_defendant:  Optional[str]       = None
-    statement_date:         Optional[str]       = None
-    was_sworn_in:           Optional[bool]      = None
-    presence_at_scene:      Optional[bool]      = None
-    key_facts_mentioned:    List[str]           = []   # ← was bare List[str] with no coercion
-    age:                    Optional[int]       = None
+    witness_name:           Optional[str]       = None # اسم الشاهد
+    witness_type:           Optional[str]       = None # ['عيان','ضابط','مخبر']
+    occupation:             Optional[str]       = None # العمل
+    id_number:              Optional[str]       = None # رقم الكارنيه او البطاقه
+    relation_to_defendant:  Optional[str]       = None # علاقته بالمتهم
+    statement_date:         Optional[str]       = None # تاريخ الإدلاء بالشهادة.
+    statement_summary:      Optional[str]       = None # ملخص كل سؤال و اجابته ليتم تقييمهم لاحقا
+    was_sworn_in:           Optional[bool]      = None # إن صُرِّح بأداء اليمين.
+    presence_at_scene:      Optional[bool]      = None # إن كان حاضراً في مكان الحادث.
     source_document_id:     Optional[str]       = None
 
     @field_validator("key_facts_mentioned", mode="before")
@@ -157,34 +119,40 @@ class WitnessStatement(BaseModel):
             return [v] if v.strip() else []
         return v
 
-
 class Confession(BaseModel):
     """اعتراف / إنكار في محضر الاستجواب"""
-    defendant_name:        Optional[str] = None
-    text:                  Optional[str] = None   # ملخص موقف المتهم
-    confession_date:       Optional[str] = None
-    confession_stage:      Optional[str] = None   # تحقيق / محكمة
-    legal_counsel_present: bool          = False
-    coercion_claimed:      bool          = False
-    voluntary:             bool          = True
-    key_admissions:        List[str]     = Field(default_factory=list)
+    defendant_name:        Optional[str] = None  # اسم المتهم
+    text:                  Optional[str] = None  # ملخص موقف المتهم
+    confession_date:       Optional[str] = None  # تاريخ الاستجواب
+    confession_stage:      Optional[str] = None  # تحقيق / محكمة
+    legal_counsel_present: bool          = False # حضور المحامي ام لا
+    coercion_claimed:      bool          = False # تعرض لتهديد او اكراه
+    key_admissions:        List[str]     = Field(default_factory=list) # نقاط أقرّ بها المتهم حتى لو كان إنكاره جزئياً.
     source_document_id:    Optional[str] = None
 
 
-class DefenseLawyer(BaseModel):
-    name: str
-    bar_association: Optional[str] = None
-    registration_number: Optional[str] = None
+class CriminalRecord(BaseModel):
+    """صحيفة السوابق الجنائية لمتهم"""
+    defendant_name:     Optional[str] = None                         # اسم المتهم
+    record_summary:     Optional[str] = None                         # ملخص مختصر لمحتوى الصحيفة
+    prior_cases:        List[str]     = Field(default_factory=list)  # قضايا سابقة إن ذُكرت
+    source_document_id: Optional[str] = None
+
+class CriminalProceedings(BaseModel):
+    procedure_type:     Optional[str] = None  # ضبط / قبض / استجواب / تفتيش
+    description:        Optional[str] = None  # الوصف
+    warrant_present:    bool          = False # false إن كان الإذن غائباً
+    conducting_officer: Optional[str] = None  # اسم وصفة الضابط المعني.
+    source_document_id: Optional[str] = None
 
 class DefenseDocument(BaseModel):
-    submitted_by:          Optional[str]       = None
-    defendant_name:        Optional[str]       = None
-    defense_team:          List[DefenseLawyer] = Field(default_factory=list)
-    formal_defenses:       List[str]           = Field(default_factory=list)
-    substantive_defenses:  List[str]           = Field(default_factory=list)
-    supporting_principles: List[str]           = Field(default_factory=list)
-    alibi_claimed:         bool                = False
-    alibi_description:     Optional[str]       = None
+    submitted_by:          Optional[str]       = None # اسم المحامي مُقدِّم المذكرة.
+    defendant_name:        Optional[str]       = None # اسم المتهم المدافَع عنه.
+    formal_defenses:       List[str]           = Field(default_factory=list) # (تتعلق بصحة الإجراءات لا بموضوع الجريمة).
+    substantive_defenses:  List[str]           = Field(default_factory=list) # الدفوع الموضوعية (تتعلق بأركان الجريمة وعدم توافرها).
+    supporting_principles: List[str]           = Field(default_factory=list) # مبادئ محكمة النقض والمواد القانونية التي استند إليها الدفاع.
+    alibi_claimed:         bool                = False # إن ادّعى الدفاع صراحةً وجود المتهم في مكان آخر وقت الحادث.
+    alibi_description:     Optional[str]       = None # وصف إن وُجد (المكان، الزمان، الشهود الداعمون).
     source_document_id:    Optional[str]       = None
 
     @field_validator("defense_team", mode="before")
