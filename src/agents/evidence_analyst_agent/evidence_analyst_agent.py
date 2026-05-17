@@ -3,9 +3,9 @@ import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from typing import Any, Dict
-from .agent_base import AgentBase
-from src.Graph.states_and_schemas.state import AgentState
-from src.Prompts.evidence_analyst_agent import (
+from ..agent_base import AgentBase
+from src.Graph.state import AgentState
+from src.agents.evidence_analyst_agent.evidence_analyst_prompt import (
     EVIDENCE_ANALYST_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
 )

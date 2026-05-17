@@ -3,9 +3,9 @@ import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from .agent_base import AgentBase
-from src.Graph.states_and_schemas.state import AgentState
-from src.Prompts.defense_analysis_agent import (
+from ..agent_base import AgentBase
+from src.Graph.state import AgentState
+from src.agents.defense_analyst_agent.defense_analysis_prompt import (
     DEFENSE_ANALYSIS_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
 )

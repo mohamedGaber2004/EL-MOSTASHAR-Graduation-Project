@@ -4,9 +4,9 @@ import json
 import logging
 from typing import Any
 
-from src.Graph.states_and_schemas.state import AgentState
-from src.Prompts.confession_validity_agent import CONFESSION_VALIDITY_PROMPT
-from src.Graph.states_and_schemas.Agents_output_models import (
+from src.Graph.state import AgentState
+from src.agents.confessoin_validity_agent.confession_validity_prompt import CONFESSION_VALIDITY_PROMPT
+from src.agents.Agents_output_models import (
     ConfessionAssessment,
     ConfessionAdmissibilityStatus,
     CoercionType,

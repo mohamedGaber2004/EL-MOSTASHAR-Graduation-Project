@@ -5,7 +5,7 @@ from typing import Any, Callable, List, Dict
 from src.Config import get_settings
 from src.Graph.shared_resources import get_vector_store 
 from src.Utils.Enums.agents_enums import AgentsEnums
-from src.Graph.states_and_schemas.state import AgentState
+from src.Graph.state import AgentState
 from src.Config.log_config import logging
 
 try:
@@ -101,7 +101,7 @@ class AgentBase:
         Validate each entity list in `data` using the appropriate Pydantic model.
         Falls back to including the raw item dict if validation fails.
         """
-        from src.Graph.states_and_schemas.main_entity_classes import (
+        from src.Graph.main_entity_classes import (
             Charge,
             CaseIncident,
             Confession,

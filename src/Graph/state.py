@@ -6,7 +6,17 @@ from operator import add
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import field_validator
 
-from src.Graph.states_and_schemas.main_entity_classes import (
+from src.agents.procedural_auditor_agent.procedural_auditor_output_model import ProceduralAuditResult
+from src.agents.evidence_analyst_agent.evidence_analyst_output_model import EvidenceScoring
+from src.agents.legal_research_agent.legal_research_output_model import JudicialPrinciple
+from src.agents.confessoin_validity_agent.confession_validity_output_model import ConfessionAssessment
+from src.agents.witness_credibility_agent.witness_credibility_output_model import WitnessCredibility
+from src.agents.prosecution_analyst_agent.prosecution_analyst_output_model import ProsecutionNarrative, ProsecutionArgument
+from src.agents.defense_analyst_agent.defense_analyst_output_model import DefenseArgument
+from src.agents.sentencing_agent.sentencing_output_model import CivilClaim
+from src.agents.judge_agent.judge_agent_output_model import FinalJudgment
+
+from src.Graph.main_entity_classes import (
     Charge,
     CaseIncident,
     Confession,
@@ -19,18 +29,7 @@ from src.Graph.states_and_schemas.main_entity_classes import (
     CriminalProceedings,
 )
 
-from src.Graph.states_and_schemas.Agents_output_models import (
-    DefenseArgument,
-    EvidenceScoring,
-    FinalJudgment,
-    JudicialPrinciple,
-    ProceduralAuditResult,
-    ProsecutionNarrative,
-    ProsecutionArgument,
-    ConfessionAssessment,
-    WitnessCredibility,
-    CivilClaim,
-)
+
 
 
 class AgentState(BaseModel):
@@ -98,7 +97,6 @@ class AgentState(BaseModel):
     verdict_operative: Optional[str]           = None # منطوق الحكم، يعني الجزء اللي بيُنطق به في قاعة المحكمة:
 
     # ── Pipeline Status ───────────────────────────────
-    # Both written by every agent in every step → must use add reducer
     completed_agents: Annotated[List[str], add] = Field(default_factory=list) #
     errors:           Annotated[List[str], add] = Field(default_factory=list) #
     current_agent:    Optional[str]             = None #

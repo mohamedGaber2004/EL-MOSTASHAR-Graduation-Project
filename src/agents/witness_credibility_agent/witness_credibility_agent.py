@@ -4,9 +4,9 @@ import json
 import logging
 from typing import Any
 
-from src.Graph.states_and_schemas.state import AgentState
-from src.Prompts.witness_credibility_agent import WITNESS_CREDIBILITY_PROMPT
-from src.Graph.states_and_schemas.Agents_output_models import (
+from src.Graph.state import AgentState
+from src.agents.witness_credibility_agent.witness_credibility_prompt import WITNESS_CREDIBILITY_PROMPT
+from src.agents.Agents_output_models import (
     WitnessCredibility,
     WitnessReliabilityLevel,
 )

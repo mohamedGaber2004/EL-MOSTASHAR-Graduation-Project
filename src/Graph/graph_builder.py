@@ -7,7 +7,7 @@ import functools
 
 from langgraph.graph import END, START, StateGraph
 
-from src.Graph.states_and_schemas.state import AgentState
+from src.Graph.state import AgentState
 from src.Graph.shared_resources import get_kg, get_vector_store
 from src.Config.config import get_settings
 from langchain_huggingface import HuggingFaceEmbeddings

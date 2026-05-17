@@ -7,7 +7,7 @@ import os , logging
 logger = logging.getLogger(__name__)
 
 from src.Graph.graph_builder import run_case
-from src.Graph.states_and_schemas.state import AgentState
+from src.Graph.state import AgentState
 
 
 # Create router

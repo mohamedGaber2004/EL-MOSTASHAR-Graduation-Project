@@ -3,11 +3,11 @@ import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from .agent_base import AgentBase
+from ..agent_base import AgentBase
 from src.Graphstore.KG_builder import LegalKnowledgeGraph
 from src.Utils.Enums.agents_enums import AgentsEnums
-from src.Graph.states_and_schemas.state import AgentState
-from src.Prompts.legal_researcher_agent import (
+from src.Graph.state import AgentState
+from src.agents.legal_research_agent.legal_researcher_prompt import (
     LEGAL_RESEARCHER_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
 )

@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import List, Optional, Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from .agent_base import AgentBase
+from ..agent_base import AgentBase
 from src.Utils.Enums.agents_enums import AgentsEnums, LegalDocType
-from src.Prompts.data_ingestion_agent import (
+from src.agents.data_ingestion_agent.data_ingestion_prompt import (
     DATA_INGESTION_AGENT_PROMPT_mahdar_dabt,
     DATA_INGESTION_AGENT_PROMPT_mahdar_istijwab,
     DATA_INGESTION_AGENT_PROMPT_aqual_shuhud,
@@ -325,7 +325,7 @@ class DataIngestionAgent(AgentBase):
         Pydantic models inside lists are constructed here so AgentState
         receives typed objects rather than raw dicts.
         """
-        from src.Graph.states_and_schemas.main_entity_classes import (
+        from src.Graph.main_entity_classes import (
             Defendant, Charge, CaseIncident, Evidence, LabReport,
             WitnessStatement, Confession,DefenseDocument, CriminalRecord, CriminalProceedings,
         )

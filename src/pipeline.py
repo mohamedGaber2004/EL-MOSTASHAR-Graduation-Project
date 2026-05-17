@@ -11,7 +11,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from src.Chunking.chunking import get_chunks, get_na2d_chunks
 from src.Vectorstore.vector_store_builder import build_vector_store, load_vector_store
 from src.Config import get_settings
-from src.Graph.states_and_schemas.state import AgentState
+from src.Graph.state import AgentState
 
 logger = logging.getLogger(__name__)
 

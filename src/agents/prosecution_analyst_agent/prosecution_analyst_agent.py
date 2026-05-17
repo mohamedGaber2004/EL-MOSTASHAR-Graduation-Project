@@ -6,10 +6,10 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.Graph.states_and_schemas.state import AgentState
+from src.Graph.state import AgentState
 from src.agents.agent_base import AgentBase
-from src.Prompts.prosecution_analyst_agent import PROSECUTION_ANALYST_PROMPT
-from src.Graph.states_and_schemas.Agents_output_models import (
+from src.agents.prosecution_analyst_agent.prosecution_analyst_prompt import PROSECUTION_ANALYST_PROMPT
+from src.agents.Agents_output_models import (
     ProsecutionNarrative,
     ProsecutionArgument,
     ProsecutionArgumentStrength,
