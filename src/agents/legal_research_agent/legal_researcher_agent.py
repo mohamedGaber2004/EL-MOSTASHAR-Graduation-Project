@@ -3,10 +3,10 @@ import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from ..agent_base import AgentBase
+from ..agent_base.agent_base import AgentBase
 from src.Graphstore.KG_builder import LegalKnowledgeGraph
-from src.agents.agents_enums import AgentsEnums
 from src.Graph.state import AgentState
+from src.routers.kg_retriever_router import kg_retrieve
 from src.agents.legal_research_agent.legal_researcher_prompt import (
     LEGAL_RESEARCHER_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
@@ -34,76 +34,73 @@ class LegalResearcherAgent(AgentBase):
             "_fallback":          True,
         }
 
-    # ── ANN query ────────────
-    _CHARGE_ANN_QUERY = """
-        CALL db.index.vector.queryNodes('article_embeddings', $k, $query_vector)
-        YIELD node AS article, score
-        RETURN
-            article.article_id     AS article_id,
-            article.article_number AS article_number,
-            article.law_id         AS law_id,
-            article.text           AS text,
-            score
-        ORDER BY score DESC
-    """
-
     def _retrieve_articles_for_charge(self,text: str, k: int= 15, threshold: float = 0.45) -> list[dict]:
         if self.kg is None or self.embeddings is None:
             logger.warning("KG or embeddings not available — skipping article retrieval")
             return []
 
         try:
-            query_vector = self.embeddings.embed_query(text)
+            clean_query = self.query_transformation(text)['article_text']
         except Exception as e:
-            logger.warning("embed_query failed for [%s...]: %s", text[:60], e)
-            return []
+            logger.warning("query_transformation failed for [%s...]: %s", text[:60], e)
+            return ""
 
         try:
-            with self.kg.driver.session() as s:
-                records = s.run(
-                    self._CHARGE_ANN_QUERY,
-                    k=k,
-                    query_vector=query_vector,
-                ).data()
+            records = records = kg_retrieve(
+                req = {
+                    "question":clean_query,
+                    "k":k,
+                    "threshold":threshold
+                }
+            )
         except Exception as e:
-            logger.warning("ANN query failed for [%s...]: %s", text[:60], e)
+            logger.warning("kg retriver failed for [%s...]: %s", text[:60], e)
             return []
 
         articles = [
             {
-                "article_number":     str(r["article_number"]),
-                "law_id":             str(r["law_id"]),
-                "article_id":         str(r["article_id"]),
-                "text":               str(r["text"])[:400],
+                "Article Number":         str(r["article_number"]),
+                "law_id":                 str(r["law_id"]),
+                "The Law of the Article": str(r["article_id"]),
+                "The Article Text":       str(r["text"]),
             }
-            for r in records
+            for r in records['sources']
             if r.get("article_number") and float(r.get("score", 0)) >= threshold
         ]
 
-        logger.info(
-            "ANN retrieval — text=[%s...] | law=%s | hits=%d (threshold=%.2f)",
-            text[:60], len(articles), threshold,
-        )
+        logger_content = records.query + records.article_count + records.table_count 
+        logger.info(str(logger_content))
+    
         return articles
 
     def _build_charge_query_text(self, charge) -> str:
         """Compose a single query string from a charge's descriptive fields."""
+        
+        if getattr(charge, "law_code", None):
+            law_code = (charge.law_code)
+        if getattr(charge, "article_number",None):
+            article_number = (charge.article_number)
+        prompt = f"{law_code} - {article_number}"
+        return prompt
+
+    def _build_charge_query_text_for_principles(self,charge):
         parts = []
-        if getattr(charge, "description", None):
-            parts.append(charge.description)
-        if getattr(charge, "incident_type", None):
-            parts.append(charge.incident_type)
         if getattr(charge, "law_code", None):
             parts.append(charge.law_code)
-        return " — ".join(parts)
+        if getattr(charge, "article_number",None):
+            parts.append(charge.article_number)
+        if getattr(charge,"description",None):
+            parts.append(charge.description)
+        if getattr(charge,"incident_type",None):
+            parts.append(charge.incident_type)
+        if getattr(charge,"charge_classification",None):
+            parts.append(charge.charge_classification)
+        if getattr(charge,"attempt_flag",None):
+            parts.append(charge.attempt_flag)
+        return "---".join(parts)
 
     # ── KG retrieval: accumulate unique articles across all charges ────
     def _resolve_articles_for_charges(self, charges: list) -> list[dict]:
-        """
-        For every charge, build a query text, resolve its law_id,
-        run the ANN query, and accumulate unique articles.
-        Mirrors ProceduralAuditorAgent._resolve_article_numbers.
-        """
         seen:   set[str]   = set()
         result: list[dict] = []
 
@@ -112,9 +109,6 @@ class LegalResearcherAgent(AgentBase):
             if not query_text.strip():
                 logger.warning("Skipping charge with no queryable text: %s", charge)
                 continue
-
-            law_code = getattr(charge, "law_code", None)
-            law_id   = AgentsEnums.law_code_to_kg_id(law_code) if law_code else None
 
             for article in self._retrieve_articles_for_charge(text=query_text):
                 key = article["article_number"]
@@ -146,20 +140,22 @@ class LegalResearcherAgent(AgentBase):
         def _accumulate(query_text: str, source: str) -> None:
             if not query_text or not query_text.strip():
                 return
-            docs = self.retrieve_principles(query_text, self.vs)
-            for doc in docs:
+            
+            transformed_query = self.query_transformation(query_text)['principle_query']
+            docs = self.retrieve_principles(transformed_query, self.vs)
+            for doc in docs['hits']:
                 text = doc.page_content if hasattr(doc, "page_content") else str(doc)
                 key  = text[:80]
                 if key not in seen:
                     seen.add(key)
                     result.append({
-                        "principle_text": text,                                          # ✅ matches model
-                        "court_source":   doc.metadata.get("source_file", None) if hasattr(doc, "metadata") else None,
-                        "applicable_to":  source,                                        # charge / violation / incident
+                        "principle_text": text,
+                        "court_source": doc.metadata.get("source_file", None) if hasattr(doc, "metadata") else None,
+                        "applicable_to":  source,
                     })
 
         for charge in charges:
-            _accumulate(self._build_charge_query_text(charge), "charge")
+            _accumulate(self._build_charge_query_text_for_principles(charge), "charge")
 
         for violation in procedural_violations:
             issue_desc = (
@@ -189,7 +185,7 @@ class LegalResearcherAgent(AgentBase):
             {
                 "charges": [
                     {
-                        "statute":     getattr(c, "statute", None),
+                        "incident_type":     getattr(c, "incident_type", None),
                         "description": getattr(c, "description", None),
                     }
                     for c in (state.charges or [])
@@ -224,8 +220,6 @@ class LegalResearcherAgent(AgentBase):
             "## صيغة الإجابة (JSON فقط — بلا مقدمة ولا شرح خارج JSON):\n"
             f"{EXPECTED_OUTPUT_SCHEMA}"
         )
-
-
 
     # ── main entry ────────────────────────────────────────────────────
     def run(self, state):

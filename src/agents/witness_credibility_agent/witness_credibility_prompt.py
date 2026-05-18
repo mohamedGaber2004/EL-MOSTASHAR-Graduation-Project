@@ -35,8 +35,7 @@ WITNESS_CREDIBILITY_PROMPT = """
       "reliability_reasoning": "التسبيب الموجز",
       "weight_in_case": "ركيزة أساسية | مساند | استئناسي | يُهمَل"
     }}
-  ],
-  "witness_summary": "ملخص تأثير مجموع الشهادات على القضية"
+  ]
 }}
 ```
 

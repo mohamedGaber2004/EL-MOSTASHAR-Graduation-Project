@@ -20,7 +20,7 @@ class DI_enums(Enum) :
         "defendants", "charges", "incidents", "evidences",
         "lab_reports", "witness_statements", "confessions",
         "criminal_records", "defense_documents",
-        "defense_procedural_issues", "procedural_issues",
+        "criminal_proceedings", "procedural_issues",
     }
 
     LIST_DEDUP: dict[str, tuple[str, ...]] = {
@@ -33,7 +33,6 @@ class DI_enums(Enum) :
         "confessions":               ("defendant_name", "confession_date", "text"),
         "criminal_proceedings":      ("procedure_type", "description", "conducting_officer"),
         "procedural_issues":         ("procedure_type", "issue_description"),
-        "defense_procedural_issues": ("procedure_type", "issue_description"),
         "criminal_records":          ("defendant_name",),
         "defense_documents":         ("submitted_by", "defendant_name"),
     }

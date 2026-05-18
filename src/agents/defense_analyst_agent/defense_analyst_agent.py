@@ -3,14 +3,16 @@ import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from ..agent_base import AgentBase
+from ..agent_base.agent_base import AgentBase
 from src.Graph.state import AgentState
+from src.agents.defense_analyst_agent.defense_analyst_output_model import DefenseAnalysis
 from src.agents.defense_analyst_agent.defense_analysis_prompt import (
     DEFENSE_ANALYSIS_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
 )
 
 logger = logging.getLogger(__name__)
+
 
 class DefenseAnalystAgent(AgentBase):
     """
@@ -19,7 +21,7 @@ class DefenseAnalystAgent(AgentBase):
     INPUT : defense_documents[], procedural_issues[], confession_assessments[],
             witness_credibility_scores[], evidence_scores[], applied_principles[],
             prosecution_theory
-    OUTPUT: defense_arguments[]
+    OUTPUT: defense_arguments[]  (List[DefenseArgument])
     """
 
     def __init__(self):
@@ -51,14 +53,14 @@ class DefenseAnalystAgent(AgentBase):
 
         nullities = [
             {
-                "procedure_source":  p.procedure_source,
-                "procedure_type":    p.procedure_type,
-                "issue_description": p.issue_description,
-                "warrant_present":   p.warrant_present,
-                "conducting_officer":p.conducting_officer,
-                "nullity_type":      p.nullity_type,
-                "nullity_effect":    p.nullity_effect,
-                "article_basis":     p.article_basis,
+                "procedure_source":   p.procedure_source,
+                "procedure_type":     p.procedure_type,
+                "issue_description":  p.issue_description,
+                "warrant_present":    p.warrant_present,
+                "conducting_officer": p.conducting_officer,
+                "nullity_type":       p.nullity_type,
+                "nullity_effect":     p.nullity_effect,
+                "article_basis":      p.article_basis,
             }
             for p in violations
             if p.nullity_type
@@ -71,30 +73,25 @@ class DefenseAnalystAgent(AgentBase):
         ]
 
         return {
-            # ── procedural layer ──────────────────────────────────────────
-            "procedural_nullities":    nullities,
-            "critical_nullities":      audit.critical_nullities or [],
-            "overall_audit_assessment":audit.overall_assessment,
-            "excluded_defense_claims": [
+            "procedural_nullities":      nullities,
+            "critical_nullities":        audit.critical_nullities or [],
+            "overall_audit_assessment":  audit.overall_assessment,
+            "excluded_defense_claims":   [
                 {"claim": c.claim, "reason": c.reason}
                 for c in (audit.excluded_defense_claims or [])
             ],
-            "invalidated_evidence":    invalidated_ids,
-            # ── evidence layer ────────────────────────────────────────────
-            "evidence_scores":         [self._safe_dump(s) for s in (state.evidence_scores or [])],
-            "chain_of_custody_issues": state.chain_of_custody_issues or [],
-            # ── credibility layer ─────────────────────────────────────────
-            "confession_assessments":     [self._safe_dump(c) for c in (state.confession_assessments or [])],
-            "witness_credibility_scores": [self._safe_dump(w) for w in (state.witness_credibility_scores or [])],
-            # ── legal layer ───────────────────────────────────────────────
-            "case_articles": [                                   # ← was missing
+            "invalidated_evidence":      invalidated_ids,
+            "evidence_scores":           [self._safe_dump(s) for s in (state.evidence_scores or [])],
+            "chain_of_custody_issues":   state.chain_of_custody_issues or [],
+            "confession_assessments":    [self._safe_dump(c) for c in (state.confession_assessments or [])],
+            "witness_credibility_scores":[self._safe_dump(w) for w in (state.witness_credibility_scores or [])],
+            "case_articles": [
                 a.get("article_number", str(a)) if isinstance(a, dict) else a
                 for a in (state.case_articles or [])
             ],
-            "applied_principles": [self._safe_dump(p) for p in (state.applied_principles or [])],
-            # ── prosecution layer ─────────────────────────────────────────
-            "prosecution_theory":    self._safe_dump(state.prosecution_theory) if state.prosecution_theory else {},
-            "prosecution_arguments": [self._safe_dump(a) for a in (state.prosecution_arguments or [])],  # ← was missing
+            "applied_principles":        [self._safe_dump(p) for p in (state.applied_principles or [])],
+            "prosecution_theory":        self._safe_dump(state.prosecution_theory) if state.prosecution_theory else {},
+            "prosecution_arguments":     [self._safe_dump(a) for a in (state.prosecution_arguments or [])],
         }
 
     def _build_prompt(self, defense_data: dict, prior_context: dict, state) -> str:
@@ -150,6 +147,42 @@ class DefenseAnalystAgent(AgentBase):
             f"{EXPECTED_OUTPUT_SCHEMA}"
         )
 
+    # ── mapping ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _map_to_defense_arguments(analysis: dict) -> list:
+        """
+        Flatten the LLM's structured JSON into List[DefenseArgument]-compatible dicts.
+        Each formal/substantive defense becomes one DefenseArgument entry.
+        """
+        args = []
+
+        for item in analysis.get("formal_defenses", []):
+            args.append({
+                "argument_type":        "شكلي",
+                "description":          item.get("defense"),
+                "legal_basis":          item.get("legal_basis"),
+                "strength":             item.get("strength"),
+                "strength_reasoning":   item.get("strength_reasoning"),
+                "linked_nullity":       item.get("linked_nullity"),
+                "countered_by_evidence": [],
+                "notes":                item.get("notes"),
+            })
+
+        for item in analysis.get("substantive_defenses", []):
+            args.append({
+                "argument_type":         "موضوعي",
+                "description":           item.get("defense"),
+                "legal_basis":           item.get("legal_basis"),
+                "strength":              item.get("strength"),
+                "strength_reasoning":    item.get("strength_reasoning"),
+                "linked_nullity":        None,
+                "countered_by_evidence": item.get("countered_by_evidence", []),
+                "notes":                 item.get("notes"),
+            })
+
+        return args
+
     # ── main entry ────────────────────────────────────────────────────
 
     def run(self, state):
@@ -159,9 +192,7 @@ class DefenseAnalystAgent(AgentBase):
         if not docs_count:
             logger.info("No defense documents — returning empty output")
             return self._empty_update(state, "defense_analyst", {
-                "defense_arguments":        [],
-                "overall_defense_strength": "لا توجد دفوع",
-                "critical_defense_points":  [],
+                "defense_arguments": [],
             })
 
         defense_data  = self._extract_defense_data(state)
@@ -174,30 +205,24 @@ class DefenseAnalystAgent(AgentBase):
             [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
         )
 
-        defense_analysis = self._parse_agent_json(response.content)
+        analysis = self._parse_agent_json(response.content)
 
-        if not isinstance(defense_analysis, dict):
-            logger.error("Defense analysis — LLM response could not be parsed as dict")
-            defense_analysis = {
-                "defense_arguments":        [],
-                "overall_defense_strength": "فشل التحليل",
-                "critical_defense_points":  prior_context["critical_nullities"],
-                "raw_response":             str(defense_analysis),
-            }
-        else:
-            logger.debug(
-                "Defense analysis complete — overall strength: %s",
-                defense_analysis.get("overall_defense_strength", "N/A"),
-            )
+        if not isinstance(analysis, dict):
+            logger.error("DefenseAnalystAgent — LLM response could not be parsed as dict")
+            return self._empty_update(state, "defense_analyst", {
+                "defense_arguments": [],
+            })
 
-        defense_analysis["_meta"] = {
-            "docs_count":        docs_count,
-            "formal_count":      len(defense_data["formal_defenses"]),
-            "substantive_count": len(defense_data["substantive_defenses"]),
-            "nullities_count":   len(prior_context["procedural_nullities"]),
-            "alibi_claimed":     defense_data["alibi_claimed"],
-        }
+        logger.debug(
+            "Defense analysis complete — strength: %s | formal: %d | substantive: %d",
+            analysis.get("overall_defense_strength", "N/A"),
+            len(analysis.get("formal_defenses", [])),
+            len(analysis.get("substantive_defenses", [])),
+        )
+
+        analysis = self._parse_agent_json(response.content)
+        defense_analysis = DefenseAnalysis(**analysis)
 
         return self._empty_update(state, "defense_analyst", {
-            "defense_arguments": defense_analysis.get("defense_arguments", []),
+            "defense_arguments": [defense_analysis.model_dump()],
         })

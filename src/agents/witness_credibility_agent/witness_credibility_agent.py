@@ -10,7 +10,7 @@ from src.agents.witness_credibility_agent.witness_credibility_output_model impor
     WitnessCredibility,
     WitnessReliabilityLevel,
 )
-from src.agents.agent_base import AgentBase
+from src.agents.agent_base.agent_base import AgentBase
 
 logger = logging.getLogger(__name__)
 

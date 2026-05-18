@@ -1,10 +1,6 @@
 from typing import Optional, List
 from pydantic import BaseModel, Field
-
-from src.agents.agents_enums import (
-    CoercionType,
-    ConfessionAdmissibilityStatus,
-)
+from src.agents.confessoin_validity_agent.CV_enums import CoercionType,ConfessionAdmissibilityStatus
 
 
 class ConfessionAssessment(BaseModel):

@@ -6,12 +6,9 @@ from typing import Any
 
 from src.Graph.state import AgentState
 from src.agents.confessoin_validity_agent.confession_validity_prompt import CONFESSION_VALIDITY_PROMPT
-from src.agents.confessoin_validity_agent.confession_validity_output_model import (
-    ConfessionAssessment,
-    ConfessionAdmissibilityStatus,
-    CoercionType,
-)
-from src.agents.agent_base import AgentBase
+from src.agents.confessoin_validity_agent.confession_validity_output_model import ConfessionAssessment
+from src.agents.confessoin_validity_agent.CV_enums import CV_Enums, CoercionType, ConfessionAdmissibilityStatus
+from src.agents.agent_base.agent_base import AgentBase
 
 logger = logging.getLogger(__name__)
 
@@ -27,27 +24,6 @@ class ConfessionValidityAgent(AgentBase):
     يُقيّم مشروعية وحجية كل اعتراف ويُنتج:
         - state.confession_assessments: List[ConfessionAssessment]
     """
-
-    AGENT_KEY = "confession_validity"
-
-    # خريطة ترجمة القيم النصية إلى Enums
-    _COERCION_MAP: dict[str, CoercionType] = {
-        "إكراه جسدي":       CoercionType.PHYSICAL,
-        "إكراه نفسي":       CoercionType.PSYCHOLOGICAL,
-        "قبض غير مشروع":   CoercionType.ILLEGAL_ARREST,
-        "احتجاز مطوّل":    CoercionType.PROLONGED_DETENTION,
-        "لا يوجد":          CoercionType.NONE,
-        "غير محدد":         CoercionType.UNKNOWN,
-    }
-
-    _ADMISSIBILITY_MAP: dict[str, ConfessionAdmissibilityStatus] = {
-        "مقبول":                            ConfessionAdmissibilityStatus.ADMISSIBLE,
-        "مرفوض — إكراه":                  ConfessionAdmissibilityStatus.INADMISSIBLE_COERCED,
-        "مرفوض — خلل إجرائي":            ConfessionAdmissibilityStatus.INADMISSIBLE_PROCEDURAL,
-        "مرفوض — دليل وحيد بلا سند مادي": ConfessionAdmissibilityStatus.INADMISSIBLE_SOLE_EVIDENCE,
-        "مقبول بشروط":                     ConfessionAdmissibilityStatus.CONDITIONALLY_ADMISSIBLE,
-        "يحتاج دليلاً تعزيزياً":          ConfessionAdmissibilityStatus.REQUIRES_CORROBORATION,
-    }
 
     def __init__(self) -> None:
         super().__init__(
@@ -109,11 +85,11 @@ class ConfessionValidityAgent(AgentBase):
                 continue
             try:
                 # normalise enum fields
-                raw["coercion_type"] = self._COERCION_MAP.get(
+                raw["coercion_type"] = CV_Enums._COERCION_MAP.value.get(
                     raw.get("coercion_type", "غير محدد"),
                     CoercionType.UNKNOWN,
                 )
-                raw["admissibility_status"] = self._ADMISSIBILITY_MAP.get(
+                raw["admissibility_status"] = CV_Enums._ADMISSIBILITY_MAP.value.get(
                     raw.get("admissibility_status", "غير محدد"),
                     ConfessionAdmissibilityStatus.REQUIRES_CORROBORATION,
                 )
@@ -132,12 +108,12 @@ class ConfessionValidityAgent(AgentBase):
     def run(self, state: AgentState) -> AgentState:
         logger.info(
             "▶ [%s] بدء تقييم الاعترافات — القضية: %s | عدد الاعترافات: %d",
-            self.AGENT_KEY, state.case_id, len(state.confessions),
+            CV_Enums.AGENT_KEY.value, state.case_id, len(state.confessions),
         )
 
         if not state.confessions:
-            logger.info("[%s] لا توجد اعترافات — تخطٍّ.", self.AGENT_KEY)
-            return self._empty_update(state, self.AGENT_KEY, {})
+            logger.info("[%s] لا توجد اعترافات — تخطٍّ.", CV_Enums.AGENT_KEY.value)
+            return self._empty_update(state, CV_Enums.AGENT_KEY.value, {})
 
         context = self._build_context(state)
         try:
@@ -157,10 +133,10 @@ class ConfessionValidityAgent(AgentBase):
         updates: dict[str, Any] = {"confession_assessments": assessments}
 
         logger.info(
-            "✔ [%s] اكتمل — %d اعتراف مقيَّم", self.AGENT_KEY, len(assessments)
+            "✔ [%s] اكتمل — %d اعتراف مقيَّم", CV_Enums.AGENT_KEY.value, len(assessments)
         )
 
-        return self._empty_update(state, self.AGENT_KEY, updates)
+        return self._empty_update(state, CV_Enums.AGENT_KEY.value, updates)
 
 
 

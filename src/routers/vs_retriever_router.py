@@ -12,7 +12,6 @@ from src.retriever.vs_retriever.vs_reriever import (
     get_hybrid_retriever,
     get_sparse_retriever,
 )
-from src.Vectorstore.vs_builder_enums import ChunkType, DocType
 from src.routers.vs_router import get_vs
 from src.Chunking.chunking_enums import Na2dOutputKey
 
@@ -30,6 +29,8 @@ class RetrieveRequest(BaseModel):
     k:          int            = Field(5,    description="Number of documents to retrieve", ge=1, le=50)
 
 class HybridRetrieveRequest(RetrieveRequest):
+    query:      str            = Field(...,  description="Free-text query")
+    k:          int            = Field(5,    description="Number of documents to retrieve", ge=1, le=50)
     dense_weight:  float = Field(0.6, description="Relative weight for FAISS results", ge=0.0, le=1.0)
     sparse_weight: float = Field(0.4, description="Relative weight for BM25 results",  ge=0.0, le=1.0)
 
@@ -79,11 +80,7 @@ def dense_retrieve(
 
 # ── Sparse (BM25) ─────────────────────────────────────────────────────────────
 
-@vs_retriever_router.post(
-    "/sparse",
-    response_model=RetrieveResponse,
-    summary="Lexical retrieval via in-memory BM25 (Okapi)",
-)
+@vs_retriever_router.post("/sparse",response_model=RetrieveResponse,summary="Lexical retrieval via in-memory BM25 (Okapi)")
 def sparse_retrieve(req: RetrieveRequest) -> RetrieveResponse:
     """
     Builds an in-memory BM25 index over the current chunk corpus (filtered by
@@ -114,15 +111,8 @@ def sparse_retrieve(req: RetrieveRequest) -> RetrieveResponse:
 
 # ── Hybrid (FAISS + BM25 via RRF) ────────────────────────────────────────────
 
-@vs_retriever_router.post(
-    "/hybrid",
-    response_model=RetrieveResponse,
-    summary="Hybrid retrieval: RRF fusion of FAISS (dense) and BM25 (sparse)",
-)
-def hybrid_retrieve(
-    req: HybridRetrieveRequest,
-    vs  = Depends(get_vs),
-) -> RetrieveResponse:
+@vs_retriever_router.post("/hybrid",response_model=RetrieveResponse,summary="Hybrid retrieval: RRF fusion of FAISS (dense) and BM25 (sparse)")
+def hybrid_retrieve(req: HybridRetrieveRequest,vs  = Depends(get_vs)) -> RetrieveResponse:
     """
     Combines FAISS semantic search and BM25 lexical search using
     Reciprocal Rank Fusion (RRF).  *dense_weight* and *sparse_weight* are
@@ -161,9 +151,4 @@ def hybrid_retrieve(
     except Exception as exc:
         logger.exception("hybrid_retrieve failed")
         raise HTTPException(status_code=500, detail=str(exc))
-
-
-# =============================================================================
-# Internal helpers
-# =============================================================================
 

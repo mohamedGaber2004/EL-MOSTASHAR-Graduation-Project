@@ -3,7 +3,7 @@ import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from typing import Any, Dict
-from ..agent_base import AgentBase
+from ..agent_base.agent_base import AgentBase
 from src.Graph.state import AgentState
 from src.agents.evidence_analyst_agent.evidence_analyst_prompt import (
     EVIDENCE_ANALYST_AGENT_PROMPT,
@@ -53,43 +53,46 @@ class EvidenceAnalystAgent(AgentBase):
     def _build_case_context(self, state: AgentState, invalidated_ids: list[str]) -> str:
         evidences = [
             {
-                "evidence_id": getattr(e, "evidence_id", None) or getattr(e, "id", None),
-                "type":        getattr(e, "evidence_type", None),
-                "description": getattr(e, "description", None),
-                "source":      getattr(e, "source", None),
-                "invalidated": (getattr(e, "evidence_id", None) or getattr(e, "id", None)) in invalidated_ids,
+                "evidence_id":   getattr(e, "source_document_id", None),
+                "type":          getattr(e, "evidence_type", None),
+                "description":   getattr(e, "description", None),
+                "detailed_text": getattr(e, "detailed_text", None),
+                "seized_by":     getattr(e, "seized_by", None),
+                "location":      getattr(e, "seizure_location", None),
+                "invalidated":   getattr(e, "source_document_id", None) in invalidated_ids,
             }
             for e in (state.evidences or [])
         ]
 
         lab_reports = [
             {
-                "report_id": getattr(r, "report_id", None),
-                "findings":  getattr(r, "findings", None),
+                "report_id":   getattr(r, "report_number", None),
+                "report_type": getattr(r, "report_type", None),
+                "findings":    getattr(r, "result", None),
+                "examiner":    getattr(r, "examiner_name", None),
             }
             for r in (state.lab_reports or [])
         ]
 
-        # ── charges: brief label only — analyst doesn't need full charge dump ─
         charges = [
             {
-                "statute":     getattr(c, "statute", None),
-                "description": getattr(c, "description", None),
+                "law_code":       getattr(c, "law_code", None),
+                "article_number": getattr(c, "article_number", None),
+                "description":    getattr(c, "description", None),
             }
             for c in (state.charges or [])
         ]
 
-        # ── incidents: location/time context for chain-of-custody reasoning ───
         incidents = [
             {
                 "description": getattr(i, "incident_description", None),
                 "date":        getattr(i, "incident_date", None),
-                "location":    getattr(i, "location", None),
+                "location":    getattr(i, "incident_location", None),
             }
             for i in (state.incidents or [])
         ]
 
-        audit      = state.procedural_audit
+        audit     = state.procedural_audit
         violations = audit.violations if audit else []
         procedural_issues = [
             {
@@ -104,11 +107,11 @@ class EvidenceAnalystAgent(AgentBase):
 
         return json.dumps(
             {
-                "charges":          charges,
-                "incidents":        incidents,
-                "evidences":        evidences,
-                "lab_reports":      lab_reports,
-                "procedural_issues": procedural_issues,
+                "charges":            charges,
+                "incidents":          incidents,
+                "evidences":          evidences,
+                "lab_reports":        lab_reports,
+                "procedural_issues":  procedural_issues,
             },
             ensure_ascii=False,
             indent=2,
@@ -161,21 +164,17 @@ class EvidenceAnalystAgent(AgentBase):
         return cleaned
     
     def _extract_scores(self, result: dict) -> list:
-        """
-        LLM returns evidence_matrix (nested), we need a flat list for AgentState.
-        """
         scores = []
-        for incident in result.get("evidence_matrix", []):
+        for incident in result.get("evidence_scores", []):
             for ev in incident.get("supporting_evidence", []):
                 scores.append({
                     "evidence_id":   ev.get("evidence_id"),
-                    "strength":      ev.get("strength"),
-                    "admissibility": ev.get("admissibility"),
-                    "proof_degree":  ev.get("proof_degree"),
-                    "reasoning":     ev.get("strength_reason"),
                     "type":          ev.get("type"),
                     "description":   ev.get("description"),
-                    "strength_reason": ev.get("strength_reason")
+                    "strength":      ev.get("strength"),
+                    "strength_reason": ev.get("strength_reason"),
+                    "admissibility": ev.get("admissibility"),
+                    "proof_degree":  ev.get("proof_degree"),
                 })
         return scores
     

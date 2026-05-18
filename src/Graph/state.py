@@ -8,11 +8,11 @@ from pydantic import field_validator
 
 from src.agents.procedural_auditor_agent.procedural_auditor_output_model import ProceduralAuditResult
 from src.agents.evidence_analyst_agent.evidence_analyst_output_model import EvidenceScoring
-from src.agents.legal_research_agent.legal_research_output_model import JudicialPrinciple
+from src.agents.legal_research_agent.legal_research_output_model import JudicialPrinciple, CaseArticle
 from src.agents.confessoin_validity_agent.confession_validity_output_model import ConfessionAssessment
 from src.agents.witness_credibility_agent.witness_credibility_output_model import WitnessCredibility
 from src.agents.prosecution_analyst_agent.prosecution_analyst_output_model import ProsecutionNarrative, ProsecutionArgument
-from src.agents.defense_analyst_agent.defense_analyst_output_model import DefenseArgument
+from src.agents.defense_analyst_agent.defense_analyst_output_model import DefenseAnalysis
 from src.agents.sentencing_agent.sentencing_output_model import CivilClaim
 from src.agents.judge_agent.judge_agent_output_model import FinalJudgment
 
@@ -66,7 +66,7 @@ class AgentState(BaseModel):
 
     # ── Legal Research ────────────────────────────────  (LegalResearcherAgent — sequential)
     applied_principles: List[JudicialPrinciple] = Field(default_factory=list) # مبادئ محكمة النقض المنطبقه على القضيه
-    case_articles:      List[dict]              = Field(default_factory=list) # المواد القانونية المرتبطة بالقضية
+    case_articles:      List[CaseArticle]              = Field(default_factory=list) # المواد القانونية المرتبطة بالقضية
 
     # ── Confession Validity ───────────────────────────  (ConfessionValidityAgent — parallel)
     confession_assessments: Annotated[List[ConfessionAssessment], add] = Field(default_factory=list) # تقييم كل اعتراف في القضية
@@ -79,7 +79,7 @@ class AgentState(BaseModel):
     prosecution_arguments: List[ProsecutionArgument]       = Field(default_factory=list) # قائمة بالحجج الاتهامية، كل حجة مرتبطة بتهمة معينة و معها الأدلة الداعمة ودرجة قوتها وما قد يرد به الدفاع.
 
     # ── Defense Analysis ──────────────────────────────  (DefenseAnalystAgent — sequential)
-    defense_arguments: List[DefenseArgument] = Field(default_factory=list) # قائمة بحجج الدفاع المستخرجة من مذكرات الدفاع، كل حجة مصنفة (شكلية / موضوعية) مع تقييم قوتها وما يدحضها من أدلة.
+    defense_arguments: List[DefenseAnalysis] = Field(default_factory=list) # قائمة بحجج الدفاع المستخرجة من مذكرات الدفاع، كل حجة مصنفة (شكلية / موضوعية) مع تقييم قوتها وما يدحضها من أدلة.
 
     # ── Sentencing ────────────────────────────────────  (SentencingAgent — sequential)
     aggravating_factors:   List[str]                = Field(default_factory=list) # الظروف المشددة للعقوبة

@@ -1,16 +1,22 @@
 from __future__ import annotations
 import logging
 
-from ..agent_base import AgentBase
+from ..agent_base.agent_base import AgentBase
 from langchain_core.messages import HumanMessage, SystemMessage
 from src.Graphstore.KG_builder import LegalKnowledgeGraph
-from src.agents.agents_enums import AgentsEnums
-from src.agents.procedural_auditor_agent.procedural_auditor_output_model import ProceduralAuditResult, ProceduralIssue, ExcludedDefenseClaim
+from src.agents.procedural_auditor_agent.procedural_auditor_output_model import (
+    ProceduralAuditResult,
+    ProceduralIssue, 
+    ExcludedDefenseClaim
+)
+from src.routers.kg_retriever_router import kg_retrieve
+
 from src.Graph.state import AgentState
 from src.agents.procedural_auditor_agent.procedural_auditor_prompt import (
     PROCEDURAL_AUDITOR_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -28,43 +34,27 @@ class ProceduralAuditorAgent(AgentBase):
         self.vs = vector_store
         self.embeddings = embeddings
 
-    # ── ANN query scoped to Criminal Procedure Law ────────────────────
-    _PROCEDURAL_LAW_ANN_QUERY = """
-        CALL db.index.vector.queryNodes('article_embeddings', $k, $query_vector)
-        YIELD node AS article, score
-        WHERE article.law_id = $law_id
-        RETURN
-            article.article_id     AS article_id,
-            article.article_number AS article_number,
-            article.law_id         AS law_id,
-            article.text           AS text,
-            score
-        ORDER BY score DESC
-    """
-
     def _retrieve_articles_for_proceeding(self,text: str,k: int = 15,threshold: float = 0.45) -> list[dict]:
         if self.kg is None or self.embeddings is None:
             logger.warning("KG or embeddings not available — skipping retrieval")
             return []
 
         try:
-            query_vector = self.embeddings.embed_query(text)
+            clean_query = self.query_transformation(text)['article_query']
         except Exception as e:
-            logger.warning("embed_query failed for [%s...]: %s", text[:60], e)
-            return []
-
-        law_id = AgentsEnums.CRIMINAL_PROCEDURE_LAW_ID.value
+            logger.warning("query_transformation failed for [%s...]: %s", text[:60], e)
+            return ""
 
         try:
-            with self.kg.driver.session() as s:
-                records = s.run(
-                    self._PROCEDURAL_LAW_ANN_QUERY,
-                    k=k,
-                    query_vector=query_vector,
-                    law_id=law_id,
-                ).data()
+            records = kg_retrieve(
+                req = {
+                    "question":clean_query,
+                    "k":k,
+                    "threshold":threshold
+                }
+            )
         except Exception as e:
-            logger.warning("ANN query failed for [%s...]: %s", text[:60], e)
+            logger.warning("kg retriver failed for [%s...]: %s", text[:60], e)
             return []
 
         articles = [
@@ -73,14 +63,13 @@ class ProceduralAuditorAgent(AgentBase):
                 "The Law of the Article": str(r["article_id"]),
                 "The Article Text": str(r["text"]),
             }
-            for r in records
+            for r in records['sources']
             if r.get("article_number") and float(r.get("score", 0)) >= threshold
         ]
 
-        logger.info(
-            "Embedding retrieval — text=[%s...] | law=%s | hits=%d (threshold=%.2f)",
-            text[:60], law_id, len(articles), threshold,
-        )
+        logger_content = records.query + records.article_count + records.table_count 
+        logger.info(str(logger_content))
+    
         return articles
 
     # ── extract plain text from a proceeding or defense issue entry ───
@@ -163,8 +152,8 @@ class ProceduralAuditorAgent(AgentBase):
                 logger.warning("Skipping empty entry in [%s] while retrieving principles", label)
                 continue
 
-            for principle in self.retrieve_principles(text, self.vs):
-                # Deduplicate by string representation (adjust key if principle is a dict)
+            transformed_query = self.query_transformation(text)['principle_query']
+            for principle in self.retrieve_principles(transformed_query, self.vs):
                 key = str(principle)
                 if key not in seen:
                     seen.add(key)
@@ -189,12 +178,7 @@ class ProceduralAuditorAgent(AgentBase):
     # ── prompt builder ────────────────────────────────────────────────
     def _build_prompt(self, state: AgentState) -> str:
         incidents = getattr(state, "incidents", [])
-        confessions = getattr(state, "confessions", [])
         criminal_proceedings = getattr(state, "criminal_proceedings", [])
-        defendants = [
-            {"name": getattr(d, "name", None), "id": getattr(d, "id", None)}
-            for d in (state.defendants or [])
-        ]
         defense_procedural_issues = [
             {"formal_defenses": getattr(document, "formal_defenses")}
             for document in state.defense_documents
@@ -217,12 +201,6 @@ class ProceduralAuditorAgent(AgentBase):
 
             "## تفاصيل الحوادث والقبض:\n"
             f"{incidents}\n\n"
-
-            "## المتهمون:\n"
-            f"{defendants}\n\n"
-
-            "## الاعترافات (إن وجدت):\n"
-            f"{confessions}\n\n"
 
             "---\n"
             "## المواد القانونية ذات الصلة بوقائع القضية:\n"
@@ -277,7 +255,7 @@ class ProceduralAuditorAgent(AgentBase):
         )
 
         try:
-            response     = self._llm_invoke_with_retries(
+            response= self._llm_invoke_with_retries(
                 self._llm,
                 [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
             )

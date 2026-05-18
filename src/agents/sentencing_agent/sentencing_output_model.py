@@ -1,6 +1,6 @@
 from typing import Optional, List
 from pydantic import BaseModel, Field
-from src.agents.agents_enums import (
+from src.agents.agent_base.agents_enums import (
     CivilClaimStatus,
 )
 

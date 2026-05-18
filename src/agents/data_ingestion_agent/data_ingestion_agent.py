@@ -5,7 +5,7 @@ import time , json
 from pathlib import Path
 from typing import List, Optional, Any
 
-from ..agent_base import AgentBase
+from ..agent_base.agent_base import AgentBase
 from langchain_core.messages import HumanMessage, SystemMessage
 from src.agents.data_ingestion_agent.di_enums import DI_enums, DI_LegalDocType
 from src.agents.data_ingestion_agent.data_ingestion_prompt import (

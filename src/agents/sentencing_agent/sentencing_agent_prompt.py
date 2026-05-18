@@ -27,11 +27,6 @@ SENTENCING_PROMPT = """
     "ظرف مخفف 2"
   ],
   "applicable_article_17": true,
-  "article_17_reasoning": "سبب تطبيق أو عدم تطبيق المادة 17 عقوبات",
-  "recidivism_impact": "أثر السوابق الجنائية على تقدير العقوبة أو null",
-  "multiple_charges_treatment": "كيفية التعامل مع تعدد الجرائم وفق المادة 32 أو null",
-  "execution_suspension_eligible": false,
-  "execution_suspension_reasoning": "مبرر وقف التنفيذ أو null",
   "charge_conviction_map": {{
     "وصف التهمة 1": "إدانة",
     "وصف التهمة 2": "براءة"
@@ -49,9 +44,7 @@ SENTENCING_PROMPT = """
     "award_reasoning": "أسباب التقدير المقترح",
     "award_against_defendant": "اسم المتهم الملزَم أو null",
     "solidarity_liability": false
-  }},
-  "sentencing_recommendation": "التوصية التقديرية الإجمالية للقاضي في فقرة واحدة",
-  "suggested_penalty_range": "نطاق العقوبة المقترح لكل تهمة ثبتت إدانتها"
+  }}
 }}
 ```
 

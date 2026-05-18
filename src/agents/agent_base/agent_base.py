@@ -1,10 +1,12 @@
 import logging, time, random, json 
 from datetime import datetime, timezone
 from typing import Any, Callable, List
-
+from langchain_core.messages import HumanMessage, SystemMessage
 from src.Config import get_settings
-from src.agents.agents_enums import AgentsEnums
+from src.agents.agent_base.agents_enums import AgentsEnums
 from src.Config.log_config import logging
+from src.routers.vs_retriever_router import hybrid_retrieve
+from src.agents.agent_base.agent_base_prompts import LEGAL_QUERY_TRANSFORMATION_PROMPT
 
 try:
     from json_repair import repair_json
@@ -54,7 +56,12 @@ class AgentBase:
         k = max(1, min(4, ntotal)) if ntotal else 4
 
         try:
-            docs = vs.similarity_search(query_text, k=k)
+            docs = hybrid_retrieve(
+                    {
+                        "query":query_text,
+                        "k":k
+                    }
+                )
             return docs or []
 
         except AssertionError as e:
@@ -455,3 +462,19 @@ class AgentBase:
 
         return update
     
+    def query_transformation(self,query:str) -> dict:
+        if not query : 
+            logger.warning("No query for transforming.")
+            return ""
+
+        transformed_query = self._llm_invoke_with_retries(
+            self._llm,
+            [
+                SystemMessage(content=LEGAL_QUERY_TRANSFORMATION_PROMPT), 
+                HumanMessage(
+                    content=f"الاشكالات الاجرائيه المستخلصه من المحامي او وقائع القضيه نفسها : {transformed_query}"
+                )
+            ],
+        )
+
+        return transformed_query

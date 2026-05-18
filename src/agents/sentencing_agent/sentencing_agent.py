@@ -7,7 +7,7 @@ from typing import Any
 from src.Graph.state import AgentState
 from src.agents.sentencing_agent.sentencing_output_model import CivilClaim, CivilClaimStatus
 from src.agents.sentencing_agent.sentencing_agent_prompt import  SENTENCING_PROMPT
-from src.agents.agent_base import AgentBase
+from src.agents.agent_base.agent_base import AgentBase
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ class SentencingAgent(AgentBase):
 
         return updates
     
-        # ── public entry point ────────────────────────────────────────
+    # ── public entry point ────────────────────────────────────────
 
     def run(self, state: AgentState) -> AgentState:
         logger.info(
