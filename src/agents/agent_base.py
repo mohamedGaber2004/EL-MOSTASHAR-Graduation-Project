@@ -99,7 +99,7 @@ class AgentBase:
         Validate each entity list in `data` using the appropriate Pydantic model.
         Falls back to including the raw item dict if validation fails.
         """
-        from src.Graph.main_entity_classes import (
+        from src.agents.data_ingestion_agent.data_ingestion_output_model import (
             Charge,
             CaseIncident,
             Confession,

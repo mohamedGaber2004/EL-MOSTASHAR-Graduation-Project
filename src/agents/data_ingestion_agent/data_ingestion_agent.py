@@ -5,9 +5,9 @@ import time , json
 from pathlib import Path
 from typing import List, Optional, Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from ..agent_base import AgentBase
-from src.agents.agents_enums import AgentsEnums, LegalDocType
+from langchain_core.messages import HumanMessage, SystemMessage
+from src.agents.data_ingestion_agent.di_enums import DI_enums, DI_LegalDocType
 from src.agents.data_ingestion_agent.data_ingestion_prompt import (
     DATA_INGESTION_AGENT_PROMPT_mahdar_dabt,
     DATA_INGESTION_AGENT_PROMPT_mahdar_istijwab,
@@ -25,7 +25,6 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────
 #  Empty state template
 # ─────────────────────────────────────────────────────────────────
-
 def _empty_extracted() -> dict:
     return {
         "case_meta": {
@@ -46,74 +45,27 @@ def _empty_extracted() -> dict:
         "witness_statements":        [],
         "confessions":               [],
         "criminal_records":          [],
-        "criminal_proceedings":         [],
+        "criminal_proceedings":      [],
         "defense_documents":         [],
     }
 
-
-# Keys that hold lists and should be merged (not overwritten)
-_LIST_KEYS = {
-    "defendants", "charges", "incidents", "evidences",
-    "lab_reports", "witness_statements", "confessions",
-    "criminal_records", "defense_documents",
-    "defense_procedural_issues", "procedural_issues",
-}
 # ─────────────────────────────────────────────────────────────────
 #  Routing: keyword sets per document type
 # ─────────────────────────────────────────────────────────────────
-_ROUTE_PATTERNS: list[tuple[str, set[str]]] = [
-    (
-        LegalDocType.AMR_IHALA.value,
-        {"amr_ihala", "امر_الاحالة", "أمر_الإحالة", "ihala", "referral",
-         "amr", "احالة", "إحالة"},
-    ),
-    (
-        LegalDocType.MAHDAR_DABT.value,
-        {"mahdar_dabt", "محضر_الضبط", "mahdar_qesm", "قسم_الشرطة", "dabt",
-         "ضبط", "تفتيش", "استدلالات", "jame3", "jame", "استدلال", "mahdar_jame"},
-    ),
-    (
-        LegalDocType.MAHDAR_ISTIJWAB.value,
-        {"mahdar_istijwab", "محضر_الاستجواب", "istijwab", "استجواب",
-         "tahqiq", "تحقيق", "niyaba", "نيابة"},
-    ),
-    (
-        LegalDocType.AQWAL_SHUHUD.value,
-        {"aqwal_shuhud", "أقوال_الشهود", "shuhud", "شهود", "شاهد",
-         "aqwal", "شهادة"},
-    ),
-    (
-        LegalDocType.TAQRIR_TIBBI.value,
-        {"taqrir_tibbi", "تقرير_طبي", "tibbi", "طبي", "شرعي", "معمل",
-         "lab", "taqrir", "تقرير", "forensic", "kimawi", "كيميائي",
-         "balisti", "بلستي"},
-    ),
-    (
-        LegalDocType.MOZAKARET_DIFA.value,
-        {"mozakeret_difa", "مذكرة_الدفاع", "difa", "دفاع", "mozakera",
-         "مذكرة", "defense"},
-    ),
-    (
-        LegalDocType.SAWABIQ.value,
-        {"sawabiq", "سوابق", "صحيفة_جنائية", "سجل_جنائي", "criminal_record",
-         "sahifa", "صحيفة"},
-    ),
-]
-
 def _route_stem(stem: str) -> Optional[str]:
     """
-    Map a file stem to a LegalDocType value using keyword matching.
+    Map a file stem to a DI_LegalDocType value using keyword matching.
 
     Strategy (in order):
     1. Exact match against the enum value.
     2. Stem contains the enum value as a substring.
     3. Stem shares at least one keyword with the pattern set.
 
-    Returns the LegalDocType value string, or None if no match.
+    Returns the DI_LegalDocType value string, or None if no match.
     """
     stem_lower = stem.lower().replace("-", "_").replace(" ", "_")
 
-    for doc_type, keywords in _ROUTE_PATTERNS:
+    for doc_type, keywords in DI_enums._ROUTE_PATTERNS.value:
         if stem_lower == doc_type:
             return doc_type
         if doc_type in stem_lower:
@@ -123,16 +75,13 @@ def _route_stem(stem: str) -> Optional[str]:
                 return doc_type
 
     return None
+
 # ─────────────────────────────────────────────────────────────────
 #  Text chunking with document-context header
 # ─────────────────────────────────────────────────────────────────
 def chunk_text(text: str,max_chars: int,overlap: int = 500,doc_id: str = "") -> List[tuple[int, str]]:
-    """
-    Split text into (chunk_index, chunk_text) pairs with overlap.
+    """Split text into (chunk_index, chunk_text) pairs with overlap."""
 
-    Each chunk after the first gets an Arabic context header so the model
-    knows it is reading a continuation of the same document.
-    """
     if len(text) <= max_chars:
         return [(1, text)]
 
@@ -174,6 +123,7 @@ def chunk_text(text: str,max_chars: int,overlap: int = 500,doc_id: str = "") -> 
             result.append((i + 1, header + chunk))
 
     return result
+
 # ─────────────────────────────────────────────────────────────────
 #  Schema validation before merging
 # ─────────────────────────────────────────────────────────────────
@@ -187,18 +137,19 @@ def _validate_extracted(result: dict) -> tuple[bool, str]:
     We only reject results that are not dicts at all, or have wrong field types.
     """
     if not isinstance(result, dict):
-        return False, "النتيجة ليست قاموساً"
+        return False, "The result is not Dict type"
 
-    for key in _LIST_KEYS:
+    for key in DI_enums._LIST_KEYS.value:
         val = result.get(key)
         if val is not None and not isinstance(val, list):
-            return False, f"الحقل '{key}' يجب أن يكون قائمة لكنه {type(val).__name__}"
+            return False, f"the field '{key}' must to be list but it's {type(val).__name__}"
 
     cm = result.get("case_meta")
     if cm is not None and not isinstance(cm, dict):
-        return False, "case_meta يجب أن يكون قاموساً"
+        return False, "case_meta must be Dict type"
 
     return True, ""
+
 # ─────────────────────────────────────────────────────────────────
 #  DataIngestionAgent
 # ─────────────────────────────────────────────────────────────────
@@ -218,13 +169,13 @@ class DataIngestionAgent(AgentBase):
             ],
         )
         self._prompt_map: dict[str, str] = {
-            LegalDocType.AMR_IHALA.value:       DATA_INGESTION_AGENT_PROMPT_amr_ihala,
-            LegalDocType.MAHDAR_DABT.value:     DATA_INGESTION_AGENT_PROMPT_mahdar_dabt,
-            LegalDocType.MAHDAR_ISTIJWAB.value: DATA_INGESTION_AGENT_PROMPT_mahdar_istijwab,
-            LegalDocType.AQWAL_SHUHUD.value:    DATA_INGESTION_AGENT_PROMPT_aqual_shuhud,
-            LegalDocType.TAQRIR_TIBBI.value:    DATA_INGESTION_AGENT_PROMPT_taqrir_tibbi,
-            LegalDocType.MOZAKARET_DIFA.value:  DATA_INGESTION_AGENT_PROMPT_mozakeret_difa,
-            LegalDocType.SAWABIQ.value:         DATA_INGESTION_AGENT_PROMPT_sawabiq,
+            DI_LegalDocType.AMR_IHALA.value:       DATA_INGESTION_AGENT_PROMPT_amr_ihala,
+            DI_LegalDocType.MAHDAR_DABT.value:     DATA_INGESTION_AGENT_PROMPT_mahdar_dabt,
+            DI_LegalDocType.MAHDAR_ISTIJWAB.value: DATA_INGESTION_AGENT_PROMPT_mahdar_istijwab,
+            DI_LegalDocType.AQWAL_SHUHUD.value:    DATA_INGESTION_AGENT_PROMPT_aqual_shuhud,
+            DI_LegalDocType.TAQRIR_TIBBI.value:    DATA_INGESTION_AGENT_PROMPT_taqrir_tibbi,
+            DI_LegalDocType.MOZAKARET_DIFA.value:  DATA_INGESTION_AGENT_PROMPT_mozakeret_difa,
+            DI_LegalDocType.SAWABIQ.value:         DATA_INGESTION_AGENT_PROMPT_sawabiq,
         }
 
     # Dedup helpers
@@ -286,25 +237,9 @@ class DataIngestionAgent(AgentBase):
             merged["case_meta"] = base_meta
 
         # ── lists: merge with dedup ───────────────────────────────────────────────
-        LIST_DEDUP: dict[str, tuple[str, ...]] = {
-            "defendants":                ("national_id", "name"),
-            "charges":                   ("law_code", "article_number", "description"),
-            "incidents":                 ("incident_type", "incident_date", "incident_location"),
-            "evidences":                 ("evidence_type", "description", "seizure_date"),
-            "lab_reports":               ("report_type", "examiner_name", "examination_date"),
-            "witness_statements":        ("witness_name", "statement_date"),
-            "confessions":               ("defendant_name", "confession_date", "text"),
-            "criminal_proceedings":      ("procedure_type", "description", "conducting_officer"),  # ← added
-            "procedural_issues":         ("procedure_type", "issue_description"),
-            "defense_procedural_issues": ("procedure_type", "issue_description"),
-            "criminal_records":          ("defendant_name",),
-            "defense_documents":         ("submitted_by", "defendant_name"),
-        }
-
-        for key, dedup_keys in LIST_DEDUP.items():
+        for key, dedup_keys in DI_enums.LIST_DEDUP.value.items():
             if key in incoming:
                 val = incoming[key]
-                # ✅ coerce singular dict to list
                 if isinstance(val, dict):
                     val = [val]
                 if isinstance(val, list):
@@ -325,10 +260,6 @@ class DataIngestionAgent(AgentBase):
         Pydantic models inside lists are constructed here so AgentState
         receives typed objects rather than raw dicts.
         """
-        from src.Graph.main_entity_classes import (
-            Defendant, Charge, CaseIncident, Evidence, LabReport,
-            WitnessStatement, Confession,DefenseDocument, CriminalRecord, CriminalProceedings,
-        )
 
         def safe_make(cls, data: dict) -> Any:
             try:
@@ -344,29 +275,14 @@ class DataIngestionAgent(AgentBase):
 
         # ── case_meta scalars ─────────────────────────────────────────────────────
         meta = extracted.get("case_meta") or {}
-        for field in (
-            "case_number", "court", "court_level", "jurisdiction",
-            "prosecutor_name", "referral_order_text", "filing_date", "referral_date",
-        ):
+        for field in (DI_enums.CASE_META_ATTRIBUTES.value):
             val = meta.get(field)
             if val is not None:
                 updates[field] = val
 
         # ── entity lists ──────────────────────────────────────────────────────────
-        mapping = {
-            "defendants":                (Defendant,           "defendants"),
-            "charges":                   (Charge,              "charges"),
-            "incidents":                 (CaseIncident,        "incidents"),
-            "evidences":                 (Evidence,            "evidences"),
-            "lab_reports":               (LabReport,           "lab_reports"),
-            "witness_statements":        (WitnessStatement,    "witness_statements"),
-            "confessions":               (Confession,          "confessions"),
-            "criminal_proceedings":      (CriminalProceedings, "criminal_proceedings"),
-            "defense_documents":         (DefenseDocument,     "defense_documents"),
-            "criminal_records":          (CriminalRecord,      "criminal_records"),
-        }
 
-        for raw_key, (cls, state_field) in mapping.items():
+        for raw_key, (cls, state_field) in DI_enums.ENTITIES_MAPPING.value.items():
             raw_list = extracted.get(raw_key, [])
             if raw_list:
                 existing = getattr(state, state_field, [])
@@ -391,7 +307,7 @@ class DataIngestionAgent(AgentBase):
         """
         # ── read file ────────────────────────────────────────────
         raw_text: Optional[str] = None
-        for enc in AgentsEnums.AGENT_INGESTION_TXT_FILES_ENCODING:
+        for enc in DI_enums.AGENT_INGESTION_TXT_FILES_ENCODING.value:
             try:
                 raw_text = path.read_text(encoding=enc).strip()
                 break

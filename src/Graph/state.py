@@ -16,7 +16,7 @@ from src.agents.defense_analyst_agent.defense_analyst_output_model import Defens
 from src.agents.sentencing_agent.sentencing_output_model import CivilClaim
 from src.agents.judge_agent.judge_agent_output_model import FinalJudgment
 
-from src.Graph.main_entity_classes import (
+from src.agents.data_ingestion_agent.data_ingestion_output_model import (
     Charge,
     CaseIncident,
     Confession,
