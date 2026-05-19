@@ -332,7 +332,11 @@ class AgentBase:
         provider_key_map = {
             "open_router": "open_router_llm",
             "groq":        "groq_llm",
-            "mistral":      "mistral_llm",
+            "mistral":     "mistral_llm",
+            "google":      "google_llm",
+            "vertex":      "vertex_llm",
+            "cloudflare":  "cloudflare_llm",
+            "celebras":    "celebras_llm" 
         }
 
         if provider not in provider_key_map:
@@ -466,15 +470,18 @@ class AgentBase:
         if not query : 
             logger.warning("No query for transforming.")
             return ""
+        try:
+            transformed_query = self._llm_invoke_with_retries(
+                self._llm,
+                [
+                    SystemMessage(content=LEGAL_QUERY_TRANSFORMATION_PROMPT), 
+                    HumanMessage(
+                        content=f"النصوص القانونيه: {query}"
+                    )
+                ],
+            )
+        except Exception as e:
+            logger.warning("query_transformation LLM call failed: %s", e)
 
-        transformed_query = self._llm_invoke_with_retries(
-            self._llm,
-            [
-                SystemMessage(content=LEGAL_QUERY_TRANSFORMATION_PROMPT), 
-                HumanMessage(
-                    content=f"الاشكالات الاجرائيه المستخلصه من المحامي او وقائع القضيه نفسها : {transformed_query}"
-                )
-            ],
-        )
 
         return transformed_query

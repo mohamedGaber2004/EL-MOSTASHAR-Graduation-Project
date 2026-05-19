@@ -43,7 +43,7 @@ class LegalResearcherAgent(AgentBase):
             clean_query = self.query_transformation(text)['article_text']
         except Exception as e:
             logger.warning("query_transformation failed for [%s...]: %s", text[:60], e)
-            return ""
+            return []
 
         try:
             records = records = kg_retrieve(

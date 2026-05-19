@@ -21,3 +21,4 @@ cachetools==7.1.1
 langchain-cohere==0.5.1
 rank-bm25==0.2.2
 langchain-mistralai==1.1.4
+langchain-cerebras==0.8.2

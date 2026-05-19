@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: Optional[str] = None
     OPENAI_BASE_ROUTER_API_KEY: Optional[str] = None
     MISTRAL_API_KEY: Optional[str] = None
+    VERTIX_API_KEY: Optional[str] = None
+    CELEBRAS_API_KEY: Optional[str] = None
+    CLOUDFLARE_API_KEY: Optional[str] = None
+    CLOUDFLARE_BASE_URL: Optional[str] = None
 
     # Embedding Model
     ARABIC_NATIVE_EMBEDDING_MODEL: str
