@@ -161,7 +161,6 @@ def build_legal_graph():
     logger.info("✅ Legal graph built — 10 agents | conditional routing active")
     return builder.compile()
 
-
 def get_graph_visualization():
     g = build_legal_graph()
     return g, g.get_graph().draw_mermaid_png()

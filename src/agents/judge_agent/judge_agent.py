@@ -1,5 +1,6 @@
 import json
 import logging
+from pydantic import BaseModel
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -122,7 +123,7 @@ class JudgeAgent(AgentBase):
 
         return (
             "## ملف القضية الكامل للمداولة:\n"
-            f"{json.dumps(ctx, ensure_ascii=False, indent=2)}\n\n"
+            f"{json.dumps(ctx, ensure_ascii=False, indent=2, default=lambda o: o.model_dump() if isinstance(o, BaseModel) else str(o))}\n\n"
 
             "## مبادئ إصدار الحكم:\n"
             "1. الشك يُفسَّر لصالح المتهم — إن وُجد شك جدي في أي تهمة تكون البراءة.\n"
@@ -146,26 +147,7 @@ class JudgeAgent(AgentBase):
             f"{EXPECTED_OUTPUT_SCHEMA}"
         )
 
-    def _build_reasoning_trace(self, judgment: dict) -> list[dict]:
-        trace = []
-        for ruling in judgment.get("charges_rulings", []):
-            trace.append({
-                "agent":     "judge",
-                "charge":    ruling.get("charge"),
-                "ruling":    ruling.get("ruling"),
-                "reasoning": ruling.get("ruling_reasoning", ""),
-                "doubt":     ruling.get("doubt_noted", False),
-            })
-        trace.append({
-            "agent":     "judge",
-            "charge":    "إجمالي",
-            "ruling":    judgment.get("verdict"),
-            "reasoning": judgment.get("verdict_reasoning", ""),
-        })
-        return trace
-
     # ── main entry ────────────────────────────────────────────────────
-
     def run(self, state):
         logger.info("JudgeAgent starting — issuing verdict")
 
@@ -191,14 +173,16 @@ class JudgeAgent(AgentBase):
         if not isinstance(judgment, dict):
             logger.error("Judge LLM response could not be parsed — issuing safe acquittal")
             judgment = {
-                "verdict":           "براءة",
-                "verdict_reasoning": "فشل إصدار الحكم — براءة احتياطية",
+                "overall_verdict":   "براءة",
+                "overall_penalty":   None,
+                "operative_text":    "فشل إصدار الحكم — براءة احتياطية",
+                "preamble":          None,
+                "established_facts": None,
+                "per_charge_rulings": [],
                 "confidence_score":  0.0,
-                "charges_rulings":   [],
                 "raw_response":      str(judgment),
             }
 
-        reasoning_trace = self._build_reasoning_trace(judgment)
         logger.info(
             "Verdict issued: %s (confidence=%.2f)",
             judgment.get("verdict", ""),
@@ -207,15 +191,17 @@ class JudgeAgent(AgentBase):
 
         return self._empty_update(state, "judge", {
             "suggested_verdict": FinalJudgment(
-                verdict             = judgment.get("verdict"),
-                reasoning_summary   = judgment.get("verdict_reasoning"),
-                recommended_penalty = judgment.get("sentencing", {}).get("total_penalty"),
+                verdict             = judgment.get("overall_verdict"),
+                recommended_penalty = judgment.get("overall_penalty"),
+                operative_text      = judgment.get("operative_text"),
+                per_charge_rulings  = judgment.get("per_charge_rulings", []),
                 confidence_score    = float(judgment.get("confidence_score", 0.0)),
-                full_ruling_text    = judgment.get("full_ruling_text"),
-                per_charge_rulings  = judgment.get("charges_rulings", []),
             ),
-            "verdict_preamble":  judgment.get("verdict_preamble"),
-            "verdict_facts":     judgment.get("verdict_facts"),
-            "verdict_reasoning": judgment.get("verdict_reasoning"),
-            "verdict_operative": judgment.get("full_ruling_text"), 
+            "verdict_preamble":  judgment.get("preamble"),
+            "verdict_facts":     judgment.get("established_facts"),
+            "verdict_reasoning": "\n\n".join(
+                r.get("reasoning", "")
+                for r in judgment.get("per_charge_rulings", [])
+            ) or None,
+            "verdict_operative": judgment.get("operative_text"),
         })

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 from cachetools import TTLCache
 from cachetools.keys import hashkey
@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from src.Chunking.chunking import get_chunks
 from src.Config import get_settings
 from src.Graphstore.KG_builder import LegalKnowledgeGraph, build_knowledge_graph
+from src.routers.kg_retriever_router import get_kg_retriever
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +20,15 @@ kg_router = APIRouter(prefix="/kg", tags=["Knowledge Graph"])
 
 
 # =============================================================================
-# Graph singleton
+# State & Locks
 # =============================================================================
 
 _graph: Optional[LegalKnowledgeGraph] = None
 _GRAPH_LOCK = threading.Lock()
+
+# Concurrency guard flag to prevent multiple parallel graph rebuild operations
+_is_building = False
+_BUILD_LOCK  = threading.Lock()
 
 
 def get_graph() -> LegalKnowledgeGraph:
@@ -49,13 +54,11 @@ def get_graph() -> LegalKnowledgeGraph:
 # =============================================================================
 # Cache configuration
 # =============================================================================
-# Each bucket ages independently — hot (stats, 1 min) vs cold (history, 5 min).
 
 _STATS_CACHE:     TTLCache = TTLCache(maxsize=1,   ttl=60)
 _AMENDMENT_CACHE: TTLCache = TTLCache(maxsize=256, ttl=300)
 _HISTORY_CACHE:   TTLCache = TTLCache(maxsize=512, ttl=300)
 
-# Centralised registry used by both the build endpoint and the cache endpoint.
 _ALL_CACHES: Dict[str, TTLCache] = {
     "statistics": _STATS_CACHE,
     "amendments": _AMENDMENT_CACHE,
@@ -63,7 +66,7 @@ _ALL_CACHES: Dict[str, TTLCache] = {
 }
 
 _CACHE_LOCK = threading.Lock()
-_STATS_KEY  = "statistics"   # fixed key — stats has no per-request args
+_STATS_KEY  = "statistics"
 
 
 def _cached_call(cache: TTLCache, fn, *args, **kwargs):
@@ -89,7 +92,6 @@ class StatisticsResponse(BaseModel):
     nodes:         Dict[str, int]
     relationships: Dict[str, int]
 
-
 class AmendmentRow(BaseModel):
     amendment_id:         Optional[str] = None
     amendment_law_number: Optional[str] = None
@@ -102,20 +104,56 @@ class AmendmentRow(BaseModel):
     law_id:               Optional[str] = None
     law_title:            Optional[str] = None
 
-
 class ArticleResponse(BaseModel):
     law_id:         str = Field(..., description="Unique law identifier")
     article_number: str = Field(..., description="Article number within the law")
     text:           str = Field(..., description="Latest full text of the article")
 
-
 class CacheInvalidateResponse(BaseModel):
     cleared: List[str]
     message: str
 
-
 class BuildKGResponse(BaseModel):
     message: str
+
+
+# =============================================================================
+# Background Workers
+# =============================================================================
+
+def background_build_task(drop_existing: bool, retriever_service: Optional[Any] = None) -> None:
+    """
+    Isolated background task runner.
+    Guarantees cleanup of build state and syncs internal caching contexts.
+    """
+    global _is_building
+    cfg = get_settings()
+    try:
+        logger.info("KG build started …")
+        build_knowledge_graph(
+            neo4j_uri      = cfg.NEO4J_URI,
+            neo4j_user     = cfg.NEO4J_USERNAME,
+            neo4j_password = cfg.NEO4J_PASSWORD,
+            drop_existing  = drop_existing,
+            verbose        = True,
+            chunks         = get_chunks(),
+        )
+        
+        # 1. Clear internal state of retriever service if it holds cached graph embeddings or metrics
+        if retriever_service and hasattr(retriever_service, "clear_cache"):
+            logger.info("Invalidating downstream KG retriever structural memory cache")
+            retriever_service.clear_cache()
+
+        # 2. Flush web/router caches
+        for cache in _ALL_CACHES.values():
+            cache.clear()
+            
+        logger.info("KG build completed — all caches invalidated and synchronized")
+    except Exception:
+        logger.exception("KG build failed")
+    finally:
+        with _BUILD_LOCK:
+            _is_building = False
 
 
 # =============================================================================
@@ -123,15 +161,8 @@ class BuildKGResponse(BaseModel):
 # =============================================================================
 
 # ── Statistics ────────────────────────────────────────────────────────────────
-
-@kg_router.get(
-    "/statistics",
-    response_model=StatisticsResponse,
-    summary="Node and relationship counts for the Knowledge Graph",
-)
-def get_statistics(
-    graph: LegalKnowledgeGraph = Depends(get_graph),
-) -> StatisticsResponse:
+@kg_router.get("/statistics", response_model=StatisticsResponse, summary="Node and relationship counts for the Knowledge Graph")
+def get_statistics(graph: LegalKnowledgeGraph = Depends(get_graph)) -> StatisticsResponse:
     """Cached for **1 minute**. Call ``DELETE /kg/cache?name=statistics`` to force a refresh."""
     try:
         with _CACHE_LOCK:
@@ -151,22 +182,9 @@ def get_statistics(
         logger.exception("get_statistics failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
-
 # ── Amendments ────────────────────────────────────────────────────────────────
-
-@kg_router.get(
-    "/amendments",
-    response_model=List[AmendmentRow],
-    summary="List amendments, optionally filtered by law",
-)
-def query_amendments(
-    law_id: Optional[str]      = Query(None, description="Filter by law ID"),
-    graph:  LegalKnowledgeGraph = Depends(get_graph),
-) -> List[AmendmentRow]:
-    """
-    Returns all amendments across every law, or only those belonging to
-    *law_id* when provided.  Response is cached per ``law_id`` for **5 minutes**.
-    """
+@kg_router.get("/amendments", response_model=List[AmendmentRow], summary="List amendments, optionally filtered by law")
+def query_amendments(law_id: Optional[str] = Query(None, description="Filter by law ID"), graph: LegalKnowledgeGraph = Depends(get_graph)) -> List[AmendmentRow]:
     try:
         rows = _cached_call(_AMENDMENT_CACHE, graph.query_amendments, law_id)
         return [AmendmentRow(**r) for r in rows]
@@ -177,23 +195,9 @@ def query_amendments(
             detail=str(exc),
         )
 
-
 # ── Article text ──────────────────────────────────────────────────────────────
-
-@kg_router.get(
-    "/{law_id}/{article_number}",
-    response_model=ArticleResponse,
-    summary="Fetch the latest text for a specific article",
-)
-def fetch_article_text(
-    law_id:         str,
-    article_number: str,
-    graph:          LegalKnowledgeGraph = Depends(get_graph),
-) -> ArticleResponse:
-    """
-    Returns the most recent version of the article text.
-    Cached per ``(law_id, article_number)`` for **5 minutes**.
-    """
+@kg_router.get("/{law_id}/{article_number}", response_model=ArticleResponse, summary="Fetch the latest text for a specific article")
+def fetch_article_text(law_id: str, article_number: str, graph: LegalKnowledgeGraph = Depends(get_graph)) -> ArticleResponse:
     try:
         text = _cached_call(_HISTORY_CACHE, graph.get_article, law_id, article_number)
 
@@ -220,53 +224,34 @@ def fetch_article_text(
             detail="An internal error occurred while retrieving the article.",
         )
 
-
 # ── Build KG ──────────────────────────────────────────────────────────────────
-
-@kg_router.post(
-    "/build",
-    response_model=BuildKGResponse,
-    summary="Rebuild the Knowledge Graph in the background",
-)
+@kg_router.post("/build", response_model=BuildKGResponse, summary="Rebuild the Knowledge Graph in the background")
 def build_kg_endpoint(
     background_tasks: BackgroundTasks,
-    drop_existing:    bool = Query(True, description="Drop existing graph data before rebuilding"),
+    drop_existing: bool = Query(True, description="Drop existing graph data before rebuilding"),
+    kg_retriever        = Depends(get_kg_retriever)
 ) -> BuildKGResponse:
-    """
-    Enqueues a full KG rebuild as a background task.  Returns immediately
-    with a 202-style acknowledgement.  All caches are invalidated after a
-    successful build.
-    """
-    cfg = get_settings()
+    """Triggers an asynchronous Neo4j update. Re-build requests are blocked if an operation is currently active."""
+    global _is_building
 
-    def _run_build() -> None:
-        try:
-            logger.info("KG build started …")
-            build_knowledge_graph(
-                neo4j_uri      = cfg.NEO4J_URI,
-                neo4j_user     = cfg.NEO4J_USERNAME,
-                neo4j_password = cfg.NEO4J_PASSWORD,
-                drop_existing  = drop_existing,
-                verbose        = True,
-                chunks         = get_chunks(),
+    with _BUILD_LOCK:
+        if _is_building:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Knowledge graph reconstruction pipeline is currently active. Request rejected."
             )
-            for cache in _ALL_CACHES.values():
-                cache.clear()
-            logger.info("KG build completed — all caches invalidated")
-        except Exception:
-            logger.exception("KG build failed")
+        _is_building = True
 
-    background_tasks.add_task(_run_build)
+    # Dispatch to async thread worker queue
+    background_tasks.add_task(
+        background_build_task, 
+        drop_existing     = drop_existing, 
+        retriever_service = kg_retriever
+    )
     return BuildKGResponse(message="Knowledge Graph build started in background.")
 
-
 # ── Cache management ──────────────────────────────────────────────────────────
-
-@kg_router.delete(
-    "/cache",
-    response_model=CacheInvalidateResponse,
-    summary="Invalidate one or all cache buckets",
-)
+@kg_router.delete("/cache", response_model=CacheInvalidateResponse, summary="Invalidate one or all cache buckets")
 def invalidate_cache(
     name: Optional[str] = Query(
         None,

@@ -84,7 +84,7 @@ DATA_INGESTION_AGENT_PROMPT_mahdar_dabt = f"""\
 - statement_date: تاريخ الأقوال — null إن لم يُذكر.
 - presence_at_scene: true إن كان حاضراً في مكان الحادث، وإلا false.
 
-[CriminalProceedings]  — كل الإجراءات الواردة في المحضر
+[criminal_proceedings]  — كل الإجراءات الواردة في المحضر
 ⚠ سجّل كل إجراء ذُكر صراحةً: ضبط، تفتيش، قبض، انتقال، معاينة، تحليل، إخطار نيابة...
   كل إجراء = سجل منفصل حتى لو نفّذه نفس الضابط.
 - procedure_type: ضبط / تفتيش / قبض / معاينة / انتقال / إخطار / غيره.
@@ -100,7 +100,7 @@ DATA_INGESTION_AGENT_PROMPT_mahdar_dabt = f"""\
 - "مكان الضبط" قد يختلف عن "مكان الجريمة" — دوّن كلاً منهما في حقله.
 - الأشخاص المذكورون في incidents.perpetrator_names يجب أن يظهروا حتماً في defendants[].
 - لا تستنتج بطلاناً إجرائياً من مجرد غياب الإذن — التلبس الصريح يُسقط هذا الاشتراط.
-- الإخراج النهائي: JSON صارم يحتوي على المفاتيح: incidents, defendants, evidences, witness_statements, CriminalProceedings — لا شيء غيرها.
+- الإخراج النهائي: JSON صارم يحتوي على المفاتيح: incidents, defendants, evidences, witness_statements, criminal_proceedings — لا شيء غيرها.
 """
 
 # ─────────────────────────────────────────────────────────────────

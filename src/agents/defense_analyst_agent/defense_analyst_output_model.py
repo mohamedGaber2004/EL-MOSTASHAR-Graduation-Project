@@ -1,5 +1,5 @@
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class FormalDefense(BaseModel):
@@ -10,7 +10,12 @@ class FormalDefense(BaseModel):
     linked_nullity:     Optional[str] = Field(default=None, description="معرف البطلان الإجرائي المرتبط أو null")
     notes:              Optional[str] = Field(default=None, description="ملاحظات إضافية")
 
-
+    @field_validator("linked_nullity", mode="before")
+    @classmethod
+    def coerce_list_to_str(cls, v):
+        if isinstance(v, list):
+            return " ".join(v)
+        return v
 class SubstantiveDefense(BaseModel):
     defense:                 Optional[str]       = Field(default=None, description="نص الدفع الموضوعي")
     legal_basis:             Optional[str]       = Field(default=None, description="المادة القانونية")

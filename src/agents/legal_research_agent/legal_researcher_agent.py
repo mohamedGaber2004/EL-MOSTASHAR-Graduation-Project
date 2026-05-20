@@ -6,7 +6,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from ..agent_base.agent_base import AgentBase
 from src.Graphstore.KG_builder import LegalKnowledgeGraph
 from src.Graph.state import AgentState
-from src.routers.kg_retriever_router import kg_retrieve
+from src.routers.kg_retriever_router import get_kg_retriever
 from src.agents.legal_research_agent.legal_researcher_prompt import (
     LEGAL_RESEARCHER_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class LegalResearcherAgent(AgentBase):
+
     def __init__(self, kg: LegalKnowledgeGraph, embeddings, vector_store):
         super().__init__(
             "LEGAL_RESEARCHER_MODEL",
@@ -26,86 +27,69 @@ class LegalResearcherAgent(AgentBase):
         self.vs         = vector_store
         self.embeddings = embeddings
 
-    # ── fallback ──────────────────────────────────────────────────────
-    def _build_fallback_package(self, all_contexts: list[dict]) -> dict:
-        return {
-            "case_articles":      [],
-            "applied_principles": [],
-            "_fallback":          True,
-        }
+    # ── fallback ──────────────────────────────────────────────────────────────
+    def _build_fallback_package(self) -> dict:
+        return {"case_articles": [], "applied_principles": [], "_fallback": True}
 
-    def _retrieve_articles_for_charge(self,text: str, k: int= 15, threshold: float = 0.45) -> list[dict]:
+    # ── KG article retrieval ──────────────────────────────────────────────────
+    def _retrieve_articles_for_charge(
+        self, text: str, k: int = 15, threshold: float = 0.45
+    ) -> list[dict]:
         if self.kg is None or self.embeddings is None:
             logger.warning("KG or embeddings not available — skipping article retrieval")
             return []
 
         try:
-            clean_query = self.query_transformation(text)['article_text']
+            clean_query = self.query_transformation(text)["article_query"]
         except Exception as e:
             logger.warning("query_transformation failed for [%s...]: %s", text[:60], e)
             return []
 
         try:
-            records = records = kg_retrieve(
-                req = {
-                    "question":clean_query,
-                    "k":k,
-                    "threshold":threshold
-                }
-            )
+            records = get_kg_retriever().retrieve(question=clean_query, k=k, threshold=threshold)
         except Exception as e:
-            logger.warning("kg retriver failed for [%s...]: %s", text[:60], e)
+            logger.warning("kg retriever failed for [%s...]: %s", text[:60], e)
             return []
 
         articles = [
             {
-                "Article Number":         str(r["article_number"]),
-                "law_id":                 str(r["law_id"]),
-                "The Law of the Article": str(r["article_id"]),
-                "The Article Text":       str(r["text"]),
+                "article_number": str(r["article_number"]),
+                "law_id":         str(r["law_id"]),
+                "text":           str(r["text"]),
             }
-            for r in records['sources']
+            for r in records.sources
             if r.get("article_number") and float(r.get("score", 0)) >= threshold
         ]
 
-        logger_content = records.query + records.article_count + records.table_count 
-        logger.info(str(logger_content))
-    
+        logger.info(
+            "query=%s | articles=%d | tables=%d",
+            records.query,
+            len(records.article_contexts),
+            len(records.table_contexts),
+        )
         return articles
 
-    def _build_charge_query_text(self, charge) -> str:
-        """Compose a single query string from a charge's descriptive fields."""
-        
-        if getattr(charge, "law_code", None):
-            law_code = (charge.law_code)
-        if getattr(charge, "article_number",None):
-            article_number = (charge.article_number)
-        prompt = f"{law_code} - {article_number}"
-        return prompt
+    # ── query builders ────────────────────────────────────────────────────────
+    def _charge_to_article_query(self, charge) -> str:
+        law_code       = getattr(charge, "law_code",       None) or ""
+        article_number = getattr(charge, "article_number", None) or ""
+        return f"{law_code} - {article_number}"
 
-    def _build_charge_query_text_for_principles(self,charge):
-        parts = []
-        if getattr(charge, "law_code", None):
-            parts.append(charge.law_code)
-        if getattr(charge, "article_number",None):
-            parts.append(charge.article_number)
-        if getattr(charge,"description",None):
-            parts.append(charge.description)
-        if getattr(charge,"incident_type",None):
-            parts.append(charge.incident_type)
-        if getattr(charge,"charge_classification",None):
-            parts.append(charge.charge_classification)
-        if getattr(charge,"attempt_flag",None):
-            parts.append(charge.attempt_flag)
-        return "---".join(parts)
+    def _charge_to_principle_query(self, charge) -> str:
+        parts = [
+            getattr(charge, attr, None)
+            for attr in ("law_code", "article_number", "description",
+                         "incident_type", "charge_classification", "attempt_flag")
+        ]
+        return "---".join(str(p) for p in parts if p)
 
-    # ── KG retrieval: accumulate unique articles across all charges ────
+    # ── accumulate unique articles across all charges ─────────────────────────
     def _resolve_articles_for_charges(self, charges: list) -> list[dict]:
         seen:   set[str]   = set()
         result: list[dict] = []
 
         for charge in charges:
-            query_text = self._build_charge_query_text(charge)
+            query_text = self._charge_to_article_query(charge)
             if not query_text.strip():
                 logger.warning("Skipping charge with no queryable text: %s", charge)
                 continue
@@ -116,20 +100,20 @@ class LegalResearcherAgent(AgentBase):
                     seen.add(key)
                     result.append(article)
 
-        if not result:
-            logger.warning(
-                "No articles found via ANN for any charge — LLM will rely on internal knowledge"
-            )
+        if result:
+            logger.info("Article resolution complete — %d unique article(s)", len(result))
         else:
-            logger.info(
-                "Article resolution complete — %d unique article(s) from ANN search",
-                len(result),
-            )
+            logger.warning("No articles found via KG — LLM will rely on internal knowledge")
 
         return result
 
-    # ── VS retrieval: accumulate unique principles ────────────────────
-    def _resolve_principles_for_charges(self,charges: list,procedural_violations: list,incidents: list) -> list:
+    # ── accumulate unique principles across charges, violations, incidents ────
+    def _resolve_principles(
+        self,
+        charges: list,
+        procedural_violations: list,
+        incidents: list,
+    ) -> list[dict]:
         if self.vs is None:
             logger.warning("No vector store — skipping principles retrieval.")
             return []
@@ -140,53 +124,58 @@ class LegalResearcherAgent(AgentBase):
         def _accumulate(query_text: str, source: str) -> None:
             if not query_text or not query_text.strip():
                 return
-            
-            transformed_query = self.query_transformation(query_text)['principle_query']
-            docs = self.retrieve_principles(transformed_query, self.vs)
-            for doc in docs['hits']:
-                text = doc.page_content if hasattr(doc, "page_content") else str(doc)
+            try:
+                transformed = self.query_transformation(query_text)["principle_query"]
+            except Exception as e:
+                logger.warning("query_transformation failed for source=%s: %s", source, e)
+                return
+
+            # retrieve_principles returns List[RetrievedDoc]
+            for doc in self.retrieve_principles(transformed, self.vs):
+                text = doc.page_content
                 key  = text[:80]
                 if key not in seen:
                     seen.add(key)
                     result.append({
                         "principle_text": text,
-                        "court_source": doc.metadata.get("source_file", None) if hasattr(doc, "metadata") else None,
-                        "applicable_to":  source,
+                        "court_source":   (
+                            doc.metadata.get("source_file")
+                            if doc.metadata else None
+                        ),
+                        "applicable_to": source,
                     })
 
         for charge in charges:
-            _accumulate(self._build_charge_query_text_for_principles(charge), "charge")
+            _accumulate(self._charge_to_principle_query(charge), "charge")
 
         for violation in procedural_violations:
-            issue_desc = (
-                getattr(violation, "issue_description", None) or str(violation)
-            ).strip()
-            _accumulate(issue_desc, "procedural_violation")
+            desc = (getattr(violation, "issue_description", None) or str(violation)).strip()
+            _accumulate(desc, "procedural_violation")
 
         for incident in incidents:
-            incident_desc = (
-                getattr(incident, "incident_description", None) or str(incident)
-            ).strip()
-            _accumulate(incident_desc[:120], "incident_narrative")
+            desc = (getattr(incident, "incident_description", None) or str(incident)).strip()
+            _accumulate(desc[:120], "incident_narrative")
 
-        if not result:
-            logger.warning("No principles found via VS for any query source.")
+        if result:
+            logger.info("Principles resolution complete — %d unique principle(s)", len(result))
         else:
-            logger.info(
-                "Principles resolution complete — %d unique principle(s)", len(result)
-            )
+            logger.warning("No principles found via VS for any query source.")
 
         return result
 
-    # ── prompt builder ────────────────────────────────────────────────
-    def _build_prompt(self, state: AgentState, case_articles: list[dict], applied_principles: list) -> str:
-        # ── charges + incidents only — no defendants, no procedural data ──────
+    # ── prompt builder ────────────────────────────────────────────────────────
+    def _build_prompt(
+        self,
+        state: AgentState,
+        case_articles: list[dict],
+        applied_principles: list,
+    ) -> str:
         case_summary = json.dumps(
             {
                 "charges": [
                     {
-                        "incident_type":     getattr(c, "incident_type", None),
-                        "description": getattr(c, "description", None),
+                        "incident_type": getattr(c, "incident_type", None),
+                        "description":   getattr(c, "description",   None),
                     }
                     for c in (state.charges or [])
                 ],
@@ -221,33 +210,29 @@ class LegalResearcherAgent(AgentBase):
             f"{EXPECTED_OUTPUT_SCHEMA}"
         )
 
-    # ── main entry ────────────────────────────────────────────────────
+    # ── main entry ────────────────────────────────────────────────────────────
     def run(self, state):
         charges_count = len(state.charges or [])
         logger.info("LegalResearcherAgent starting — %d charge(s)", charges_count)
 
         if not state.charges:
-            base_state = self._empty_update(state, "legal_researcher", {})
             return self._empty_update(state, "legal_researcher", {
                 "case_articles":      [],
                 "applied_principles": [],
             })
 
         procedural_violations = (
-            state.procedural_audit.violations
-            if state.procedural_audit
-            else []
+            state.procedural_audit.violations if state.procedural_audit else []
         )
-        incidents = state.incidents or []
 
-        # ── retrieval (no KG method call — pure ANN like ProceduralAuditorAgent) ──
         case_articles      = self._resolve_articles_for_charges(state.charges)
-        applied_principles = self._resolve_principles_for_charges(
-            state.charges, procedural_violations, incidents
+        applied_principles = self._resolve_principles(
+            state.charges,
+            procedural_violations,
+            state.incidents or [],
         )
 
         prompt = self._build_prompt(state, case_articles, applied_principles)
-        logger.debug("LegalResearcherAgent prompt built — invoking LLM")
 
         try:
             response      = self._llm_invoke_with_retries(
@@ -257,11 +242,11 @@ class LegalResearcherAgent(AgentBase):
             legal_package = self._parse_agent_json(response.content)
         except Exception as e:
             logger.error("LLM invocation failed: %s — using fallback", e)
-            legal_package = self._build_fallback_package([])
+            legal_package = self._build_fallback_package()
 
         if not isinstance(legal_package, dict):
             logger.error("LLM response is not a dict — using fallback")
-            legal_package = self._build_fallback_package([])
+            legal_package = self._build_fallback_package()
         else:
             logger.info(
                 "Legal research complete — %d case_article(s), %d principle(s)",
@@ -271,8 +256,8 @@ class LegalResearcherAgent(AgentBase):
 
         return self._empty_update(state, "legal_researcher", {
             "case_articles":      legal_package.get("case_articles", []),
+            # prefer LLM-enriched principles; fall back to raw retrieved ones
             "applied_principles": (
-                legal_package.get("applied_principles", [])   # from LLM
-                or applied_principles 
+                legal_package.get("applied_principles") or applied_principles
             ),
         })

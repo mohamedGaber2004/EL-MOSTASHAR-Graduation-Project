@@ -52,6 +52,7 @@ class BaseModel :
             project = "el-mosta4ar",
             vertexai = True,
             max_tokens = 4096,
+            api_key=self.cfg.VERTIX_API_KEY
         )
         self.as_celebras_llm = ChatCerebras(
             model=self.model_name,

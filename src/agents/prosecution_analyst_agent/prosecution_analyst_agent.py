@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any
+from pydantic import BaseModel
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -55,7 +56,7 @@ class ProsecutionAnalystAgent(AgentBase):
             "overall_audit_assessment": audit.overall_assessment,
             "critical_nullities":       audit.critical_nullities or [],
         }
-        return self.prompt.format(context=json.dumps(ctx, ensure_ascii=False, indent=2))
+        return self.prompt.format(context=json.dumps(ctx, ensure_ascii=False, indent=2, default=lambda o: o.model_dump() if isinstance(o, BaseModel) else str(o)))
 
     # ── LLM call ──────────────────────────────────────────────────
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -90,72 +90,48 @@ class ScoredSearchResponse(BaseModel):
 # =============================================================================
 
 # ── Status ────────────────────────────────────────────────────────────────────
-
-@vs_router.get(
-    "/status",
-    response_model=VSStatusResponse,
-    summary="Check whether a vector store is currently loaded",
-)
+@vs_router.get("/status",response_model=VSStatusResponse,summary="Check whether a vector store is currently loaded",)
 def vs_status() -> VSStatusResponse:
     return VSStatusResponse(loaded=_vs is not None)
 
 
 # ── Build ─────────────────────────────────────────────────────────────────────
-
-@vs_router.post(
-    "/build",
-    response_model=BuildVSResponse,
-    summary="Build a FAISS index from the Na2d corpus (rulings + principles)",
-)
-def build_vs_endpoint(
-    index_path: str = Query("na2d_faiss_index", description="Directory to save the index"),
-) -> BuildVSResponse:
+@vs_router.post("/build",response_model=BuildVSResponse,summary="Build a FAISS index from the Na2d corpus (rulings + principles)")
+def build_vs_endpoint(index_path: str = Query("na2d_faiss_index", description="Directory to save the index")) -> BuildVSResponse:
     global _vs
     try:
-        na2d       = get_na2d_chunks()
-        rulings    = na2d[Na2dOutputKey.RULINGS]
-        principles = na2d[Na2dOutputKey.PRINCIPLES]
-        docs       = rulings + principles
-        embeddings = get_embeddings()
-
-        if not docs:
+        na2d = get_na2d_chunks()
+        rulings = na2d.get(Na2dOutputKey.RULINGS, [])
+        principles = na2d.get(Na2dOutputKey.PRINCIPLES, [])
+        combined_docs = rulings + principles
+        
+        total_count = len(combined_docs)
+        if total_count == 0:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Na2d corpus is empty — nothing to index.",
+                detail="Cannot build vector store with zero documents."
             )
-
-        with _VS_LOCK:
-            _vs = build_vector_store(docs, embeddings, index_path=index_path)
-
-        logger.info(
-            "VS built: %d docs (%d rulings + %d principles) → %s",
-            len(docs), len(rulings), len(principles), index_path,
-        )
+            
+        embeddings = get_embeddings()
+        
+        # Build vector store instance using corporate package builder utilities
+        _vs = build_vector_store(docs=combined_docs, embeddings=embeddings, index_path=index_path)
+        
         return BuildVSResponse(
-            message          = "Vector store built and loaded successfully.",
+            message          = "FAISS Vector store constructed and synchronized successfully.",
             rulings_count    = len(rulings),
             principles_count = len(principles),
-            total_count      = len(docs),
-            index_path       = index_path,
+            total_count      = total_count,
+            index_path       = index_path
         )
-
-    except HTTPException:
-        raise
     except Exception as exc:
-        logger.exception("build_vs_endpoint failed")
+        logger.exception("Failed to build local vector store index context.")
         raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ── Load ──────────────────────────────────────────────────────────────────────
-
-@vs_router.post(
-    "/load",
-    response_model=LoadVSResponse,
-    summary="Load a previously persisted FAISS index into memory",
-)
-def load_vs_endpoint(
-    index_path: str = Query("na2d_faiss_index", description="Directory of the saved index"),
-) -> LoadVSResponse:
+@vs_router.post("/load",response_model=LoadVSResponse,summary="Load a previously persisted FAISS index into memory")
+def load_vs_endpoint(index_path: str = Query("na2d_faiss_index", description="Directory of the saved index")) -> LoadVSResponse:
     global _vs
     try:
         embeddings = get_embeddings()
@@ -174,12 +150,7 @@ def load_vs_endpoint(
 
 
 # ── Search ────────────────────────────────────────────────────────────────────
-
-@vs_router.post(
-    "/search",
-    response_model=SearchResponse,
-    summary="Similarity search over rulings and principles",
-)
+@vs_router.post("/search",response_model=SearchResponse,summary="Similarity search over rulings and principles")
 def vs_search(
     req: SearchRequest,
     vs  = Depends(get_vs),
@@ -198,12 +169,7 @@ def vs_search(
 
 
 # ── Search with scores ────────────────────────────────────────────────────────
-
-@vs_router.post(
-    "/search/scored",
-    response_model=ScoredSearchResponse,
-    summary="Similarity search returning L2 distance scores",
-)
+@vs_router.post("/search/scored",response_model=ScoredSearchResponse,summary="Similarity search returning L2 distance scores")
 def vs_search_scored(
     req: SearchRequest,
     vs  = Depends(get_vs),

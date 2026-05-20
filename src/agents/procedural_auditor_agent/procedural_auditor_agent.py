@@ -1,25 +1,23 @@
 from __future__ import annotations
 import logging
 
-from ..agent_base.agent_base import AgentBase
 from langchain_core.messages import HumanMessage, SystemMessage
+
+from ..agent_base.agent_base import AgentBase
 from src.Graphstore.KG_builder import LegalKnowledgeGraph
+from src.Graph.state import AgentState
 from src.agents.procedural_auditor_agent.procedural_auditor_output_model import (
     ProceduralAuditResult,
-    ProceduralIssue, 
-    ExcludedDefenseClaim
+    ProceduralIssue,
+    ExcludedDefenseClaim,
 )
-from src.routers.kg_retriever_router import kg_retrieve
-
-from src.Graph.state import AgentState
+from src.routers.kg_retriever_router import get_kg_retriever
 from src.agents.procedural_auditor_agent.procedural_auditor_prompt import (
     PROCEDURAL_AUDITOR_AGENT_PROMPT,
     EXPECTED_OUTPUT_SCHEMA,
 )
 
-
 logger = logging.getLogger(__name__)
-
 
 class ProceduralAuditorAgent(AgentBase):
     """Audits procedural issues against articles retrieved from the KG."""
@@ -30,121 +28,102 @@ class ProceduralAuditorAgent(AgentBase):
             "PROCEDURAL_AUDITOR_TEMP",
             PROCEDURAL_AUDITOR_AGENT_PROMPT,
         )
-        self.kg = kg
-        self.vs = vector_store
+        self.kg         = kg
+        self.vs         = vector_store
         self.embeddings = embeddings
 
-    def _retrieve_articles_for_proceeding(self,text: str,k: int = 15,threshold: float = 0.45) -> list[dict]:
+    # ── KG article retrieval ──────────────────────────────────────────────────
+    def _retrieve_articles_for_proceeding(
+        self, text: str, k: int = 15, threshold: float = 0.45
+    ) -> list[dict]:
         if self.kg is None or self.embeddings is None:
             logger.warning("KG or embeddings not available — skipping retrieval")
             return []
 
         try:
-            clean_query = self.query_transformation(text)['article_query']
+            clean_query = self.query_transformation(text)["article_query"]
         except Exception as e:
             logger.warning("query_transformation failed for [%s...]: %s", text[:60], e)
-            return ""
+            return []
 
         try:
-            records = kg_retrieve(
-                req = {
-                    "question":clean_query,
-                    "k":k,
-                    "threshold":threshold
-                }
+            records = get_kg_retriever().retrieve(
+                question=clean_query, k=k, threshold=threshold
             )
         except Exception as e:
-            logger.warning("kg retriver failed for [%s...]: %s", text[:60], e)
+            logger.warning("kg retriever failed for [%s...]: %s", text[:60], e)
             return []
 
         articles = [
             {
-                "Article Number": str(r["article_number"]),
-                "The Law of the Article": str(r["article_id"]),
-                "The Article Text": str(r["text"]),
+                "Article Number":        str(r["article_number"]),
+                "The Law of the Article": str(r["law_id"]),
+                # truncate article text to avoid context overflow
+                "The Article Text":       str(r["text"]),
             }
-            for r in records['sources']
+            for r in records.sources
             if r.get("article_number") and float(r.get("score", 0)) >= threshold
         ]
 
-        logger_content = records.query + records.article_count + records.table_count 
-        logger.info(str(logger_content))
-    
+        logger.info(
+            "query=%s | articles=%d | tables=%d",
+            records.query,
+            len(records.article_contexts),
+            len(records.table_contexts),
+        )
         return articles
 
-    # ── extract plain text from a proceeding or defense issue entry ───
+    # ── text extractor ────────────────────────────────────────────────────────
     @staticmethod
     def _extract_text(entry) -> str:
-        """
-        Safely extract a searchable text string from either a dict entry
-        (criminal proceeding or formal defense issue) or a plain string.
-        """
         if isinstance(entry, dict):
             return (
                 entry.get("issue_description")
-                or entry.get("warrant_present")
                 or entry.get("procedure_type")
+                or entry.get("warrant_present")
                 or entry.get("description")
                 or entry.get("text")
                 or ""
             ).strip()
         return str(entry).strip()
 
-    # ── deduplicated article accumulator ──────────────────────────────
-    @staticmethod
-    def _accumulate_unique(entries: list,fetch_fn,label: str) -> list[dict]:
-        """
-        Iterate `entries`, call `fetch_fn(text)` for each, and accumulate
-        unique article dicts (deduplicated by Article Number).
-        """
-        seen: set[str] = set()
+    # ── deduplicated article accumulator ──────────────────────────────────────
+    def _accumulate_unique_articles(
+        self, entries: list, label: str
+    ) -> list[dict]:
+        seen:   set[str]   = set()
         result: list[dict] = []
 
         for entry in entries:
-            text = ProceduralAuditorAgent._extract_text(entry)
+            text = self._extract_text(entry)
             if not text or text.lower() == "none":
                 logger.warning("Skipping empty entry in [%s]", label)
                 continue
 
-            for article in fetch_fn(text):
+            for article in self._retrieve_articles_for_proceeding(text):
                 key = article["Article Number"]
                 if key not in seen:
                     seen.add(key)
                     result.append(article)
 
-        if not result:
-            logger.warning("No articles found for [%s] — LLM will rely on internal knowledge", label)
-        else:
+        if result:
             logger.info("Article resolution [%s] — %d unique article(s)", label, len(result))
-
+        else:
+            logger.warning(
+                "No articles found for [%s] — LLM will rely on internal knowledge", label
+            )
         return result
 
-    # ── dynamic article discovery ─────────────────────────────────────
-    def _resolve_article_numbers(self,criminal_proceedings: list,defense_procedural_issues: list) -> tuple[list[dict], list[dict]]:
+    # ── deduplicated principle accumulator ────────────────────────────────────
+    def _accumulate_unique_principles(
+        self, entries: list, label: str
+    ) -> list[dict]:
         """
-        Returns two lists of unique article dicts:
-          1. Articles relevant to the criminal proceedings.
-          2. Articles relevant to the defense procedural issues.
+        Retrieve unique judicial principles for a list of entries.
+        Returns plain dicts (not RetrievedDoc objects) for easy JSON serialisation.
         """
-        proceedings_articles = self._accumulate_unique(
-            criminal_proceedings,
-            self._retrieve_articles_for_proceeding,
-            "criminal_proceedings",
-        )
-        defense_articles = self._accumulate_unique(
-            defense_procedural_issues,
-            self._retrieve_articles_for_proceeding,
-            "defense_procedural_issues",
-        )
-        return proceedings_articles, defense_articles
-
-    # ── judicial principles retrieval ─────────────────────────────────
-    def _retrieve_principles_for_entries(self,entries: list,label: str) -> list:
-        """
-        Retrieve unique judicial principles for a list of proceeding/issue entries.
-        """
-        seen: set = set()
-        result = []
+        seen:   set[str] = set()
+        result: list     = []
 
         for entry in entries:
             text = self._extract_text(entry)
@@ -152,45 +131,74 @@ class ProceduralAuditorAgent(AgentBase):
                 logger.warning("Skipping empty entry in [%s] while retrieving principles", label)
                 continue
 
-            transformed_query = self.query_transformation(text)['principle_query']
-            for principle in self.retrieve_principles(transformed_query, self.vs):
-                key = str(principle)
+            try:
+                transformed = self.query_transformation(text)["principle_query"]
+            except Exception as e:
+                logger.warning("query_transformation failed in [%s]: %s", label, e)
+                continue
+
+            # retrieve_principles returns List[RetrievedDoc]
+            for doc in self.retrieve_principles(transformed, self.vs):
+                key = doc.page_content[:80]
                 if key not in seen:
                     seen.add(key)
-                    result.append(principle)
+                    result.append({
+                        "principle_text": doc.page_content,
+                        "court_source":   (
+                            doc.metadata.get("source_file") if doc.metadata else None
+                        ),
+                    })
 
-        if not result:
-            logger.warning("No principles found for [%s]", label)
-        else:
+        if result:
             logger.info("Principles resolution [%s] — %d unique principle(s)", label, len(result))
+        else:
+            logger.warning("No principles found for [%s]", label)
 
         return result
 
-    def retrieve_proceedings_and_defense_principles(self,criminal_proceedings: list,defense_procedural_issues: list) -> tuple[list, list]:
-        proceedings_principles = self._retrieve_principles_for_entries(
+    # ── resolve articles + principles for proceedings and defense ─────────────
+    def _resolve_all(
+        self,
+        criminal_proceedings: list,
+        defense_procedural_issues: list,
+    ) -> tuple[list, list, list, list]:
+        """
+        Returns (proceedings_articles, defense_articles,
+                 proceedings_principles, defense_principles).
+        Articles are capped at _MAX_ARTICLES_IN_PROMPT to prevent context overflow.
+        """
+        proceedings_articles = self._accumulate_unique_articles(
             criminal_proceedings, "criminal_proceedings"
         )
-        issues_principles = self._retrieve_principles_for_entries(
+
+        defense_articles = self._accumulate_unique_articles(
             defense_procedural_issues, "defense_procedural_issues"
         )
-        return proceedings_principles, issues_principles
 
-    # ── prompt builder ────────────────────────────────────────────────
+        proceedings_principles = self._accumulate_unique_principles(
+            criminal_proceedings, "criminal_proceedings"
+        )
+        defense_principles = self._accumulate_unique_principles(
+            defense_procedural_issues, "defense_procedural_issues"
+        )
+
+        return proceedings_articles, defense_articles, proceedings_principles, defense_principles
+
+    # ── prompt builder ────────────────────────────────────────────────────────
     def _build_prompt(self, state: AgentState) -> str:
-        incidents = getattr(state, "incidents", [])
-        criminal_proceedings = getattr(state, "criminal_proceedings", [])
+        incidents = getattr(state, "incidents", []) or []
+        criminal_proceedings = getattr(state, "criminal_proceedings", []) or []
         defense_procedural_issues = [
-            {"formal_defenses": getattr(document, "formal_defenses")}
-            for document in state.defense_documents
+            {"formal_defenses": getattr(doc, "formal_defenses", [])}
+            for doc in (state.defense_documents or [])
         ]
-        proceedings_articles, defense_articles = self._resolve_article_numbers(
-            criminal_proceedings, defense_procedural_issues
-        )
-        proceedings_principles, defense_principles = (
-            self.retrieve_proceedings_and_defense_principles(
-                criminal_proceedings, defense_procedural_issues
-            )
-        )
+
+        (
+            proceedings_articles,
+            defense_articles,
+            proceedings_principles,
+            defense_principles,
+        ) = self._resolve_all(criminal_proceedings, defense_procedural_issues)
 
         return (
             "## المسائل الإجرائية المستخرجة من وقائع القضية:\n"
@@ -226,18 +234,20 @@ class ProceduralAuditorAgent(AgentBase):
             "## صيغة الإجابة (JSON فقط — بلا أي نص خارج JSON):\n"
             f"{EXPECTED_OUTPUT_SCHEMA}"
         )
-    
-    # ── main entry ────────────────────────────────────────────────────
-    def run(self, state):
-        criminal_proceedings      = getattr(state, "criminal_proceedings", []) or []
-        defense_procedural_issues = getattr(state.defense_documents, "formal_defenses", []) or []
 
-        proceedings_count = len(criminal_proceedings)
-        defense_count     = len(defense_procedural_issues)
+    # ── main entry ────────────────────────────────────────────────────────────
+    def run(self, state):
+        criminal_proceedings = getattr(state, "criminal_proceedings", []) or []
+        defense_procedural_issues = [
+            item
+            for doc in (state.defense_documents or [])
+            for item in (getattr(doc, "formal_defenses", []) or [])
+        ]
 
         logger.info(
             "ProceduralAuditorAgent starting — %d proceeding(s), %d defense issue(s)",
-            proceedings_count, defense_count,
+            len(criminal_proceedings),
+            len(defense_procedural_issues),
         )
 
         if not criminal_proceedings and not defense_procedural_issues:
@@ -247,19 +257,17 @@ class ProceduralAuditorAgent(AgentBase):
                 )
             })
 
-        prompt = self._build_prompt(state)
-        logger.debug("ProceduralAuditorAgent prompt built — invoking LLM")
-
         _fallback = ProceduralAuditResult(
             overall_assessment="فشل استدعاء النموذج — لا يمكن إتمام المراجعة الإجرائية",
         )
 
         try:
-            response= self._llm_invoke_with_retries(
+            prompt   = self._build_prompt(state)
+            response = self._llm_invoke_with_retries(
                 self._llm,
                 [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
             )
-            raw_package  = self._parse_agent_json(response.content)
+            raw_package = self._parse_agent_json(response.content)
         except Exception as e:
             logger.error("ProceduralAuditorAgent LLM invocation failed: %s", e)
             raw_package = None
@@ -280,9 +288,9 @@ class ProceduralAuditorAgent(AgentBase):
                         for c in raw_package.get("excluded_defense_claims", [])
                         if isinstance(c, dict)
                     ],
-                    overall_assessment=raw_package.get("overall_assessment"),
-                    critical_nullities=raw_package.get("critical_nullities", []),
-                    kg_articles_used=raw_package.get("kg_articles_used", []),
+                    overall_assessment = raw_package.get("overall_assessment"),
+                    critical_nullities = raw_package.get("critical_nullities", []),
+                    kg_articles_used   = raw_package.get("kg_articles_used", []),
                 )
             except Exception as e:
                 logger.error("ProceduralAuditorAgent: Pydantic validation failed: %s", e)
@@ -296,8 +304,8 @@ class ProceduralAuditorAgent(AgentBase):
             )
 
         audit_result._meta = {
-            "proceedings_count":    proceedings_count,
-            "defense_issues_count": defense_count,
+            "proceedings_count":    len(criminal_proceedings),
+            "defense_issues_count": len(defense_procedural_issues),
             "kg_connected":         self.kg is not None,
             "vs_connected":         self.vs is not None,
         }

@@ -1,23 +1,44 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from src.Chunking.chunking import get_na2d_chunks
+from src.Chunking.chunking_enums import Na2dOutputKey
 from src.retriever.vs_retriever.vs_reriever import (
     get_dense_retriever,
     get_hybrid_retriever,
     get_sparse_retriever,
 )
 from src.routers.vs_router import get_vs
-from src.Chunking.chunking_enums import Na2dOutputKey
 
 logger = logging.getLogger(__name__)
 
 vs_retriever_router = APIRouter(prefix="/vs/retriever", tags=["VS Retriever"])
+
+_cached_bm25_retriever: Optional[Any] = None
+_BM25_LOCK = threading.Lock()
+
+def get_cached_sparse_retriever() -> Any:
+    """Lazily loads and caches the BM25 index over the entire corpus."""
+    global _cached_bm25_retriever
+    if _cached_bm25_retriever is None:
+        with _BM25_LOCK:
+            if _cached_bm25_retriever is None:
+                logger.info("Initializing global BM25 sparse corpus index...")
+                na2d = get_na2d_chunks()
+                docs = na2d[Na2dOutputKey.RULINGS] + na2d[Na2dOutputKey.PRINCIPLES]
+                if not docs:
+                    raise ValueError("Empty corpus returned from get_na2d_chunks.")
+                
+                # Build default index
+                _cached_bm25_retriever = get_sparse_retriever(docs, k=5)
+                logger.info("Global BM25 sparse corpus index established successfully.")
+    return _cached_bm25_retriever
 
 
 # =============================================================================
@@ -49,20 +70,8 @@ class RetrieveResponse(BaseModel):
 # =============================================================================
 
 # ── Dense (FAISS) ─────────────────────────────────────────────────────────────
-
-@vs_retriever_router.post(
-    "/dense",
-    response_model=RetrieveResponse,
-    summary="Semantic retrieval via FAISS dense vectors",
-)
-def dense_retrieve(
-    req: RetrieveRequest,
-    vs  = Depends(get_vs),
-) -> RetrieveResponse:
-    """
-    Wraps the loaded FAISS store as a LangChain retriever and invokes it.
-    Pure semantic (cosine / L2) search — no lexical component.
-    """
+@vs_retriever_router.post("/dense",response_model=RetrieveResponse,summary="Semantic retrieval via FAISS dense vectors")
+def dense_retrieve(req: RetrieveRequest,vs  = Depends(get_vs)) -> RetrieveResponse:
     try:
         retriever = get_dense_retriever(vs,k= req.k,)
         docs = retriever.invoke(req.query)
@@ -79,30 +88,18 @@ def dense_retrieve(
 
 
 # ── Sparse (BM25) ─────────────────────────────────────────────────────────────
-
-@vs_retriever_router.post("/sparse",response_model=RetrieveResponse,summary="Lexical retrieval via in-memory BM25 (Okapi)")
-def sparse_retrieve(req: RetrieveRequest) -> RetrieveResponse:
-    """
-    Builds an in-memory BM25 index over the current chunk corpus (filtered by
-    the supplied metadata constraints) and retrieves the top-k results.
-
-    Note: BM25 is rebuilt per request from the live corpus.  For high-QPS
-    scenarios consider caching the index at application startup.
-    """
+@vs_retriever_router.post("/sparse", response_model=RetrieveResponse, summary="Lexical retrieval via cached BM25 (Okapi)")
+def sparse_retrieve(req: RetrieveRequest, sparse_retriever = Depends(get_cached_sparse_retriever)) -> RetrieveResponse:
     try:
-        na2d = get_na2d_chunks()
-        docs = na2d[Na2dOutputKey.RULINGS] + na2d[Na2dOutputKey.PRINCIPLES]
-        retriever = get_sparse_retriever(docs,k= req.k)
-        results = retriever.invoke(req.query)
+        # Avoid rebuilding; update runtime parameter k dynamically
+        sparse_retriever.k = req.k
+        results = sparse_retriever.invoke(req.query)
         return RetrieveResponse(
             query    = req.query,
             strategy = "sparse",
             hits     = [RetrievedDoc(page_content=d.page_content, metadata=d.metadata) for d in results],
         )
-    except HTTPException:
-        raise
     except ValueError as exc:
-        # empty corpus after filtering
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     except Exception as exc:
         logger.exception("sparse_retrieve failed")
@@ -110,27 +107,21 @@ def sparse_retrieve(req: RetrieveRequest) -> RetrieveResponse:
 
 
 # ── Hybrid (FAISS + BM25 via RRF) ────────────────────────────────────────────
-
-@vs_retriever_router.post("/hybrid",response_model=RetrieveResponse,summary="Hybrid retrieval: RRF fusion of FAISS (dense) and BM25 (sparse)")
-def hybrid_retrieve(req: HybridRetrieveRequest,vs  = Depends(get_vs)) -> RetrieveResponse:
-    """
-    Combines FAISS semantic search and BM25 lexical search using
-    Reciprocal Rank Fusion (RRF).  *dense_weight* and *sparse_weight* are
-    normalised internally so they need not sum to 1.
-
-    This is the recommended strategy for Arabic legal text, where exact
-    term matches (article numbers, specific legal terms) complement
-    semantic similarity.
-    """
+@vs_retriever_router.post("/hybrid", response_model=RetrieveResponse, summary="Hybrid retrieval: RRF fusion of FAISS and BM25")
+def hybrid_retrieve(req: HybridRetrieveRequest, vs = Depends(get_vs), sparse_retriever = Depends(get_cached_sparse_retriever)) -> RetrieveResponse:
     try:
-        if req.dense_weight <= 0 or req.sparse_weight <= 0:
+        if req.dense_weight <= 0 and req.sparse_weight <= 0:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Both dense_weight and sparse_weight must be > 0.",
+                detail="At least one weight (dense_weight or sparse_weight) must be strictly greater than 0.",
             )
 
-        na2d = get_na2d_chunks()
-        docs = na2d[Na2dOutputKey.RULINGS] + na2d[Na2dOutputKey.PRINCIPLES]
+        # Retrieve underlying document list directly from cached sparse index metadata to avoid extraction recalculation
+        docs = sparse_retriever.docs if hasattr(sparse_retriever, 'docs') else []
+        if not docs:
+            na2d = get_na2d_chunks()
+            docs = na2d[Na2dOutputKey.RULINGS] + na2d[Na2dOutputKey.PRINCIPLES]
+
         retriever = get_hybrid_retriever(
             vs,
             docs,
@@ -144,8 +135,6 @@ def hybrid_retrieve(req: HybridRetrieveRequest,vs  = Depends(get_vs)) -> Retriev
             strategy = f"hybrid(dense={req.dense_weight:.2f}, sparse={req.sparse_weight:.2f})",
             hits     = [RetrievedDoc(page_content=d.page_content, metadata=d.metadata) for d in results],
         )
-    except HTTPException:
-        raise
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     except Exception as exc:

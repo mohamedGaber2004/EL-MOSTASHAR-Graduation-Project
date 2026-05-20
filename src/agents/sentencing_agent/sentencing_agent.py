@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any
+from pydantic import BaseModel
 
 from src.Graph.state import AgentState
 from src.agents.sentencing_agent.sentencing_output_model import CivilClaim, CivilClaimStatus
@@ -60,7 +61,7 @@ class SentencingAgent(AgentBase):
             # ── procedural: critical nullities only, not full violations ──
             "critical_nullities": audit.critical_nullities or [],
         }
-        return self.prompt.format(context=json.dumps(ctx, ensure_ascii=False, indent=2))
+        return self.prompt.format(context=json.dumps(ctx, ensure_ascii=False, indent=2, default=lambda o: o.model_dump() if isinstance(o, BaseModel) else str(o)))
 
     def _call_llm(self, prompt_text: str) -> str:
         from langchain_core.messages import HumanMessage, SystemMessage

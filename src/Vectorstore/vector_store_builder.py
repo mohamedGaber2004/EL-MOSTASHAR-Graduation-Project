@@ -29,16 +29,6 @@ def build_vector_store(
     embeddings,
     index_path: str = "na2d_faiss_index",
 ) -> FAISS:
-    """Embed *docs*, build a FAISS index, persist it, and return it.
-
-    Args:
-        docs:       Non-empty list of ruling / principle Documents.
-        embeddings: Any LangChain-compatible embeddings object.
-        index_path: Directory path where the index will be saved.
-
-    Raises:
-        ValueError: If *docs* is empty.
-    """
     if not docs:
         raise ValueError("Cannot build a vector store from an empty document list.")
 
@@ -82,19 +72,6 @@ def search(
     crime_category:  str | None = None,
     book_title:      str | None = None,
 ) -> list[Document]:
-    """Similarity search over rulings and/or principles.
-
-    Args:
-        vs:             A loaded or freshly built FAISS store.
-        query:          Free-text search query (Arabic).
-        k:              Number of results to return.
-        doc_type:       Filter by :class:`DocType` — ``ruling`` or ``principle``.
-        crime_category: Filter rulings by crime category folder name.
-        book_title:     Filter principles by book title.
-
-    Returns:
-        Up to *k* Documents ordered by similarity.
-    """
     f = _build_filter(
         doc_type       = doc_type.value if isinstance(doc_type, DocType) else doc_type,
         crime_category = crime_category,
@@ -112,13 +89,7 @@ def search_with_scores(
     crime_category:  str | None = None,
     book_title:      str | None = None,
 ) -> list[tuple[Document, float]]:
-    """Similarity search that also returns L2 distance scores.
 
-    Lower scores indicate higher similarity.
-
-    Returns:
-        List of ``(Document, score)`` pairs ordered by ascending distance.
-    """
     f = _build_filter(
         doc_type       = doc_type.value if isinstance(doc_type, DocType) else doc_type,
         crime_category = crime_category,
