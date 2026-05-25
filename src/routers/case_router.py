@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import List, Optional, Any
 from threading import Lock
+import shutil
 import os , logging
 
 logger = logging.getLogger(__name__)
@@ -19,41 +20,63 @@ _CASE_CACHE: dict = {}
 _CACHE_LOCK = Lock()
 
 
-class InvokeCaseRequest(BaseModel):
-    case_id:          str
-    source_documents: Optional[List[str]] = None
-
-
 @router.post("/invoke_case")
-async def invoke_case(payload: InvokeCaseRequest) -> Any:
-    source_docs = payload.source_documents or []
-    if not source_docs:
-        case_dir = os.path.join("Datasets", "User_Cases", payload.case_id)
-        if os.path.isdir(case_dir):
-            source_docs = [case_dir]
+async def invoke_case(
+    case_id: str = Form(...),
+    files: List[UploadFile] = File(...),
+):
+    """
+    Endpoint to invoke AI processing on a case by receiving files from Spring Boot.
+    """
+    if not case_id or not case_id.strip():
+        raise HTTPException(status_code=400, detail="case_id is required")
 
-    state = AgentState(case_id=payload.case_id, source_documents=source_docs)
+    # Create directory
+    case_dir = os.path.join("Datasets", "User_Cases", case_id.strip())
+    os.makedirs(case_dir, exist_ok=True)
+
+    saved_files_count = 0
 
     try:
+        # Save uploaded files
+        for uploaded_file in files:
+            if not uploaded_file.filename:
+                continue
+
+            file_path = os.path.join(case_dir, uploaded_file.filename)
+
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(uploaded_file.file, buffer)
+
+            saved_files_count += 1
+
+        if saved_files_count == 0:
+            raise HTTPException(status_code=400, detail="No valid files were uploaded")
+
+        # Run the AI graph
+        state = AgentState(case_id=case_id, source_documents=[case_dir])
+
         final = run_case(state)
+
+        # Prepare response
+        if hasattr(final, "model_dump"):
+            result = final.model_dump()
+        elif isinstance(final, dict):
+            result = final
+        else:
+            result = {"raw_result": str(final)}
+
+        return {
+            "success": True,
+            "message": "Case processed successfully",
+            "case_id": case_id,
+            "files_received": saved_files_count,
+            "result": result
+        }
+
     except Exception as e:
-        # str(e) can be empty for some exception types — always include the class name
-        detail = f"{type(e).__name__}: {str(e)}" if str(e) else type(e).__name__
-        logger.error("invoke_case failed for case_id=%s: %s", payload.case_id, detail, exc_info=True)
-        raise HTTPException(status_code=500, detail=detail)
-
-    # Normalize to JSON-serializable dict
-    if hasattr(final, "model_dump"):
-        out = final.model_dump()
-    elif isinstance(final, dict):
-        out = final
-    else:
-        out = {"error": "unexpected output type", "type": str(type(final))}
-
-    with _CACHE_LOCK:
-        _CASE_CACHE[payload.case_id] = out
-
-    return out
+        logger.error(f"Failed to process case {case_id}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @router.get("/get_case_result")
