@@ -1,0 +1,39 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: el_mosta4ar_api
+
+    ports:
+      - "8000:8000"
+
+    env_file:
+      - .env
+
+    environment:
+      PYTHONUNBUFFERED: 1
+
+      # HuggingFace cache paths
+      HF_HOME: /cache/hf
+      TRANSFORMERS_CACHE: /cache/hf/transformers
+      SENTENCE_TRANSFORMERS_HOME: /cache/hf/sentence-transformers
+
+    volumes:
+      # Persist datasets + FAISS index
+      - ./Datasets:/app/Datasets
+
+      # Persist HuggingFace downloaded models
+      - hf_cache:/cache/hf
+
+    restart: unless-stopped
+
+    command: >
+      uvicorn main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+
+volumes:
+  hf_cache:

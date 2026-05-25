@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environments
+.venv/
+venv/
+
+# Git
+.git/
+.gitignore
+
+# VSCode
+.vscode/
+
+# Pytest
+.pytest_cache/
+
+# Mac/Linux
+.DS_Store
+
+# Logs
+*.log
+
+# Environment variables
+.env
+
+# Docker
+docker-compose.yml
+
+# Large local data (optional)
+Experiments/
+
+# HuggingFace cache (local)
+.cache/
+
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Temporary files
+tmp/
+temp/
+
+# Node
+node_modules/

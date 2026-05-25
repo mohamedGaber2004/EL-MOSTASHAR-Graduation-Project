@@ -27,7 +27,7 @@ def _build_filter(**kwargs: Any) -> dict[str, Any]:
 def build_vector_store(
     docs: list[Document],
     embeddings,
-    index_path: str = "na2d_faiss_index",
+    index_path: str = "Datasets/na2d_faiss_index",
 ) -> FAISS:
     if not docs:
         raise ValueError("Cannot build a vector store from an empty document list.")
