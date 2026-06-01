@@ -3,697 +3,543 @@
 ## Table of Contents
 1. [Architecture Overview](#architecture-overview)
 2. [System Layers](#system-layers)
-3. [Component Architecture](#component-architecture)
+3. [Multi-Agent Pipeline](#multi-agent-pipeline)
 4. [Data Flow](#data-flow)
-5. [Agent Architecture](#agent-architecture)
-6. [Storage Architecture](#storage-architecture)
+5. [Retrieval Architecture](#retrieval-architecture)
+6. [Storage & Databases](#storage--databases)
 7. [API Architecture](#api-architecture)
-8. [Deployment Architecture](#deployment-architecture)
-9. [Design Patterns](#design-patterns)
-10. [Scalability Considerations](#scalability-considerations)
+8. [Component Interactions](#component-interactions)
 
 ---
 
 ## Architecture Overview
 
-### Core Principles
+### Core Design Principles
 
-The system architecture is built on the following principles:
+The system follows these architectural principles:
 
-1. **Modularity**: Independent, reusable components
-2. **Scalability**: Horizontal and vertical scaling capability
-3. **Resilience**: Graceful error handling and recovery
-4. **Extensibility**: Easy to add new agents and features
-5. **Observability**: Comprehensive logging and monitoring
+1. **Modular Agent Architecture**: 10 independent, specialized agents working in a coordinated pipeline
+2. **Hybrid Retrieval**: Multiple retrieval strategies (semantic, lexical, graph-based)
+3. **FastAPI REST Interface**: Stateless, scalable HTTP endpoints
+4. **Lazy Initialization**: Resources (graph, vector store, retrievers) initialized on-demand
+5. **Thread-Safe Singletons**: Global instances with locking mechanisms
+6. **Arabic-First**: Native support for Arabic language processing
 
-### Architectural Pattern: Microservices-Ready Monolith
-
-The current implementation is a **monolithic architecture** with microservices design principles:
+### High-Level Architecture
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│                API Gateway Layer (FastAPI)                │
-│              Request validation & routing                 │
-└────────────────────────────────────────────────────────────┘
-                        ↓
-┌─────────────────────────────────────────────────────────┐
-│         Multi-Agent Orchestration (LangGraph)           │
-│  Coordinates specialized agents for different tasks    │
-└─────────────────────────────────────────────────────────┘
-      ↓           ↓            ↓             ↓
-┌──────────┐  ┌────────┐  ┌────────┐  ┌─────────┐
-│ Ingest   │  │Analyze │  │ Query  │  │ Audit   │
-│ Agent    │  │ Agent  │  │ Agent  │  │ Agent   │
-└──────────┘  └────────┘  └────────┘  └─────────┘
-      ↓           ↓            ↓             ↓
-┌──────────────────────────────────────────────────────────┐
-│              Data Processing & Retrieval                 │
-│  Chunking │ Embedding │ Indexing │ Searching            │
-└──────────────────────────────────────────────────────────┘
-      ↓                    ↓
-┌──────────────────┐  ┌─────────────────┐
-│  Neo4j Graph DB  │  │  FAISS Vectors  │
-│  Knowledge Base  │  │  Semantic Index │
-└──────────────────┘  └─────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    FastAPI REST Layer                        │
+│  (/cases, /kg/retriever, /vs/retriever, /kg, /vs, /agents) │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+        ┌────────────────┼────────────────┐
+        │                │                │
+    ┌───▼───────────┐ ┌──▼──────────┐ ┌──▼──────────┐
+    │ Case Router   │ │ Retrieval   │ │ Management  │
+    │ invoke_case   │ │ Routers     │ │ Routers     │
+    │               │ │ (KG, VS)    │ │ (KG, VS)    │
+    └───┬───────────┘ └──┬──────────┘ └──┬──────────┘
+        │                │                │
+        └────────────────┼────────────────┘
+                         │
+        ┌────────────────▼────────────────┐
+        │  LangGraph Multi-Agent Engine   │
+        │  (src/Graph/graph_builder.py)   │
+        └────────────────┬────────────────┘
+                         │
+        ┌────────────────▼────────────────┐
+        │  10 Specialized Legal Agents    │
+        │  (src/agents/*/agent.py)        │
+        └────────────────┬────────────────┘
+                         │
+        ┌────────────────┴────────────────┐
+        │                                 │
+    ┌───▼────────────┐          ┌────────▼──────┐
+    │ Knowledge Graph│          │ Vector Store  │
+    │ (Neo4j)        │          │ (FAISS)       │
+    │ - Articles     │          │ - Rulings     │
+    │ - Amendments   │          │ - Principles  │
+    └────────────────┘          └───────────────┘
 ```
 
 ---
 
 ## System Layers
 
-### Layer 1: API & Request Handling Layer
+### Layer 1: API Gateway Layer (FastAPI)
 
-**File**: `main.py`, `src/routers/*.py`
+**Location**: `main.py`, `src/routers/*.py`
 
-```python
-# FastAPI Application Architecture
-FastAPI Application
-├── Root Endpoint "/"
-├── Case Analysis Endpoints
-│   └── POST /case/analyze
-├── Data Ingestion Endpoints
-│   ├── POST /ingest/documents
-│   └── POST /ingest/batch
-├── Text Chunking Endpoints
-│   └── POST /chunk/process
-├── Knowledge Graph Endpoints
-│   ├── POST /kg/query
-│   └── POST /kg/build
-├── Retrieval Endpoints
-│   ├── POST /retrieval/hybrid
-│   ├── POST /retrieval/vector
-│   └── POST /retrieval/kg
-└── Vector Store Endpoints
-    ├── POST /vector/search
-    └── POST /vector/index
-```
+#### Core Routers
+- **Case Router** (`case_router.py`)
+  - `POST /cases/invoke_case` - Main entry point for case processing
+  - `GET /cases/get_case_result` - Retrieve cached results
 
-### Layer 2: Multi-Agent Orchestration Layer
+- **KG Retriever Router** (`kg_retriever_router.py`)
+  - `POST /kg/retriever/retrieve` - Hybrid legal document retrieval
+  - `POST /kg/retriever/index/setup` - Create vector indexes
+  - `POST /kg/retriever/index/embed` - Embed nodes
+  - `POST /kg/retriever/index/reindex` - Re-embed articles
+  - `POST /kg/retriever/index/rebuild` - Full index rebuild
+  - `GET /kg/retriever/status` - Check retriever status
 
-**File**: `src/Graph/graph_builder.py`, `src/agents/`
+- **VS Retriever Router** (`vs_retriever_router.py`)
+  - `POST /vs/retriever/dense` - FAISS semantic search
+  - `POST /vs/retriever/sparse` - BM25 lexical search
+  - `POST /vs/retriever/hybrid` - RRF fusion (dense + sparse)
 
-Manages workflow execution and agent coordination:
+- **Knowledge Graph Router** (`kg_router.py`)
+  - `GET /kg/statistics` - Node and relationship counts
+  - `GET /kg/amendments` - Query amendments
+  - `GET /kg/{law_id}/{article_number}` - Fetch article text
+  - `POST /kg/build` - Rebuild knowledge graph
+  - `DELETE /kg/cache` - Invalidate caches
 
-```
-Agent Orchestrator (LangGraph)
-├── State Management
-│   ├── Current agent state
-│   ├── Workflow history
-│   └── Context persistence
-├── Workflow Execution
-│   ├── Agent routing
-│   ├── Conditional branching
-│   └── Error handling
-└── Agent Communication
-    ├── Message passing
-    ├── State updates
-    └── Result aggregation
-```
+- **Vector Store Router** (`vs_router.py`)
+  - `GET /vs/status` - Check if vector store loaded
+  - `POST /vs/build` - Build FAISS index
+  - `POST /vs/load` - Load FAISS index
+  - `POST /vs/search` - Similarity search
+  - `POST /vs/search/scored` - Search with L2 scores
 
-### Layer 3: Processing & Retrieval Layer
+- **Data Ingestion Router** (`data_ingestion_router.py`)
+  - `POST /agents/ingest_data` - Ingest documents
 
-**Files**: `src/Chunking/`, `src/retriever/`, `src/LLMs/`
-
-Handles data transformation and information retrieval:
-
-```
-Processing Pipeline
-├── Document Chunking
-│   ├── Split logic
-│   ├── Overlap handling
-│   └── Metadata preservation
-├── Embedding Generation
-│   ├── Sentence-Transformers
-│   ├── Batch processing
-│   └── Caching
-├── Retrieval Systems
-│   ├── Vector Search (FAISS)
-│   ├── Graph Search (Neo4j)
-│   └── Hybrid Ranking
-└── LLM Integration
-    ├── Provider management
-    ├── Prompt engineering
-    └── Response parsing
-```
-
-### Layer 4: Data Storage Layer
-
-**Files**: `src/Graphstore/`, `src/Vectorstore/`
-
-Persistent storage of processed data:
-
-```
-Storage Systems
-├── Neo4j Graph Database
-│   ├── Case nodes & relationships
-│   ├── Entity graph
-│   └── Precedent network
-├── FAISS Vector Store
-│   ├── Document embeddings
-│   ├── Similarity indices
-│   └── Metadata mapping
-└── File System
-    ├── Original documents
-    ├── Processed chunks
-    └── Index files
-```
+- **Chunking Router** (`chunking_router.py`)
+  - `GET /Services/get_chunked_articles` - Get chunked legal articles
+  - `GET /Services/get_chunked_principles` - Get chunked court principles
 
 ---
 
-## Component Architecture
+### Layer 2: Multi-Agent Orchestration Layer
 
-### Core Components
+**Location**: `src/Graph/graph_builder.py`, `src/Graph/state.py`
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| **FastAPI App** | `main.py` | REST API server, lifespan management |
-| **Routers** | `src/routers/` | API endpoint handlers |
-| **Graph Builder** | `src/Graph/` | Graph construction, state management |
-| **Agents** | `src/agents/` | Task-specific AI agents |
-| **Chunking** | `src/Chunking/` | Document preprocessing |
-| **KG Builder** | `src/Graphstore/` | Knowledge graph construction |
-| **Retrievers** | `src/retriever/` | Vector & graph search |
-| **LLM Manager** | `src/LLMs/` | LLM provider integration |
-| **Configuration** | `src/Config/` | Settings and logging |
-| **Utilities** | `src/Utils/` | Helper functions |
+#### LangGraph Pipeline
 
-### Component Interaction Map
+The system uses **LangGraph** for stateful multi-agent workflow:
 
 ```
-HTTP Request
-    ↓
-[Router Layer]
-    ├─→ Input validation
-    ├─→ Parameter extraction
-    └─→ Route handling
-    ↓
-[Business Logic]
-    ├─→ Agent selection
-    ├─→ Workflow coordination
-    └─→ State management
-    ↓
-[Processing Layer]
-    ├─→ Data transformation
-    ├─→ Retrieval execution
-    └─→ Result compilation
-    ↓
-[Storage Layer]
-    ├─→ Database queries
-    ├─→ Index updates
-    └─→ Cache operations
-    ↓
-[Response Builder]
-    ├─→ Result formatting
-    ├─→ Error handling
-    └─→ Status codes
-    ↓
-HTTP Response
+START
+  ↓
+DATA_INGESTION (Extract case metadata)
+  ↓
+PROCEDURAL_AUDITOR (Check for fatal procedural issues)
+  ├─ If fatal issue found → JUDGE
+  ├─ Otherwise ↓
+LEGAL_RESEARCHER (Research applicable laws)
+  ↓
+┌─────────────────────────────────┐
+│ PARALLEL ANALYSIS PHASE         │
+├─────────────────────────────────┤
+│ 1. EVIDENCE_ANALYST             │
+│ 2. DEFENSE_ANALYST              │
+│ 3. CONFESSION_VALIDITY          │
+│ 4. WITNESS_CREDIBILITY          │
+└─────────────────────────────────┘
+  ↓
+PROSECUTION_ANALYST (Analyze prosecution case)
+  ↓
+SENTENCING_AGENT (Recommend sentencing)
+  ↓
+JUDGE_AGENT (Generate final judgment)
+  ↓
+END
+```
+
+#### 10 Specialized Agents
+
+1. **Data Ingestion Agent**
+   - Extracts case metadata from documents
+   - Normalizes document format
+   - Output: Case ID, court info, filing date, prosecutor, charges
+
+2. **Procedural Auditor Agent**
+   - Identifies fatal procedural violations
+   - Checks statute of limitations, jurisdiction
+   - May bypass entire pipeline if critical issues found
+
+3. **Legal Researcher Agent**
+   - Queries knowledge graph for applicable laws
+   - Retrieves relevant articles and amendments
+   - Performs hybrid search across legal corpus
+
+4. **Evidence Analyst Agent**
+   - Analyzes quality and relevance of evidence
+   - Scores evidence strength
+   - Identifies gaps in evidence chain
+
+5. **Defense Analyst Agent**
+   - Analyzes defense arguments
+   - Evaluates defense viability
+   - Identifies counter-evidence
+
+6. **Confession Validity Agent**
+   - Evaluates confession validity
+   - Checks for coercion, Miranda-equivalent rights
+   - Assesses psychological factors
+
+7. **Witness Credibility Agent**
+   - Evaluates witness testimony reliability
+   - Analyzes inconsistencies
+   - Assesses bias potential
+
+8. **Prosecution Analyst Agent**
+   - Synthesizes prosecution case
+   - Evaluates prosecution arguments
+   - Recommendations for prosecution strength
+
+9. **Sentencing Agent**
+   - Recommends appropriate sentencing
+   - Considers precedents
+   - Applies sentencing guidelines
+
+10. **Judge Agent**
+    - Synthesizes all analyses
+    - Makes final judgment call
+    - Issues recommendations
+
+#### Agent State Management
+
+**AgentState** tracks shared context:
+```python
+- case_id: str
+- case_number: str
+- source_documents: List[str]
+- court: str
+- jurisdiction: str
+- filing_date: str
+- prosecutor_name: str
+- completed_agents: List[str]
+- errors: List[str]
+- procedural_audit: ProcedureAnalysisOutput
+- legal_research: LegalResearchOutput
+- evidence_analysis: EvidenceAnalysisOutput
+- defense_analysis: DefenseAnalysisOutput
+- confession_validity: ConfessionValidityOutput
+- witness_credibility: WitnessCredibilityOutput
+- prosecution_analysis: ProsecutionAnalysisOutput
+- sentencing: SentencingOutput
+- judge_decision: JudgeOutput
 ```
 
 ---
 
 ## Data Flow
 
-### End-to-End Data Processing Flow
+### Case Invocation Flow
 
 ```
-1. INGESTION PHASE
-┌─────────────────────────────────────┐
-│ User uploads legal document         │
-└────────────┬────────────────────────┘
-             ↓
-┌─────────────────────────────────────┐
-│ Validation & Format Detection       │
-│ - Check document integrity          │
-│ - Extract metadata                  │
-│ - Normalize format                  │
-└────────────┬────────────────────────┘
-             ↓
-2. PREPROCESSING PHASE
-┌─────────────────────────────────────┐
-│ Text Chunking & Segmentation        │
-│ - Identify logical sections         │
-│ - Split into chunks                 │
-│ - Preserve context/overlap          │
-└────────────┬────────────────────────┘
-             ↓
-3. EMBEDDING PHASE
-┌─────────────────────────────────────┐
-│ Generate Vector Embeddings          │
-│ - Sentence-Transformers model       │
-│ - Batch processing                  │
-│ - Store embeddings                  │
-└────────────┬────────────────────────┘
-             ↓
-4. KNOWLEDGE EXTRACTION PHASE
-┌──────────┬──────────────────────────┐
-│          │                          │
-Entity   Relationship               Metadata
-Extract   Extraction                Extraction
-│          │                          │
-└──────────┴──────────────────────────┘
-             ↓
-5. STORAGE PHASE
-┌──────────┬────────────────────┬──────┐
-│          │                    │      │
-Neo4j    FAISS               File
-Graph    Vectors            System
-└──────────┴────────────────────┴──────┘
-             ↓
-6. INDEXING PHASE
-┌──────────────────────────────────────┐
-│ Create/Update Search Indices         │
-│ - Graph indices                      │
-│ - Vector indices                     │
-│ - Full-text indices                  │
-└──────────────────────────────────────┘
-```
+1. CLIENT REQUEST
+   POST /cases/invoke_case
+   ├─ case_id: "CASE_2024_001"
+   └─ files: [document.pdf, ...]
 
-### Query Processing Flow
+2. CASE ROUTER (case_router.py)
+   ├─ Validate case_id
+   ├─ Create case directory
+   ├─ Save uploaded files
+   └─ Create AgentState
 
-```
-User Query
-    ↓
-┌──────────────────────────────┐
-│ Query Parsing & Expansion    │
-│ - Extract key terms          │
-│ - Generate related queries   │
-│ - Determine intent           │
-└────────┬─────────────────────┘
-         ↓
-    Retrieval Phase
-    ┌────────────────┬──────────────┐
-    ↓                ↓              ↓
-Vector Search   Graph Query    Metadata
-(FAISS)         (Neo4j)        Lookup
-    │                │              │
-    └────────────────┴──────────────┘
-             ↓
-    ┌──────────────────────────────┐
-    │ Hybrid Ranking & Scoring     │
-    │ - BM25 scoring               │
-    │ - Semantic similarity        │
-    │ - Graph relevance            │
-    └────────┬─────────────────────┘
-             ↓
-    ┌──────────────────────────────┐
-    │ Multi-Agent Processing       │
-    │ - Select relevant agents     │
-    │ - Execute analysis tasks     │
-    │ - Aggregate results          │
-    └────────┬─────────────────────┘
-             ↓
-    ┌──────────────────────────────┐
-    │ Response Generation          │
-    │ - Format results             │
-    │ - Add explanations           │
-    │ - Include citations          │
-    └────────┬─────────────────────┘
-             ↓
-User Response
+3. LANGGRAPH PIPELINE EXECUTION (graph_builder.py)
+   ├─ Data Ingestion → Extract metadata
+   ├─ Procedural Auditor → Check validity
+   ├─ Legal Researcher → Query KG & VS
+   ├─ Parallel Analysis (Evidence, Defense, Confession, Witness)
+   ├─ Prosecution Analysis → Synthesize
+   ├─ Sentencing → Recommendations
+   └─ Judge → Final output
+
+4. RETRIEVAL SUBSYSTEM
+   ├─ Query Knowledge Graph (Neo4j)
+   │  └─ Hybrid: Vector ANN + BM25 + graph expansion
+   ├─ Query Vector Store (FAISS)
+   │  └─ Hybrid: Dense embedding + BM25 + RRF
+   └─ Return context to agents
+
+5. OUTPUT GENERATION
+   ├─ Collect all agent outputs
+   ├─ Serialize to JSON
+   └─ Return in response
+
+6. CLIENT RESPONSE
+   {
+     "success": true,
+     "case_id": "CASE_2024_001",
+     "files_received": 3,
+     "result": { ... agent outputs ... }
+   }
 ```
 
 ---
 
-## Agent Architecture
+## Retrieval Architecture
 
-### Agent Types & Responsibilities
-
-```
-┌─────────────────────────────────────────┐
-│      Multi-Agent System                 │
-│      (LangGraph Orchestration)          │
-└──────────────┬────────────────────────── ┘
-               │
-    ┌──────────┼──────────┬──────────┐
-    ↓          ↓          ↓          ↓
-┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
-│ Data   │ │Analysis│ │  KG    │ │ Audit  │
-│ Agent  │ │ Agent  │ │ Agent  │ │ Agent  │
-└────────┘ └────────┘ └────────┘ └────────┘
-```
-
-#### 1. Data Ingestion Agent
-- **Responsibility**: Handle document lifecycle
-- **Tasks**:
-  - Parse and validate documents
-  - Extract structured metadata
-  - Perform quality assurance
-  - Trigger chunking pipeline
-- **Inputs**: Raw documents
-- **Outputs**: Validated chunks with metadata
-
-#### 2. Analysis Agent
-- **Responsibility**: Perform legal analysis
-- **Tasks**:
-  - Analyze case relationships
-  - Extract legal principles
-  - Assess evidence
-  - Generate insights
-- **Inputs**: Chunks, retrieved context
-- **Outputs**: Analysis results
-
-#### 3. Knowledge Graph Agent
-- **Responsibility**: Maintain knowledge base
-- **Tasks**:
-  - Extract entities and relationships
-  - Update graph structure
-  - Manage graph queries
-  - Handle deduplication
-- **Inputs**: Processed documents
-- **Outputs**: Graph updates, query results
-
-#### 4. Audit Agent
-- **Responsibility**: Verify and validate
-- **Tasks**:
-  - Audit processing steps
-  - Verify accuracy
-  - Check consistency
-  - Generate audit trails
-- **Inputs**: Analysis results
-- **Outputs**: Audit reports, flags
-
-### Agent Communication Protocol
+### Knowledge Graph Retrieval (Neo4j)
 
 ```
-Agent A                          Agent B
-    │                              │
-    ├──────── Query Request ──────→│
-    │                              │
-    │←────── Processing ───────────│
-    │                              │
-    │←────── Result Response ──────│
-    │                              │
-    ├──────── State Update ───────→│
-    │                              │
+Query: "What laws apply to theft cases?"
+  ↓
+HybridRetriever (kg_retriever.py)
+  ├─ Step 1: Vector ANN Search
+  │  └─ Embed query → Search Neo4j vector index
+  ├─ Step 2: BM25 Ranking
+  │  └─ Full-text search on article text
+  ├─ Step 3: RRF (Reciprocal Rank Fusion)
+  │  └─ Combine rankings: score = 1/(rank_vector + 1) + 1/(rank_bm25 + 1)
+  ├─ Step 4: Graph Expansion
+  │  └─ Follow relationships to related articles/amendments
+  └─ Threshold filtering (default: 0.5)
+  ↓
+Return: Ranked list of articles with sources
 ```
 
-### Workflow Execution Model
+### Vector Store Retrieval (FAISS + BM25)
 
 ```
-Sequential Workflow:
-Data Agent → Analysis Agent → KG Agent → Audit Agent
-
-Parallel Workflow:
-Data Agent ───┬──→ Analysis Agent
-              └──→ Vector Indexing
-
-Conditional Workflow:
-Analysis Agent ─┬─→ [Valid] ─→ KG Agent
-                └─→ [Invalid] ─→ Manual Review Agent
+Query: "Court ruling on contract disputes"
+  ↓
+Hybrid Retriever (vs_retriever.py)
+  ├─ Dense Search (FAISS)
+  │  └─ Embed query → FAISS similarity search
+  ├─ Sparse Search (BM25)
+  │  └─ Lexical ranking on Okapi BM25
+  ├─ RRF Fusion
+  │  └─ Combine rankings with configurable weights:
+  │     score = (dense_weight * dense_rank) + (sparse_weight * sparse_rank)
+  └─ Return top-k results
+  ↓
+Return: Hybrid-ranked documents (rulings + principles)
 ```
+
+#### Retrieval Strategies
+
+1. **Dense (Vector Search)**
+   - Method: FAISS L2 distance
+   - Use case: Semantic similarity
+   - Example: "Liability in contract disputes" finds similar concepts
+
+2. **Sparse (BM25)**
+   - Method: Okapi BM25 ranking
+   - Use case: Keyword matching
+   - Example: "contract" keyword search
+
+3. **Hybrid (RRF)**
+   - Method: Reciprocal Rank Fusion
+   - Combines dense + sparse
+   - Configurable weights (default: dense=0.6, sparse=0.4)
+   - Use case: Best of both worlds
 
 ---
 
-## Storage Architecture
+## Storage & Databases
 
-### Neo4j Knowledge Graph Schema
+### Neo4j Knowledge Graph
 
+**Purpose**: Store legal documents, articles, amendments, relationships
+
+**Node Types**:
+- **Article**: Legal articles with full text and metadata
+- **Law**: Parent law documents
+- **Amendment**: Amendments to articles
+- **TableChunk**: Table extracts from documents
+
+**Properties**:
+- `law_id`: Unique law identifier
+- `article_number`: Article numbering
+- `text`: Full article text
+- `embedding`: Vector embedding (1024-dim by default)
+- `date_created`: Creation timestamp
+- `category`: Legal category
+
+**Relationships**:
+- `HAS_ARTICLE`: Law → Article
+- `HAS_AMENDMENT`: Article → Amendment
+- `REFERENCES`: Article → Article (cross-references)
+- `AMENDED_BY`: Article → Amendment
+- `CONTAINS_TABLE`: Document → TableChunk
+
+### FAISS Vector Store
+
+**Purpose**: Fast semantic search over rulings and principles
+
+**Content**:
+- Court rulings (from Na2d corpus)
+- Legal principles
+- Combined ~10,000+ documents
+
+**Vector Model**:
+- Arabic-native embeddings (specified in config)
+- Default: AraBERT or similar Arabic SBERT
+- Dimension: 768 or 1024 (configurable)
+
+**Index Structure**:
 ```
-Node Types:
-├── Case
-│   ├─ caseId (PRIMARY KEY)
-│   ├─ caseNumber
-│   ├─ title, date, court
-│   ├─ summary, status
-│   └─ confidence: 0.0-1.0
-├── Judge
-│   ├─ judgeId, name
-│   ├─ court, yearsExperience
-│   └─ specialization
-├── Party
-│   ├─ partyId, name
-│   ├─ role: PLAINTIFF|DEFENDANT
-│   └─ type: INDIVIDUAL|CORPORATION
-├── Law
-│   ├─ lawId, code, title
-│   ├─ article, category
-│   └─ effectiveDate
-└── Precedent
-    ├─ precedentId, caseId
-    ├─ principle
-    └─ applicability: 0.0-1.0
-
-Relationships:
-├─ [PRESIDED_BY]: Case → Judge
-├─ [INVOLVED]: Case → Party
-├─ [CITES]: Case → Law
-├─ [CITED_BY]: Case → Case
-├─ [OVERRULES]: Case → Case
-├─ [RELATED_TO]: Case → Case
-└─ [FOLLOWS]: Case → Precedent
-```
-
-### FAISS Vector Index Organization
-
-```
-Vector Store Structure
-├─ Metadata Index
-│  └─ Maps vector IDs to document references
-├─ Embedding Vectors
-│  ├─ Document chunks (d-dimensional vectors)
-│  ├─ Semantic space representation
-│  └─ Normalized L2 vectors
-├─ Index Types
-│  ├─ Flat Index: Brute force exact search
-│  ├─ IVF: Inverted file quantization
-│  └─ HNSW: Hierarchical navigable world
-└─ Search Interface
-   ├─ similarity_search(query_vector, k)
-   ├─ range_search(query_vector, radius)
-   └─ batch_search(queries, k)
+├── FAISS Index
+│   ├── Vector data (documents × dimensions)
+│   ├── ID mapping (doc_id → vector)
+│   └── Metadata (source, type, etc.)
+└── BM25 Index (for sparse search)
+    └── Inverted index on document terms
 ```
 
 ---
 
 ## API Architecture
 
-### RESTful Endpoint Design
+### Request/Response Pattern
 
-```
-/api/v1
-├─ /health
-│  └─ GET: System health check
-│
-├─ /case
-│  ├─ POST /analyze
-│  │  └─ Analyze legal case
-│  ├─ GET /{caseId}
-│  │  └─ Retrieve case details
-│  └─ PUT /{caseId}
-│     └─ Update case information
-│
-├─ /ingestion
-│  ├─ POST /upload
-│  │  └─ Upload single document
-│  ├─ POST /batch
-│  │  └─ Batch upload documents
-│  └─ GET /status/{jobId}
-│     └─ Get job status
-│
-├─ /chunking
-│  ├─ POST /process
-│  │  └─ Process and chunk document
-│  └─ GET /chunks/{docId}
-│     └─ Retrieve document chunks
-│
-├─ /kg
-│  ├─ POST /query
-│  │  └─ Execute graph query
-│  ├─ POST /build
-│  │  └─ Build KG from documents
-│  └─ GET /entities/{type}
-│     └─ List entities by type
-│
-├─ /retrieval
-│  ├─ POST /hybrid
-│  │  └─ Hybrid search (vector + graph)
-│  ├─ POST /vector
-│  │  └─ Vector similarity search
-│  └─ POST /kg
-│     └─ Knowledge graph search
-│
-└─ /admin
-   ├─ GET /stats
-   │  └─ System statistics
-   └─ POST /rebuild
-      └─ Rebuild all indices
-```
-
-### Response Format Standard
-
+**Request**:
 ```json
 {
-  "status": "success|error|partial",
-  "code": 200,
-  "message": "Operation successful",
-  "timestamp": "2024-06-01T13:25:50Z",
-  "data": {
-    "results": [],
-    "metadata": {}
-  },
-  "errors": [
+  "query": "What is the penalty for theft?",
+  "k": 5,
+  "threshold": 0.5
+}
+```
+
+**Response**:
+```json
+{
+  "query": "What is the penalty for theft?",
+  "context_text": "Combined relevant excerpts...",
+  "sources": [
     {
-      "code": "ERR_001",
-      "message": "Error description",
-      "field": "fieldName"
+      "type": "article",
+      "law_id": "law_001",
+      "article_number": "155",
+      "law_title": "Penal Code",
+      "score": 0.92,
+      "text": "Article text..."
     }
   ],
-  "pagination": {
-    "page": 1,
-    "pageSize": 20,
-    "totalItems": 100,
-    "totalPages": 5
-  }
+  "article_count": 5,
+  "table_count": 2
 }
+```
+
+### Error Handling
+
+- **400**: Invalid parameters
+- **404**: Resource not found (e.g., no cached result)
+- **409**: Conflict (e.g., KG already building)
+- **422**: Unprocessable (validation error)
+- **503**: Service unavailable (vector store not loaded)
+- **500**: Internal server error
+
+### Caching Strategy
+
+**TTLCache Implementation**:
+```
+Statistics Cache:    1 minute   (1 entry max)
+Amendments Cache:    5 minutes  (256 entries max)
+History Cache:       5 minutes  (512 entries max)
+Case Results Cache:  In-memory  (per-process)
 ```
 
 ---
 
-## Deployment Architecture
+## Component Interactions
 
-### Container Architecture
-
-```
-Docker Compose Stack
-├── Application Service
-│   ├─ Image: custom/el-mostashar:latest
-│   ├─ Ports: 8000:8000
-│   ├─ Environment: .env loaded
-│   ├─ Volumes:
-│   │  ├─ /data → persistent data
-│   │  └─ /logs → application logs
-│   └─ Dependencies: neo4j, vector-service
-│
-├── Neo4j Service
-│   ├─ Image: neo4j:6.1.0
-│   ├─ Ports: 7474:7474 (HTTP), 7687:7687 (Bolt)
-│   ├─ Environment: NEO4J_AUTH
-│   └─ Volumes: neo4j-data:/var/lib/neo4j/data
-│
-└── (Optional) Vector Service
-    ├─ Image: custom/vector-service:latest
-    ├─ Ports: 5000:5000
-    └─ Volumes: /vector-indices
-```
-
-### Production Architecture
+### On Server Startup
 
 ```
-Internet
-    ↓
-┌─────────────────────────────────┐
-│   Load Balancer / Reverse Proxy │
-│   (Nginx / HAProxy)             │
-└────────────┬────────────────────┘
-             │
-    ┌────────┼────────┐
-    ↓        ↓        ↓
-┌──────┐ ┌──────┐ ┌──────┐
-│ App  │ │ App  │ │ App  │  (Kubernetes Replicas)
-│ Pod1 │ │ Pod2 │ │ Pod3 │
-└──────┘ └──────┘ └──────┘
-    ↓        ↓        ↓
-    └────────┼────────┘
-             ↓
-┌──────────────────────────────────┐
-│     Service Mesh (Istio)         │
-│   - Traffic routing              │
-│   - Circuit breaking             │
-│   - Distributed tracing          │
-└────────────┬─────────────────────┘
-             │
-    ┌────────┼──────────┐
-    ↓        ↓          ↓
-┌────────┐┌─────┐┌──────────┐
-│Neo4j   ││FAISS││Redis     │
-│Cluster ││Dist ││Cache     │
-└────────┘└─────┘└──────────┘
+main.py startup (lifespan context manager)
+  ├─ Initialize LangSmith tracing (if enabled)
+  ├─ Get KG singleton
+  │  └─ Connect to Neo4j
+  ├─ Get KG Retriever singleton
+  │  └─ Initialize BM25 index
+  └─ Log readiness
+```
+
+### On Case Invocation
+
+```
+POST /cases/invoke_case
+  ├─ Validate input
+  ├─ Save files to disk
+  ├─ Create AgentState
+  ├─ Run LangGraph pipeline
+  │  ├─ Each agent runs in order/parallel
+  │  ├─ Agents may query KG/VS for context
+  │  ├─ State accumulates results
+  │  └─ Error handling per agent
+  ├─ Collect final output
+  └─ Return to client
+```
+
+### Dependency Injection Pattern
+
+```python
+FastAPI Dependencies:
+├─ get_graph() → Neo4j singleton
+├─ get_kg_retriever() → LegalRetriever singleton
+├─ get_vs() → FAISS singleton
+├─ get_embeddings() → HuggingFaceEmbeddings
+└─ get_cached_sparse_retriever() → BM25 singleton
 ```
 
 ---
 
 ## Design Patterns
 
-### Patterns Implemented
+### 1. Singleton Pattern
+- **GraphDB**: Single Neo4j connection per process
+- **KGRetriever**: Single LegalRetriever instance
+- **VectorStore**: Single FAISS index in memory
+- **Thread-safety**: Double-checked locking with threading.Lock()
 
-| Pattern | Usage | Benefit |
-|---------|-------|---------|
-| **Repository** | Data access abstraction | Testability, flexibility |
-| **Factory** | Agent/Service creation | Decoupling, extensibility |
-| **Strategy** | Multiple retrieval methods | Flexibility, swappability |
-| **Observer** | Event-driven updates | Loose coupling |
-| **Singleton** | Shared resources (DB connections) | Resource efficiency |
-| **Chain of Responsibility** | Multi-agent workflows | Modular processing |
-| **Pipeline** | Sequential transformations | Organized processing |
+### 2. Dependency Injection
+- FastAPI `Depends()` for resource injection
+- Lazy initialization on first use
+- Testable and loosely coupled
 
-### Error Handling Strategy
+### 3. State Machine (LangGraph)
+- AgentState passed through pipeline
+- Each agent reads/updates state
+- Conditional routing based on state
 
-```
-Error Handling Flow
-    ↓
-┌──────────────────────────────┐
-│ Error Detection              │
-│ - Try/catch blocks           │
-│ - Validation checks          │
-│ - Type checking              │
-└────────┬─────────────────────┘
-         ↓
-┌──────────────────────────────┐
-│ Error Classification         │
-│ - System errors (5xx)        │
-│ - Client errors (4xx)        │
-│ - Business logic errors      │
-└────────┬─────────────────────┘
-         ↓
-┌──────────────────────────────┐
-│ Recovery Strategy            │
-│ - Retry (exponential backoff)│
-│ - Fallback (alternative path)│
-│ - Graceful degradation       │
-└────────┬─────────────────────┘
-         ↓
-┌──────────────────────────────┐
-│ Error Reporting              │
-│ - Logging                    │
-│ - Monitoring                 │
-│ - User notification          │
-└──────────────────────────────┘
-```
+### 4. TTL Caching
+- Dynamic cache invalidation
+- Automatic expiration
+- Manual cache clear endpoints
+
+### 5. Error Wrapping
+- `_safe_run()` wrapper for agents
+- Graceful degradation on agent failure
+- Error collection in state
 
 ---
 
-## Scalability Considerations
+## Key Technologies Used
 
-### Horizontal Scaling
+### LangChain Stack
+- **LangChain**: LLM framework and chains
+- **LangGraph**: Multi-agent orchestration
+- **Embeddings**: HuggingFace Transformers (Arabic)
 
-**Stateless API Design**:
-- No session affinity required
-- Easy load balancing
-- Replicate instances freely
+### Data Storage
+- **Neo4j**: Graph database (legal knowledge base)
+- **FAISS**: Vector indexing (semantic search)
+- **BM25**: Lexical ranking (hybrid search)
 
-**Database Scaling**:
-- Neo4j read replicas
-- FAISS distributed indices
-- Cache layer distribution
+### Backend
+- **FastAPI**: REST API framework
+- **Uvicorn**: ASGI server
+- **Pydantic**: Data validation
 
-### Vertical Scaling
-
-**Performance Optimization**:
-- Connection pooling
-- Query optimization
-- Index strategies
-- Caching layers
-
-### Performance Targets
-
-| Metric | Target | Strategy |
-|--------|--------|----------|
-| API Latency (p95) | <500ms | Caching, indexing |
-| Document Processing | <100ms/page | Batch processing |
-| Search Response | <500ms | Vector index optimization |
-| Throughput | 100+ req/s | Load balancing |
+### LLM Providers
+- OpenAI (GPT-4, GPT-3.5)
+- Google (Gemini)
+- Groq (LPU)
+- Cerebras
+- Mistral
+- Cohere
 
 ---
 
-**This architecture provides a solid foundation for a scalable, maintainable, and extensible legal AI system.**
+**Last Updated**: June 2024  
+**Version**: 1.0.0  
+**Architecture Status**: Production Ready ✅

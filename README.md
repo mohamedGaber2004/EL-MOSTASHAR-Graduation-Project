@@ -1,20 +1,18 @@
-# 📋 Egyptian Legal Multi-Agent System - Professional Documentation
+# 📋 Egyptian Legal Multi-Agent System (EL-MOSTASHAR)
 
 ## Executive Summary
 
-The **Egyptian Legal Multi-Agent System** (EL-MOSTASHAR) is a sophisticated, AI-powered platform designed to revolutionize legal case analysis and decision-making in the Egyptian judicial system. Built with cutting-edge LLM technologies, graph-based knowledge representation, and multi-agent architecture, this system provides comprehensive legal document analysis, case intelligence, and procedural auditing.
+The **Egyptian Legal Multi-Agent System** (EL-MOSTASHAR) is an AI-powered platform designed to automate legal case analysis and decision-making in the Egyptian judicial system. Built with LangChain, LangGraph, Neo4j, and multiple LLM providers, this system provides comprehensive multi-agent legal analysis, hybrid information retrieval, and case intelligence.
 
 ---
 
-## 🎯 Project Objectives
+## 🎯 Core Purpose
 
-This graduation project aims to:
-
-- **Automate Legal Analysis**: Leverage advanced AI models to analyze complex legal documents and cases
-- **Enhance Judicial Efficiency**: Reduce analysis time and improve decision-making accuracy
-- **Knowledge Representation**: Build a sophisticated graph-based knowledge model of Egyptian legal cases
-- **Multi-Agent Processing**: Implement specialized agents for specific legal tasks
-- **RESTful API Interface**: Provide seamless integration with existing legal systems
+This system provides:
+- **Multi-Agent Case Processing**: 10 specialized agents for different aspects of legal analysis
+- **Intelligent Retrieval**: Hybrid retrieval combining knowledge graph, semantic search, and lexical search
+- **Case Invocation**: Single endpoint to process legal cases with document analysis
+- **Production-Ready APIs**: RESTful endpoints for integration with external systems
 
 ---
 
@@ -22,35 +20,35 @@ This graduation project aims to:
 
 | Feature | Description |
 |---------|-------------|
-| **Case Analysis** | AI-driven automated analysis of legal cases with multi-agent processing |
-| **Graph-Based Knowledge** | Advanced Neo4j graph database for legal knowledge representation |
-| **Intelligent Agents** | Specialized agents for data ingestion, evidence analysis, and procedural auditing |
-| **Hybrid Retrieval** | Combines vector search and graph-based retrieval for accurate information extraction |
-| **RESTful API** | Production-ready FastAPI endpoints for system integration |
-| **Document Chunking** | Advanced text preprocessing and segmentation algorithms |
-| **Multi-Model Support** | Integration with multiple LLM providers (OpenAI, Google, Groq, etc.) |
-| **Production-Ready** | Docker containerization, environment configuration, logging, and monitoring |
+| **Case Invocation** | Submit cases with documents and get comprehensive analysis results |
+| **Multi-Agent Pipeline** | 10 specialized agents working together: data ingestion, procedural auditing, legal research, evidence analysis, defense analysis, confession validity, witness credibility, prosecution analysis, sentencing, and judgment |
+| **Knowledge Graph Retrieval** | Hybrid retrieval combining Neo4j vector search + BM25 ranking + graph expansion |
+| **Vector Store Retrieval** | FAISS dense vectors with BM25 sparse search and RRF fusion for optimal results |
+| **Intelligent Agents** | Data Ingestion, Procedural Auditor, Legal Researcher, Evidence Analyst, Defense Analyst, Confession Validity, Witness Credibility, Prosecution Analyst, Sentencing, Judge |
+| **Document Chunking** | Advanced text preprocessing and segmentation for Arabic legal documents |
+| **Multi-Model Support** | Integration with OpenAI, Google Gemini, Groq, Cerebras, Mistral, Cohere |
+| **Production-Ready** | Docker containerization, environment configuration, comprehensive logging |
 
 ---
 
 ## 📊 Technology Stack
 
-### Backend Framework
-- **FastAPI** (v0.129.1) - Modern async REST API framework
+### Backend
+- **FastAPI** - Async REST API framework
 - **Python** (3.11+) - Core language
+- **Uvicorn** - ASGI application server
 
-### AI & LLM Integration
-- **LangChain** (v1.2.10) - LLM framework and orchestration
-- **LangGraph** (v1.0.9) - Graph-based workflow execution
-- **LangChain-Neo4j** - Neo4j integration for graph operations
-- **Sentence-Transformers** - Semantic embedding models
+### AI & Orchestration
+- **LangChain** - LLM framework and orchestration
+- **LangGraph** - Multi-agent workflow execution
+- **Sentence-Transformers** - Arabic semantic embeddings
 
-### Data Storage & Retrieval
-- **Neo4j** (v6.1.0) - Knowledge graph database
-- **FAISS** (CPU) - Vector similarity search
+### Data & Storage
+- **Neo4j** - Knowledge graph database for legal documents
+- **FAISS** - Vector similarity search (CPU)
 - **BM25** - Hybrid ranking algorithm
 
-### LLM Providers (Multi-Model Support)
+### LLM Providers
 - OpenAI GPT models
 - Google Gemini
 - Groq LPU
@@ -58,9 +56,8 @@ This graduation project aims to:
 - Mistral AI
 - Cohere
 
-### DevOps & Deployment
+### DevOps
 - **Docker** & **Docker Compose** - Containerization
-- **Uvicorn** - ASGI application server
 - **Python-dotenv** - Environment management
 
 ---
@@ -68,28 +65,37 @@ This graduation project aims to:
 ## 🏗️ Project Structure
 
 ```
-EL-MOSTASHAR-Graduation-Project/
-├── 📁 src/
-│   ├── 📁 agents/                 # Specialized agents for legal tasks
-│   ├── 📁 Chunking/               # Text preprocessing & chunking utilities
-│   ├── 📁 Config/                 # Configuration management & logging
-│   ├── 📁 Graph/                  # Graph construction & state management
-│   ├── 📁 Graphstore/             # Knowledge graph builder
-│   ├── 📁 LLMs/                   # LLM provider configurations
-│   ├── 📁 Prompts/                # Prompt templates for agents
-│   ├── 📁 retriever/              # Retrieval systems (Vector & KG)
-│   ├── 📁 routers/                # API endpoint definitions
-│   ├── 📁 Vectorstore/            # Vector database management
-│   └── 📁 Utils/                  # Utility functions
-├── 📁 Experiments/                # Research notebooks & experiments
-├── 📁 System_Plan_and_Arch/       # Architecture documentation
-├── 📁 PROFESSIONAL_DOCS/          # Professional documentation
-├── 📄 main.py                     # Application entry point
-├── 📄 pyproject.toml              # Project configuration
-├── 📄 requirements.txt            # Python dependencies
-├── 📄 docker-compose.yml          # Docker services configuration
-├── 📄 Dockerfile                  # Container image definition
-└── 📄 .env.example                # Environment variables template
+src/
+├── agents/                      # 10 specialized agents
+│   ├── data_ingestion_agent/
+│   ├── procedural_auditor_agent/
+│   ├── legal_research_agent/
+│   ├── evidence_analyst_agent/
+│   ├── defense_analyst_agent/
+│   ├── confessoin_validity_agent/
+│   ├── witness_credibility_agent/
+│   ├── prosecution_analyst_agent/
+│   ├── sentencing_agent/
+│   └── judge_agent/
+├── routers/                     # API endpoints
+│   ├── case_router.py           # Case invocation
+│   ├── kg_retriever_router.py   # KG retrieval
+│   ├── vs_retriever_router.py   # Vector store retrieval
+│   ├── kg_router.py             # KG management
+│   ├── vs_router.py             # Vector store management
+│   ├── data_ingestion_router.py # Data ingestion
+│   └── chunking_router.py       # Chunking services
+├── Graph/                       # Multi-agent graph builder
+│   ├── graph_builder.py         # LangGraph construction
+│   └── state.py                 # AgentState definition
+├── retriever/                   # Retrieval systems
+│   ├── kg_retriever/            # Knowledge graph retriever
+│   └── vs_retriever/            # Vector store retriever
+├── Graphstore/                  # Neo4j graph builder
+├── Vectorstore/                 # FAISS index builder
+├── Chunking/                    # Document preprocessing
+├── Config/                      # Configuration & logging
+└── LLMs/                        # LLM provider configs
 ```
 
 ---
@@ -97,40 +103,34 @@ EL-MOSTASHAR-Graduation-Project/
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.11 or higher
-- Docker & Docker Compose (optional, for containerized setup)
-- Neo4j database access
-- API keys for LLM providers (OpenAI, Google, etc.)
+- Python 3.11+
+- Docker & Docker Compose
+- Neo4j database
+- LLM API keys (OpenAI, Google, etc.)
 
 ### Installation
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/mohamedGaber2004/EL-MOSTASHAR-Graduation-Project.git
-   cd EL-MOSTASHAR-Graduation-Project
-   ```
+```bash
+# Clone repository
+git clone https://github.com/mohamedGaber2004/EL-MOSTASHAR-Graduation-Project.git
+cd EL-MOSTASHAR-Graduation-Project
 
-2. **Set up environment variables**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
+# Setup environment
+cp .env.example .env
+# Edit .env with your API keys and database credentials
 
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   # OR using uv package manager (recommended)
-   uv sync
-   ```
+# Install dependencies
+pip install -r requirements.txt
+# OR using uv
+uv sync
 
-4. **Start the application**
-   ```bash
-   python main.py
-   ```
+# Start the application
+python main.py
 
-5. **Access the API**
-   - API Documentation: http://127.0.0.1:8000/docs
-   - ReDoc: http://127.0.0.1:8000/redoc
+# Access API docs
+# Interactive: http://127.0.0.1:8000/docs
+# ReDoc: http://127.0.0.1:8000/redoc
+```
 
 ### Docker Setup
 
@@ -140,105 +140,45 @@ docker-compose up -d
 
 ---
 
-## 📚 Documentation Index
-
-Comprehensive documentation is available in the following files:
-
-| Document | Purpose |
-|----------|---------|
-| [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md) | Detailed project description and objectives |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | System architecture and design patterns |
-| [SYSTEM_COMPONENTS.md](./SYSTEM_COMPONENTS.md) | Detailed component documentation |
-| [INSTALLATION_AND_SETUP.md](./INSTALLATION_AND_SETUP.md) | Detailed installation and configuration |
-| [USAGE_GUIDE.md](./USAGE_GUIDE.md) | How to use the system and its features |
-| [API_REFERENCE.md](./API_REFERENCE.md) | Complete API endpoints reference |
-| [DEVELOPMENT_GUIDE.md](./DEVELOPMENT_GUIDE.md) | Development guidelines and contribution |
-| [DEPLOYMENT.md](./DEPLOYMENT.md) | Production deployment instructions |
-| [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) | Common issues and solutions |
-
----
-
 ## 🔌 Core API Endpoints
 
-### Quick Reference
+### Case Invocation (Main Entry Point)
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/` | GET | Health check and welcome message |
-| `/case/analyze` | POST | Analyze legal cases |
-| `/ingest/documents` | POST | Ingest legal documents |
-| `/chunk/process` | POST | Process and chunk documents |
-| `/kg/query` | POST | Query knowledge graph |
-| `/retrieval/hybrid` | POST | Hybrid retrieval search |
-| `/vector/search` | POST | Vector similarity search |
+**POST** `/cases/invoke_case`
+- Submit case documents and receive comprehensive AI analysis
+- Parameters: `case_id`, `files`
+- Returns: Full case analysis with all agent outputs
 
-For complete API documentation, see [API_REFERENCE.md](./API_REFERENCE.md) or visit `/docs` when the server is running.
+### Knowledge Graph Retrieval APIs
 
----
+**POST** `/kg/retriever/retrieve` - Hybrid legal retrieval
+- Query parameters: `question`, `k` (result count), `threshold`
+- Returns: Relevant articles with sources
 
-## 🎓 Team & Contributors
+**POST** `/kg/retriever/index/setup` - Create vector indexes
+**POST** `/kg/retriever/index/embed` - Embed nodes
+**POST** `/kg/retriever/index/reindex` - Re-embed all articles
+**POST** `/kg/retriever/index/rebuild` - Full index rebuild
 
-| Role | Name | Responsibility |
-|------|------|-----------------|
-| Project Lead | Mohamed Gaber | Overall project management |
-| Contributors | Ahmed Hamdy, Omar Youssef | Core development |
-| Academic Advisors | [Faculty Advisors] | Technical guidance |
+### Vector Store Retrieval APIs
+
+**POST** `/vs/retriever/dense` - Semantic search via FAISS
+**POST** `/vs/retriever/sparse` - Lexical search via BM25
+**POST** `/vs/retriever/hybrid` - RRF fusion of dense + sparse
+
+For complete API reference, see [PROFESSIONAL_DOCS/API_REFERENCE.md](./PROFESSIONAL_DOCS/API_REFERENCE.md) or visit `/docs`
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License. See the [LICENSE](../LICENSE) file for details.
+MIT License - See LICENSE file for details
 
 ---
 
-## 📞 Support & Contact
+## 📞 Contact
 
-For questions, issues, or contributions:
-
-1. **GitHub Issues**: [Report bugs or request features](https://github.com/mohamedGaber2004/EL-MOSTASHAR-Graduation-Project/issues)
-2. **Documentation**: Refer to the comprehensive docs in this directory
-3. **Email**: [Contact Information]
-
----
-
-## 🙏 Acknowledgments
-
-- **LangChain & LangGraph Community** for excellent AI orchestration frameworks
-- **Neo4j** for powerful graph database technology
-- **OpenAI, Google, Groq, and other LLM providers** for state-of-the-art models
-- **The Egyptian Legal System** for domain expertise and guidance
-- **Academic Advisors and Faculty** for continuous support
-
----
-
-## 📅 Version History
-
-| Version | Date | Status | Notes |
-|---------|------|--------|-------|
-| 1.0.0 | June 2024 | Current | Production release |
-| 0.9.0 | May 2024 | Released | Beta release |
-| 0.5.0 | April 2024 | Released | Alpha release |
-
----
-
-## 🔐 Security & Privacy
-
-- Environment variables for sensitive configuration
-- No hardcoded credentials or API keys
-- Secure dependency management
-- Regular security audits recommended
-- Data encryption in transit and at rest
-
----
-
-## 📈 Performance & Scalability
-
-This system is designed for:
-- **Scalability**: Microservices-ready architecture
-- **Performance**: Optimized graph queries and vector searches
-- **Reliability**: Error handling and retry mechanisms
-- **Monitoring**: Comprehensive logging and observability
+**Email**: mg7357432@gmail.com
 
 ---
 

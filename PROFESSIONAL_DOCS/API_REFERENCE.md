@@ -2,14 +2,14 @@
 
 ## Table of Contents
 1. [API Overview](#api-overview)
-2. [Authentication](#authentication)
-3. [Case Endpoints](#case-endpoints)
-4. [Ingestion Endpoints](#ingestion-endpoints)
-5. [Chunking Endpoints](#chunking-endpoints)
-6. [Knowledge Graph Endpoints](#knowledge-graph-endpoints)
-7. [Retrieval Endpoints](#retrieval-endpoints)
-8. [Error Handling](#error-handling)
-9. [Rate Limiting](#rate-limiting)
+2. [Case Endpoints (invoke_case)](#case-endpoints)
+3. [Knowledge Graph Retrieval APIs](#knowledge-graph-retrieval-apis)
+4. [Vector Store Retrieval APIs](#vector-store-retrieval-apis)
+5. [Knowledge Graph Management APIs](#knowledge-graph-management-apis)
+6. [Vector Store Management APIs](#vector-store-management-apis)
+7. [Data Processing APIs](#data-processing-apis)
+8. [Response Format](#response-format)
+9. [Error Handling](#error-handling)
 
 ---
 
@@ -17,575 +17,699 @@
 
 ### Base URL
 ```
-http://localhost:8000/api/v1
+http://localhost:8000
 ```
 
 ### API Version
-- Current Version: **1.0.0**
-- Release Date: June 2024
+- **Current Version**: 1.0.0
+- **Released**: June 2024
 
-### Response Format
-
-All endpoints return responses in this standardized format:
-
-```json
-{
-  "status": "success",
-  "code": 200,
-  "message": "Operation successful",
-  "timestamp": "2024-06-01T13:25:50Z",
-  "data": {},
-  "errors": [],
-  "pagination": {}
-}
-```
-
----
-
-## Authentication
-
-### API Key Authentication (Future)
-
-Currently, the system runs without authentication. For production deployment:
-
-```bash
-# Add API key to request headers
-curl -H "X-API-Key: your-api-key" \
-  http://localhost:8000/case/analyze
-```
-
-### Bearer Token (Future)
-
-```bash
-# Get token
-TOKEN=$(curl -X POST http://localhost:8000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username": "user", "password": "pass"}')
-
-# Use token
-curl -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8000/case/analyze
-```
+### Core APIs
+As per the system design, the **core APIs** are:
+1. **Retrieval APIs** - All retrieval endpoints (KG and Vector Store)
+2. **invoke_case** - Case invocation endpoint
 
 ---
 
 ## Case Endpoints
 
-### 1. Analyze Case
+### Main Entry Point: Invoke Case
 
-**Endpoint**: `POST /case/analyze`
+**Endpoint**: `POST /cases/invoke_case`
 
-**Description**: Analyze a legal case and retrieve comprehensive insights
+**Description**: Submit a legal case with documents and receive comprehensive AI analysis from all 10 agents.
 
-**Request Body**:
+**Request**:
+```
+Content-Type: multipart/form-data
+
+Parameters:
+- case_id (string, required): Unique case identifier
+- files (file[], required): Legal document files
+```
+
+**Example**:
+```bash
+curl -X POST http://localhost:8000/cases/invoke_case \
+  -F "case_id=CASE_2024_001" \
+  -F "files=@case_document.pdf" \
+  -F "files=@witness_statement.pdf"
+```
+
+**Response** (200 OK):
 ```json
 {
+  "success": true,
+  "message": "Case processed successfully",
   "case_id": "CASE_2024_001",
-  "analysis_type": "comprehensive",
-  "include_precedents": true,
-  "include_evidence_analysis": true,
-  "include_citations": true,
-  "confidence_threshold": 0.75
+  "files_received": 2,
+  "result": {
+    "case_id": "CASE_2024_001",
+    "case_number": "123/2024",
+    "court": "Cairo Court of First Instance",
+    "jurisdiction": "Cairo",
+    "filing_date": "2024-01-15",
+    "procedural_audit": { ... },
+    "legal_research": { ... },
+    "evidence_analysis": { ... },
+    "defense_analysis": { ... },
+    "confession_validity": { ... },
+    "witness_credibility": { ... },
+    "prosecution_analysis": { ... },
+    "sentencing": { ... },
+    "judge_decision": { ... }
+  }
+}
+```
+
+**Error Responses**:
+- `400`: Missing case_id or no valid files
+- `500`: Internal server error during processing
+
+---
+
+## Knowledge Graph Retrieval APIs
+
+### Hybrid Legal Document Retrieval
+
+**Endpoint**: `POST /kg/retriever/retrieve`
+
+**Description**: Query the knowledge graph using hybrid retrieval (vector + BM25 + graph expansion).
+
+**Request**:
+```json
+{
+  "question": "What are the penalties for theft in Egyptian law?",
+  "k": 15,
+  "threshold": 0.5
 }
 ```
 
 **Parameters**:
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| case_id | string | Yes | Unique case identifier |
-| analysis_type | string | No | "quick" or "comprehensive" (default: "comprehensive") |
-| include_precedents | boolean | No | Include precedent analysis (default: true) |
-| include_evidence_analysis | boolean | No | Analyze evidence strength (default: true) |
-| include_citations | boolean | No | Include law citations (default: true) |
-| confidence_threshold | float | No | Minimum confidence (0.0-1.0, default: 0.75) |
-
-**Response**:
-```json
-{
-  "status": "success",
-  "code": 200,
-  "data": {
-    "case_id": "CASE_2024_001",
-    "case_number": "2024-1234",
-    "title": "Case Title",
-    "case_summary": "...",
-    "key_legal_principles": ["Principle 1", "Principle 2"],
-    "precedents_found": 15,
-    "evidence_strength": 0.85,
-    "related_cases": ["CASE_002", "CASE_003"],
-    "analysis_confidence": 0.88,
-    "processing_time_ms": 1200
-  }
-}
-```
+| Parameter | Type | Default | Range | Description |
+|-----------|------|---------|-------|-------------|
+| question | string | required | - | Natural-language legal question (Arabic) |
+| k | integer | 15 | 1-50 | Number of candidate articles to retrieve |
+| threshold | float | 0.5 | 0.0-1.0 | Minimum normalized RRF score |
 
 **Example**:
 ```bash
-curl -X POST http://localhost:8000/case/analyze \
+curl -X POST http://localhost:8000/kg/retriever/retrieve \
   -H "Content-Type: application/json" \
   -d '{
-    "case_id": "CASE_2024_001",
-    "analysis_type": "comprehensive"
+    "question": "ما هي عقوبة السرقة؟",
+    "k": 10,
+    "threshold": 0.6
   }'
 ```
 
----
-
-### 2. Get Case Details
-
-**Endpoint**: `GET /case/{caseId}`
-
-**Description**: Retrieve detailed information about a specific case
-
-**Path Parameters**:
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| caseId | string | Case identifier |
-
-**Query Parameters**:
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| include_relationships | boolean | Include related cases (default: true) |
-| include_entities | boolean | Include entity information (default: true) |
-
-**Response**:
+**Response** (200 OK):
 ```json
 {
-  "status": "success",
-  "data": {
-    "case_id": "CASE_001",
-    "case_number": "2024-1234",
-    "title": "Case Title",
-    "date": "2024-01-15",
-    "court": "Cairo Court",
-    "status": "ACTIVE",
-    "parties": [...],
-    "judges": [...],
-    "related_laws": [...],
-    "precedents": [...]
-  }
-}
-```
-
-**Example**:
-```bash
-curl http://localhost:8000/case/CASE_2024_001?include_relationships=true
-```
-
----
-
-### 3. Update Case
-
-**Endpoint**: `PUT /case/{caseId}`
-
-**Description**: Update case information
-
-**Request Body**:
-```json
-{
-  "status": "CLOSED",
-  "summary": "Updated case summary",
-  "outcome": "DISMISSED",
-  "metadata": {}
-}
-```
-
-**Response**: Updated case object
-
----
-
-### 4. Compare Cases
-
-**Endpoint**: `POST /case/compare`
-
-**Description**: Compare two cases for similarity and differences
-
-**Request Body**:
-```json
-{
-  "case_id_1": "CASE_001",
-  "case_id_2": "CASE_002",
-  "comparison_aspects": ["legal_principles", "outcome", "evidence"],
-  "return_format": "detailed"
-}
-```
-
-**Response**:
-```json
-{
-  "status": "success",
-  "data": {
-    "case_1": {...},
-    "case_2": {...},
-    "similarity_score": 0.78,
-    "differences": [...],
-    "shared_elements": [...]
-  }
-}
-```
-
----
-
-## Ingestion Endpoints
-
-### 1. Upload Single Document
-
-**Endpoint**: `POST /ingest/documents`
-
-**Description**: Upload and process a single legal document
-
-**Request**:
-```
-Content-Type: multipart/form-data
-
-document: [binary file]
-case_id: "CASE_2024_001"
-metadata: {"court": "Cairo Court", "date": "2024-01-15"}
-```
-
-**Response**:
-```json
-{
-  "status": "success",
-  "data": {
-    "document_id": "doc_12345",
-    "case_id": "CASE_2024_001",
-    "chunks_created": 25,
-    "file_size": 1024000,
-    "processing_time_ms": 2500,
-    "status": "completed"
-  }
-}
-```
-
-**Example**:
-```bash
-curl -X POST http://localhost:8000/ingest/documents \
-  -F "document=@case_document.pdf" \
-  -F "case_id=CASE_2024_001" \
-  -F "metadata={\"court\": \"Cairo Court\"}"
-```
-
----
-
-### 2. Batch Upload
-
-**Endpoint**: `POST /ingest/batch`
-
-**Description**: Upload multiple documents in one request
-
-**Request**:
-```
-Content-Type: multipart/form-data
-
-documents: [binary file 1]
-documents: [binary file 2]
-documents: [binary file 3]
-batch_id: "BATCH_001"
-```
-
-**Response**:
-```json
-{
-  "status": "success",
-  "data": {
-    "batch_id": "BATCH_001",
-    "total_documents": 3,
-    "successfully_processed": 3,
-    "failed": 0,
-    "total_chunks": 75,
-    "processing_time_ms": 7500
-  }
-}
-```
-
----
-
-### 3. Check Ingestion Status
-
-**Endpoint**: `GET /ingest/status/{jobId}`
-
-**Description**: Check the status of an ingestion job
-
-**Response**:
-```json
-{
-  "status": "success",
-  "data": {
-    "job_id": "job_12345",
-    "status": "completed",
-    "progress": 100,
-    "documents_processed": 3,
-    "total_chunks": 75,
-    "completion_time": "2024-06-01T13:25:50Z"
-  }
-}
-```
-
----
-
-## Chunking Endpoints
-
-### 1. Process Document Chunks
-
-**Endpoint**: `POST /chunk/process`
-
-**Description**: Process and chunk a document
-
-**Request Body**:
-```json
-{
-  "document_id": "doc_12345",
-  "chunk_size": 512,
-  "chunk_overlap": 50,
-  "preserve_paragraphs": true
-}
-```
-
-**Response**:
-```json
-{
-  "status": "success",
-  "data": {
-    "document_id": "doc_12345",
-    "chunks_created": 25,
-    "chunk_size": 512,
-    "chunk_overlap": 50,
-    "metadata": {...}
-  }
-}
-```
-
----
-
-### 2. Retrieve Document Chunks
-
-**Endpoint**: `GET /chunk/chunks/{docId}`
-
-**Description**: Retrieve chunks for a specific document
-
-**Query Parameters**:
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| page | integer | Page number (default: 1) |
-| page_size | integer | Results per page (default: 20) |
-
-**Response**:
-```json
-{
-  "status": "success",
-  "data": {
-    "document_id": "doc_12345",
-    "total_chunks": 100,
-    "chunks": [
-      {
-        "chunk_id": "chunk_1",
-        "content": "...",
-        "tokens": 256,
-        "embedding": [...]
-      }
-    ],
-    "pagination": {
-      "page": 1,
-      "page_size": 20,
-      "total_pages": 5
+  "query": "ما هي عقوبة السرقة؟",
+  "context_text": "مجموعة من النصوص القانونية ذات الصلة...",
+  "sources": [
+    {
+      "type": "article",
+      "law_id": "penal_code_001",
+      "article_number": "311",
+      "law_title": "قانون العقوبات",
+      "score": "0.92",
+      "text": "يعاقب بالحبس..."
     }
-  }
+  ],
+  "article_count": 5,
+  "table_count": 2
 }
 ```
 
----
+**Error Responses**:
+- `404`: No relevant articles found above threshold
+- `500`: Internal server error
 
-## Knowledge Graph Endpoints
+### KG Retriever Status
 
-### 1. Query Knowledge Graph
+**Endpoint**: `GET /kg/retriever/status`
 
-**Endpoint**: `POST /kg/query`
+**Description**: Check if the KG retriever singleton is initialized.
 
-**Description**: Execute a Cypher query against the knowledge graph
-
-**Request Body**:
+**Response** (200 OK):
 ```json
 {
-  "query": "MATCH (c:Case) RETURN c LIMIT 10",
-  "parameters": {},
-  "return_format": "graph"
+  "retriever_ready": true,
+  "bm25_article_count": 3245
 }
 ```
 
-**Response**:
-```json
-{
-  "status": "success",
-  "data": {
-    "entities": [...],
-    "relationships": [...],
-    "query_time_ms": 145
-  }
-}
-```
+### Setup Vector Indexes
 
----
+**Endpoint**: `POST /kg/retriever/index/setup`
 
-### 2. List Entities by Type
-
-**Endpoint**: `GET /kg/entities/{type}`
-
-**Description**: List all entities of a specific type
-
-**Path Parameters**:
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| type | string | Entity type: Case, Judge, Party, Law, Precedent |
+**Description**: Create Neo4j vector indexes for Article and TableChunk nodes.
 
 **Query Parameters**:
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| limit | integer | Maximum results (default: 100) |
-| offset | integer | Results offset (default: 0) |
+| dimensions | integer | Optional: Override embedding dimensions |
 
-**Response**:
+**Response** (200 OK):
 ```json
 {
-  "status": "success",
-  "data": {
-    "entity_type": "Judge",
-    "total_count": 150,
-    "entities": [...]
-  }
+  "message": "Vector indexes created (or already existed).",
+  "dimensions": 1024
+}
+```
+
+**Error Responses**:
+- `409`: Indexes already exist
+- `500`: Internal error
+
+### Embed Nodes
+
+**Endpoint**: `POST /kg/retriever/index/embed`
+
+**Description**: Embed all un-embedded Article and TableChunk nodes.
+
+**Query Parameters**:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| batch_size | integer | 128 | Embedding batch size |
+| max_workers | integer | 4 | Parallel encoding threads |
+
+**Response** (200 OK):
+```json
+{
+  "message": "Embedding complete.",
+  "nodes_written": 1250
+}
+```
+
+### Re-index Articles
+
+**Endpoint**: `POST /kg/retriever/index/reindex`
+
+**Description**: Force re-embed all Article nodes (overwrites existing embeddings).
+
+**Query Parameters**:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| batch_size | integer | 128 | Embedding batch size |
+| max_workers | integer | 4 | Parallel threads |
+
+**Response** (200 OK):
+```json
+{
+  "message": "Article re-indexing complete.",
+  "nodes_written": 3245
+}
+```
+
+### Rebuild Vector Index
+
+**Endpoint**: `POST /kg/retriever/index/rebuild`
+
+**Description**: Full rebuild - drop, recreate, and fully re-embed both Neo4j vector indexes.
+
+**Query Parameters**:
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| batch_size | integer | Batch size |
+| max_workers | integer | Worker threads |
+| dimensions | integer | Optional embedding dimensions |
+
+**Response** (200 OK):
+```json
+{
+  "message": "Full vector index rebuild complete.",
+  "nodes_written": 3245
 }
 ```
 
 ---
 
-### 3. Build Knowledge Graph
+## Vector Store Retrieval APIs
+
+### Dense Vector Search (FAISS)
+
+**Endpoint**: `POST /vs/retriever/dense`
+
+**Description**: Semantic retrieval via FAISS dense vectors (court rulings + principles).
+
+**Request**:
+```json
+{
+  "query": "العقود والتزاماتها",
+  "k": 5
+}
+```
+
+**Parameters**:
+| Parameter | Type | Default | Range | Description |
+|-----------|------|---------|-------|-------------|
+| query | string | required | - | Free-text query (Arabic) |
+| k | integer | 5 | 1-50 | Number of documents to retrieve |
+
+**Response** (200 OK):
+```json
+{
+  "query": "العقود والتزاماتها",
+  "strategy": "dense",
+  "hits": [
+    {
+      "page_content": "حكم محكمة النقض رقم 123...",
+      "metadata": {
+        "source": "na2d_rulings",
+        "type": "court_ruling",
+        "date": "2023-06-15"
+      }
+    }
+  ]
+}
+```
+
+**Error Responses**:
+- `503`: Vector store not loaded
+- `500`: Internal error
+
+### Sparse BM25 Search
+
+**Endpoint**: `POST /vs/retriever/sparse`
+
+**Description**: Lexical retrieval via cached BM25 (Okapi) index.
+
+**Request**:
+```json
+{
+  "query": "العقود والتزاماتها",
+  "k": 5
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "query": "العقود والتزاماتها",
+  "strategy": "sparse",
+  "hits": [
+    {
+      "page_content": "حكم محكمة النقض...",
+      "metadata": { ... }
+    }
+  ]
+}
+```
+
+**Error Responses**:
+- `422`: Invalid query or empty corpus
+- `500`: Internal error
+
+### Hybrid Search (Dense + Sparse + RRF)
+
+**Endpoint**: `POST /vs/retriever/hybrid`
+
+**Description**: Hybrid retrieval using RRF fusion of FAISS and BM25 results.
+
+**Request**:
+```json
+{
+  "query": "العقود والتزاماتها",
+  "k": 5,
+  "dense_weight": 0.6,
+  "sparse_weight": 0.4
+}
+```
+
+**Parameters**:
+| Parameter | Type | Default | Range | Description |
+|-----------|------|---------|-------|-------------|
+| query | string | required | - | Free-text query |
+| k | integer | 5 | 1-50 | Number of results |
+| dense_weight | float | 0.6 | 0.0-1.0 | Weight for FAISS results |
+| sparse_weight | float | 0.4 | 0.0-1.0 | Weight for BM25 results |
+
+**Response** (200 OK):
+```json
+{
+  "query": "العقود والتزاماتها",
+  "strategy": "hybrid(dense=0.60, sparse=0.40)",
+  "hits": [
+    {
+      "page_content": "...",
+      "metadata": { ... }
+    }
+  ]
+}
+```
+
+**Error Responses**:
+- `422`: Both weights are 0, or invalid parameters
+- `500`: Internal error
+
+---
+
+## Knowledge Graph Management APIs
+
+### Get KG Statistics
+
+**Endpoint**: `GET /kg/statistics`
+
+**Description**: Get node and relationship counts for the knowledge graph (cached 1 minute).
+
+**Response** (200 OK):
+```json
+{
+  "nodes": {
+    "Article": 3245,
+    "Law": 42,
+    "Amendment": 523,
+    "TableChunk": 1850
+  },
+  "relationships": {
+    "HAS_ARTICLE": 3200,
+    "HAS_AMENDMENT": 500,
+    "REFERENCES": 2100,
+    "AMENDED_BY": 450,
+    "CONTAINS_TABLE": 1850
+  }
+}
+```
+
+### Query Amendments
+
+**Endpoint**: `GET /kg/amendments`
+
+**Description**: List amendments, optionally filtered by law (cached 5 minutes).
+
+**Query Parameters**:
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| law_id | string | Optional filter by law ID |
+
+**Response** (200 OK):
+```json
+[
+  {
+    "amendment_id": "amend_001",
+    "amendment_law_number": "Law 25/2024",
+    "amendment_law_title": "قانون تعديل قانون العقوبات",
+    "amendment_date": "2024-01-15",
+    "amendment_type": "clarification",
+    "description": "توضيح لنص المادة 311...",
+    "effective_date": "2024-02-01",
+    "affected_articles": ["311", "312", "313"],
+    "law_id": "penal_code_001",
+    "law_title": "قانون العقوبات"
+  }
+]
+```
+
+### Fetch Article Text
+
+**Endpoint**: `GET /kg/{law_id}/{article_number}`
+
+**Description**: Fetch the latest text for a specific article (cached 5 minutes).
+
+**URL Parameters**:
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| law_id | string | Unique law identifier |
+| article_number | string | Article number within law |
+
+**Example**:
+```bash
+curl http://localhost:8000/kg/penal_code_001/311
+```
+
+**Response** (200 OK):
+```json
+{
+  "law_id": "penal_code_001",
+  "article_number": "311",
+  "text": "يعاقب بالحبس مدة لا تقل عن ستة أشهر ولا تزيد على ثلاث سنوات كل من اختلس منقولا..."
+}
+```
+
+**Error Responses**:
+- `404`: Article not found
+- `500`: Internal error
+
+### Build Knowledge Graph
 
 **Endpoint**: `POST /kg/build`
 
-**Description**: Build knowledge graph from processed documents
+**Description**: Rebuild the knowledge graph in the background (asynchronous).
 
-**Request Body**:
+**Query Parameters**:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| drop_existing | boolean | true | Drop existing data before rebuilding |
+
+**Response** (200 OK):
 ```json
 {
-  "document_ids": ["doc_001", "doc_002"],
-  "extraction_model": "advanced",
-  "confidence_threshold": 0.75,
-  "force_rebuild": false
+  "message": "Knowledge Graph build started in background."
 }
 ```
 
-**Response**:
+**Error Responses**:
+- `409`: Build already in progress
+
+### Invalidate Cache
+
+**Endpoint**: `DELETE /kg/cache`
+
+**Description**: Invalidate one or all cache buckets.
+
+**Query Parameters**:
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| name | string | Cache name: statistics \| amendments \| history (omit for all) |
+
+**Response** (200 OK):
 ```json
 {
-  "status": "success",
-  "data": {
-    "job_id": "job_12345",
-    "documents_processed": 2,
-    "entities_extracted": 45,
-    "relationships_created": 78,
-    "status": "completed"
-  }
+  "cleared": ["statistics", "amendments", "history"],
+  "message": "Cleared 3 cache bucket(s) successfully."
+}
+```
+
+**Error Responses**:
+- `400`: Unknown cache name
+
+---
+
+## Vector Store Management APIs
+
+### Check Vector Store Status
+
+**Endpoint**: `GET /vs/status`
+
+**Description**: Check whether a vector store is currently loaded.
+
+**Response** (200 OK):
+```json
+{
+  "loaded": true
+}
+```
+
+### Build Vector Store
+
+**Endpoint**: `POST /vs/build`
+
+**Description**: Build a FAISS index from the Na2d corpus (rulings + principles).
+
+**Query Parameters**:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| index_path | string | na2d_faiss_index | Directory to save the index |
+
+**Response** (200 OK):
+```json
+{
+  "message": "FAISS Vector store constructed and synchronized successfully.",
+  "rulings_count": 5000,
+  "principles_count": 1240,
+  "total_count": 6240,
+  "index_path": "na2d_faiss_index"
+}
+```
+
+**Error Responses**:
+- `422`: Cannot build with zero documents
+- `500`: Internal error
+
+### Load Vector Store
+
+**Endpoint**: `POST /vs/load`
+
+**Description**: Load a previously persisted FAISS index into memory.
+
+**Query Parameters**:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| index_path | string | na2d_faiss_index | Directory of saved index |
+
+**Response** (200 OK):
+```json
+{
+  "message": "Vector store loaded from 'na2d_faiss_index'.",
+  "index_path": "na2d_faiss_index"
+}
+```
+
+### Vector Store Search
+
+**Endpoint**: `POST /vs/search`
+
+**Description**: Similarity search over rulings and principles.
+
+**Request**:
+```json
+{
+  "query": "العقود والالتزامات",
+  "k": 5
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "query": "العقود والالتزامات",
+  "hits": [
+    {
+      "page_content": "محتوى الحكم...",
+      "metadata": { ... }
+    }
+  ]
+}
+```
+
+### Vector Store Search with Scores
+
+**Endpoint**: `POST /vs/search/scored`
+
+**Description**: Similarity search returning L2 distance scores.
+
+**Request**:
+```json
+{
+  "query": "العقود والالتزامات",
+  "k": 5
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "query": "العقود والالتزامات",
+  "hits": [
+    {
+      "page_content": "محتوى الحكم...",
+      "metadata": { ... },
+      "score": 0.125
+    }
+  ]
 }
 ```
 
 ---
 
-## Retrieval Endpoints
+## Data Processing APIs
 
-### 1. Vector Search
+### Ingest Data
 
-**Endpoint**: `POST /retrieval/vector`
+**Endpoint**: `POST /agents/ingest_data`
 
-**Description**: Perform semantic similarity search
+**Description**: Ingest documents for processing through data ingestion agent.
 
-**Request Body**:
+**Request**:
 ```json
 {
-  "query": "ownership rights in property disputes",
-  "k": 5,
-  "threshold": 0.7
+  "case_id": "CASE_2024_001",
+  "source_documents": ["/path/to/case/dir"]
 }
 ```
 
-**Response**:
+**Parameters**:
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| case_id | string | Unique case identifier |
+| source_documents | string[] | Optional paths to documents |
+
+**Response** (200 OK):
 ```json
 {
-  "status": "success",
-  "data": {
-    "query": "ownership rights in property disputes",
-    "results": [
-      {
-        "document_id": "doc_12345",
-        "chunk_id": "chunk_1",
-        "content": "...",
-        "score": 0.92,
-        "metadata": {...}
+  "case_id": "CASE_2024_001",
+  "case_number": "123/2024",
+  "extracted_data": { ... }
+}
+```
+
+### Get Chunked Articles
+
+**Endpoint**: `GET /Services/get_chunked_articles`
+
+**Description**: Get chunked legal articles from the knowledge base.
+
+**Response** (200 OK):
+```json
+{
+  "status_code": 200,
+  "Length of articles": 3245,
+  "content": [
+    {
+      "page_content": "نص المادة...",
+      "metadata": {
+        "law_id": "penal_code_001",
+        "article_number": "311"
       }
-    ],
-    "total_results": 5,
-    "query_time_ms": 245
-  }
+    }
+  ]
 }
 ```
 
----
+### Get Chunked Principles
 
-### 2. Knowledge Graph Search
+**Endpoint**: `GET /Services/get_chunked_principles`
 
-**Endpoint**: `POST /retrieval/kg`
+**Description**: Get chunked court principles from Na2d corpus.
 
-**Description**: Search using knowledge graph relationships
-
-**Request Body**:
+**Response** (200 OK):
 ```json
 {
-  "entity_type": "Case",
-  "filters": {
-    "court": "Cairo Court",
-    "status": "ACTIVE"
-  },
-  "limit": 10
-}
-```
-
-**Response**: List of entities matching filters
-
----
-
-### 3. Hybrid Search
-
-**Endpoint**: `POST /retrieval/hybrid`
-
-**Description**: Combined vector and graph search
-
-**Request Body**:
-```json
-{
-  "query": "Find cases involving contract disputes",
-  "k": 10,
-  "vector_weight": 0.6,
-  "graph_weight": 0.4,
-  "min_score": 0.65
-}
-```
-
-**Response**:
-```json
-{
-  "status": "success",
-  "data": {
-    "results": [
-      {
-        "document_id": "doc_12345",
-        "vector_score": 0.89,
-        "graph_score": 0.85,
-        "combined_score": 0.875,
-        "retrieval_type": "hybrid"
+  "status_code": 200,
+  "Length of principles": 1240,
+  "content": [
+    {
+      "page_content": "نص المبدأ...",
+      "metadata": {
+        "court": "Supreme Court",
+        "date": "2023-06-15"
       }
-    ],
-    "total_results": 8,
-    "query_time_ms": 320
-  }
+    }
+  ]
+}
+```
+
+---
+
+## Response Format
+
+### Success Response
+```json
+{
+  "success": true,
+  "message": "Operation successful",
+  "data": { ... },
+  "timestamp": "2024-06-01T13:25:50Z"
+}
+```
+
+### Error Response
+```json
+{
+  "detail": "Detailed error message"
 }
 ```
 
@@ -593,148 +717,35 @@ batch_id: "BATCH_001"
 
 ## Error Handling
 
-### Error Response Format
-
-```json
-{
-  "status": "error",
-  "code": 400,
-  "message": "Invalid request",
-  "errors": [
-    {
-      "field": "case_id",
-      "code": "ERR_INVALID_FORMAT",
-      "message": "Case ID must be alphanumeric"
-    }
-  ],
-  "timestamp": "2024-06-01T13:25:50Z"
-}
-```
-
-### Error Codes
-
-| Code | Status | Description |
-|------|--------|-------------|
-| 400 | Bad Request | Invalid input parameters |
-| 401 | Unauthorized | Missing or invalid authentication |
-| 403 | Forbidden | Insufficient permissions |
-| 404 | Not Found | Resource not found |
-| 409 | Conflict | Resource already exists |
-| 429 | Too Many Requests | Rate limit exceeded |
-| 500 | Internal Server Error | Server error |
-| 503 | Service Unavailable | Service temporarily unavailable |
-
-### Common Error Scenarios
-
-#### Invalid Request
-```json
-{
-  "status": "error",
-  "code": 400,
-  "message": "Validation failed",
-  "errors": [
-    {"field": "case_id", "message": "Required field"}
-  ]
-}
-```
-
-#### Not Found
-```json
-{
-  "status": "error",
-  "code": 404,
-  "message": "Case not found",
-  "data": {"case_id": "CASE_999"}
-}
-```
-
-#### Service Error
-```json
-{
-  "status": "error",
-  "code": 500,
-  "message": "Database connection failed",
-  "request_id": "req_12345"
-}
-```
+| Status Code | Error Type | Description |
+|-------------|-----------|-------------|
+| **400** | Bad Request | Invalid parameters or missing required fields |
+| **404** | Not Found | Resource not found |
+| **409** | Conflict | Operation conflict (e.g., build already in progress) |
+| **422** | Unprocessable Entity | Validation error |
+| **500** | Internal Server Error | Unexpected server error |
+| **503** | Service Unavailable | Required service not initialized (e.g., vector store) |
 
 ---
 
 ## Rate Limiting
 
-### Current Limits (Production)
-- 100 requests per minute per IP
-- 10 concurrent requests per IP
-
-### Headers
-
-```
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 95
-X-RateLimit-Reset: 1624080000
-```
-
-### Rate Limit Exceeded Response
-
-```json
-{
-  "status": "error",
-  "code": 429,
-  "message": "Rate limit exceeded",
-  "retry_after": 60
-}
-```
+Currently, no rate limiting is enforced. For production deployment, implement:
+- Per-IP rate limiting
+- Per-endpoint rate limiting
+- Burst allowances
 
 ---
 
-## SDK Examples
+## Authentication
 
-### Python SDK
-
-```python
-import requests
-
-class ELMostasharClient:
-    def __init__(self, base_url="http://localhost:8000"):
-        self.base_url = base_url
-    
-    def analyze_case(self, case_id):
-        response = requests.post(
-            f"{self.base_url}/case/analyze",
-            json={"case_id": case_id}
-        )
-        return response.json()
-    
-    def search(self, query, k=5):
-        response = requests.post(
-            f"{self.base_url}/retrieval/hybrid",
-            json={"query": query, "k": k}
-        )
-        return response.json()
-
-# Usage
-client = ELMostasharClient()
-results = client.analyze_case("CASE_2024_001")
-```
-
-### JavaScript SDK
-
-```javascript
-const client = new ELMostasharClient('http://localhost:8000');
-
-async function analyzeCase(caseId) {
-    const response = await fetch(`${client.baseUrl}/case/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ case_id: caseId })
-    });
-    return await response.json();
-}
-
-// Usage
-const results = await analyzeCase('CASE_2024_001');
-```
+Currently, no authentication is required. For production deployment:
+- Implement API key authentication
+- Add JWT bearer token support
+- Add role-based access control (RBAC)
 
 ---
 
-**For complete interactive API documentation, visit http://localhost:8000/docs when the server is running.**
+**Last Updated**: June 2024  
+**API Version**: 1.0.0  
+**Status**: Production Ready ✅

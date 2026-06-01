@@ -1,259 +1,168 @@
-# 🚀 Quick Reference Guide
+# ⚡ Quick Reference
 
-## Start Here - Navigation Guide
+## Core Endpoints
 
-### 📖 Documentation Files Overview
-
-```
-📚 PROFESSIONAL_DOCS/
-├── README.md ⭐ START HERE
-│   └─ Overview & Quick Start
-├── PROJECT_OVERVIEW.md
-│   └─ Detailed project description
-├── ARCHITECTURE.md
-│   └─ System design & structure
-├── INSTALLATION_AND_SETUP.md
-│   └─ Setup instructions
-├── USAGE_GUIDE.md
-│   └─ How to use the system
-├── API_REFERENCE.md
-│   └─ API endpoints documentation
-├── DEVELOPMENT_GUIDE.md
-│   └─ Development guidelines
-├── DEPLOYMENT.md
-│   └─ Production deployment
-├── TROUBLESHOOTING.md
-│   └─ Problem solving
-└── DOCUMENTATION_INDEX.md
-    └─ Full navigation guide
-```
-
----
-
-## Quick Navigation by Task
-
-### 🆕 First Time? 
-1. Read: **README.md** (15 min)
-2. Then: **INSTALLATION_AND_SETUP.md** (40 min)
-3. Finally: **USAGE_GUIDE.md** (25 min)
-
-### 🔍 Want to Understand Architecture?
-1. **ARCHITECTURE.md** - System design (35 min)
-2. **PROJECT_OVERVIEW.md** - Project context (30 min)
-
-### 💻 Ready to Develop?
-1. **DEVELOPMENT_GUIDE.md** - Setup & guidelines (25 min)
-2. **API_REFERENCE.md** - API endpoints (30 min)
-3. **ARCHITECTURE.md** - System design (35 min)
-
-### 🚀 Need to Deploy?
-1. **DEPLOYMENT.md** - Deployment steps (30 min)
-2. **INSTALLATION_AND_SETUP.md** - Configuration (40 min)
-
-### 🐛 Something Broken?
-1. **TROUBLESHOOTING.md** - Common issues (20 min)
-2. **INSTALLATION_AND_SETUP.md** - Verification (20 min)
-
-### 👥 Presenting to Others?
-1. Use: **DOCUMENTATION_INDEX.md** for structure
-2. Mix content from: All documents as needed
-3. Prep time: 2-4 hours
-
----
-
-## Most Useful Commands
-
+### Case Processing
 ```bash
-# Install system
-git clone https://github.com/mohamedGaber2004/EL-MOSTASHAR-Graduation-Project.git
-cd EL-MOSTASHAR-Graduation-Project
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-
-# Start system
-python main.py
-
-# Or with Docker
-docker-compose up -d
-
-# Access API
-# Browser: http://localhost:8000/docs
-# API: http://localhost:8000
-# Neo4j: http://localhost:7474/browser
+POST /cases/invoke_case
 ```
 
----
-
-## Key Endpoints Quick Reference
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/` | GET | Health check |
-| `/case/analyze` | POST | Analyze case |
-| `/ingest/documents` | POST | Upload document |
-| `/retrieval/hybrid` | POST | Search |
-| `/kg/query` | POST | Graph query |
-
----
-
-## Key Configuration Variables
-
+### Knowledge Graph Retrieval
 ```bash
-# LLM Providers
-OPENAI_API_KEY=sk-...
-GOOGLE_API_KEY=...
-GROQ_API_KEY=...
-
-# Database
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USERNAME=neo4j
-NEO4J_PASSWORD=password
-
-# Application
-APP_HOST=0.0.0.0
-APP_PORT=8000
-APP_DEBUG=False
+POST /kg/retriever/retrieve
 ```
 
----
-
-## Tech Stack at a Glance
-
-- **Language**: Python 3.11+
-- **Framework**: FastAPI
-- **Database**: Neo4j
-- **Vector Store**: FAISS
-- **Orchestration**: LangGraph
-- **LLMs**: OpenAI, Google, Groq, etc.
-- **Deployment**: Docker
-
----
-
-## File Locations
-
-```
-Project Root:
-├── main.py (Entry point)
-├── src/ (Source code)
-│   ├── agents/ (AI agents)
-│   ├── routers/ (API endpoints)
-│   ├── Config/ (Configuration)
-│   └── ...
-├── PROFESSIONAL_DOCS/ (📍 You are here)
-│   └── All .md files
-├── docker-compose.yml (Docker setup)
-└── requirements.txt (Dependencies)
-```
-
----
-
-## Common Workflows
-
-### Upload & Analyze a Case
+### Vector Store Retrieval (Hybrid)
 ```bash
-curl -X POST http://localhost:8000/ingest/documents \
-  -F "document=@case.pdf" \
-  -F "case_id=CASE_001"
+POST /vs/retriever/dense      # Semantic
+POST /vs/retriever/sparse     # Keyword
+POST /vs/retriever/hybrid     # Best results
+```
 
-curl -X POST http://localhost:8000/case/analyze \
+---
+
+## Quick Examples
+
+### Submit Case
+```bash
+curl -X POST http://localhost:8000/cases/invoke_case \
+  -F "case_id=CASE_001" \
+  -F "files=@document.pdf"
+```
+
+### Search Legal Articles
+```bash
+curl -X POST http://localhost:8000/kg/retriever/retrieve \
   -H "Content-Type: application/json" \
-  -d '{"case_id": "CASE_001"}'
+  -d '{"question": "ما هي العقوبة؟", "k": 10}'
 ```
 
-### Search Cases
+### Find Similar Rulings
 ```bash
-curl -X POST http://localhost:8000/retrieval/hybrid \
+curl -X POST http://localhost:8000/vs/retriever/hybrid \
   -H "Content-Type: application/json" \
-  -d '{"query": "property rights", "k": 5}'
+  -d '{"query": "جريمة", "k": 5, "dense_weight": 0.6, "sparse_weight": 0.4}'
 ```
 
-### Query Database
+### Get Article Text
 ```bash
-curl -X POST http://localhost:8000/kg/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "MATCH (c:Case) RETURN c LIMIT 10"}'
+curl http://localhost:8000/kg/penal_code_001/311
+```
+
+### Check Status
+```bash
+curl http://localhost:8000/kg/retriever/status
+curl http://localhost:8000/vs/status
 ```
 
 ---
 
-## Documentation Quick Stats
+## Key Parameters
 
-| Metric | Value |
-|--------|-------|
-| Total Files | 10 markdown docs |
-| Total Size | 172 KB |
-| Total Lines | 5,500+ lines |
-| Reading Time | ~9 hours |
-| Code Examples | 50+ |
-| Diagrams | 20+ |
+### Case Invocation
+- `case_id` (string, required) - Case identifier
+- `files` (file[], required) - Document files
 
----
+### KG Retrieval
+- `question` (string) - Legal question
+- `k` (integer, 1-50) - Result count
+- `threshold` (float, 0.0-1.0) - Min score
 
-## When to Read Each Document
-
-| Document | When | Time |
-|----------|------|------|
-| README | First visit | 15 min |
-| PROJECT_OVERVIEW | Understanding goal | 30 min |
-| ARCHITECTURE | Deep dive | 35 min |
-| INSTALLATION_AND_SETUP | Setting up | 40 min |
-| USAGE_GUIDE | Using system | 25 min |
-| API_REFERENCE | Building with API | 30 min |
-| DEVELOPMENT_GUIDE | Coding features | 25 min |
-| DEPLOYMENT | Going live | 30 min |
-| TROUBLESHOOTING | Something wrong | 20 min |
+### Vector Retrieval
+- `query` (string) - Search query
+- `k` (integer, 1-50) - Result count
+- `dense_weight` (float, 0.0-1.0) - FAISS weight
+- `sparse_weight` (float, 0.0-1.0) - BM25 weight
 
 ---
 
-## Pro Tips 💡
+## Common Tasks
 
-1. **Search within docs**: Use Ctrl+F (Cmd+F on Mac)
-2. **Use table of contents**: Jump to sections quickly
-3. **Code examples**: Copy and modify for your use
-4. **API Docs**: Visit `/docs` for interactive testing
-5. **Logs**: Check `logs/` folder for debugging
+### Setup
+```bash
+# Build vector store
+POST /vs/build
 
----
+# Load vector store
+POST /vs/load
 
-## Getting Help
+# Build knowledge graph
+POST /kg/build
 
-1. **Search documentation** - Most answers are here
-2. **Check logs** - See `logs/app.log`
-3. **Try troubleshooting** - See TROUBLESHOOTING.md
-4. **Review API docs** - Visit http://localhost:8000/docs
-
----
-
-## Next Steps
-
-- [ ] Read **README.md** (15 min)
-- [ ] Follow **INSTALLATION_AND_SETUP.md** (40 min)
-- [ ] Try examples in **USAGE_GUIDE.md** (25 min)
-- [ ] Review **ARCHITECTURE.md** for understanding (35 min)
-- [ ] Bookmark **API_REFERENCE.md** for reference
-
----
-
-## Document Locations
-
-All documentation files are in:
+# Embed nodes
+POST /kg/retriever/index/embed
 ```
-PROFESSIONAL_DOCS/
-├── README.md
-├── PROJECT_OVERVIEW.md
-├── ARCHITECTURE.md
-├── INSTALLATION_AND_SETUP.md
-├── USAGE_GUIDE.md
-├── API_REFERENCE.md
-├── DEVELOPMENT_GUIDE.md
-├── DEPLOYMENT.md
-├── TROUBLESHOOTING.md
-├── DOCUMENTATION_INDEX.md
-└── QUICK_REFERENCE.md (you are here)
+
+### Operations
+```bash
+# Get statistics
+GET /kg/statistics
+
+# Query amendments
+GET /kg/amendments
+
+# Clear cache
+DELETE /kg/cache
+```
+
+### Troubleshooting
+```bash
+# Check KG retriever
+GET /kg/retriever/status
+
+# Check vector store
+GET /vs/status
+
+# Rebuild indexes
+POST /kg/retriever/index/rebuild
 ```
 
 ---
 
-**Start with README.md → Follow your use case above → Reference as needed!**
+## Response Status Codes
 
-Last Updated: June 2024 | Version: 1.0.0
+| Code | Meaning |
+|------|---------|
+| 200 | Success |
+| 400 | Bad request |
+| 404 | Not found |
+| 409 | Conflict |
+| 422 | Invalid data |
+| 500 | Server error |
+| 503 | Service unavailable |
+
+---
+
+## 10 Agents Pipeline
+
+1. Data Ingestion
+2. Procedural Auditor
+3. Legal Researcher
+4. Evidence Analyst (parallel)
+5. Defense Analyst (parallel)
+6. Confession Validity (parallel)
+7. Witness Credibility (parallel)
+8. Prosecution Analyst
+9. Sentencing
+10. Judge
+
+---
+
+## Default Values
+
+- K (results): 5-15
+- Threshold (KG): 0.5
+- Dense weight: 0.6
+- Sparse weight: 0.4
+- Batch size: 128
+- Max workers: 4
+
+---
+
+**Base URL**: http://localhost:8000  
+**API Docs**: http://localhost:8000/docs  
+**ReDoc**: http://localhost:8000/redoc
+
+---
+
+**Last Updated**: June 2024

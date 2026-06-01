@@ -1,490 +1,407 @@
-# 🛠️ Development Guide
+# 👨‍💻 Development Guide
 
-## Table of Contents
-1. [Development Environment](#development-environment)
-2. [Code Structure](#code-structure)
-3. [Adding New Features](#adding-new-features)
-4. [Testing](#testing)
-5. [Code Style & Standards](#code-style--standards)
-6. [Contributing](#contributing)
-7. [Debugging](#debugging)
+## Development Setup
 
----
+### Prerequisites
+- Python 3.11+
+- Git
+- Code editor (VS Code recommended)
+- Neo4j instance
 
-## Development Environment
-
-### Setting Up Development Environment
-
+### Clone & Setup
 ```bash
-# Clone and navigate to repository
 git clone https://github.com/mohamedGaber2004/EL-MOSTASHAR-Graduation-Project.git
 cd EL-MOSTASHAR-Graduation-Project
 
-# Create virtual environment with dev dependencies
-python3 -m venv venv
-source venv/bin/activate  # Linux/macOS
+python3.11 -m venv venv
+source venv/bin/activate  # or venv\Scripts\activate on Windows
 
-# Install development dependencies
 pip install -r requirements.txt
-pip install pytest pytest-cov black flake8 mypy
-```
-
-### IDE Setup (VS Code)
-
-Create `.vscode/settings.json`:
-
-```json
-{
-  "python.defaultInterpreterPath": "${workspaceFolder}/venv/bin/python",
-  "python.linting.enabled": true,
-  "python.linting.pylintEnabled": false,
-  "python.linting.flake8Enabled": true,
-  "python.formatting.provider": "black",
-  "editor.formatOnSave": true,
-  "[python]": {
-    "editor.defaultFormatter": "ms-python.python",
-    "editor.formatOnSave": true
-  }
-}
 ```
 
 ---
 
-## Code Structure
-
-### Directory Organization
+## Project Structure
 
 ```
 src/
-├── agents/              # AI agents implementation
-│   ├── base_agent.py
-│   ├── data_agent.py
-│   ├── analysis_agent.py
-│   └── __init__.py
-├── Chunking/            # Document chunking
-│   ├── chunker.py
-│   └── __init__.py
-├── Config/              # Configuration management
-│   ├── config.py
-│   ├── log_config.py
-│   └── __init__.py
-├── Graph/               # Graph construction
-│   ├── graph_builder.py
-│   ├── state.py
-│   └── __init__.py
-├── Graphstore/          # Knowledge graph operations
-│   ├── KG_builder.py
-│   ├── kg_enums.py
-│   └── __init__.py
-├── LLMs/                # LLM provider configs
-│   ├── providers.py
-│   └── __init__.py
-├── Prompts/             # Prompt templates
-│   ├── templates.py
-│   └── __init__.py
-├── retriever/           # Retrieval systems
+├── agents/                    # 10 specialized agents
+│   ├── data_ingestion_agent/
+│   ├── procedural_auditor_agent/
+│   ├── legal_research_agent/
+│   ├── evidence_analyst_agent/
+│   ├── defense_analyst_agent/
+│   ├── confessoin_validity_agent/
+│   ├── witness_credibility_agent/
+│   ├── prosecution_analyst_agent/
+│   ├── sentencing_agent/
+│   └── judge_agent/
+├── routers/                   # API endpoints
+│   ├── case_router.py
+│   ├── kg_retriever_router.py
+│   ├── vs_retriever_router.py
+│   ├── kg_router.py
+│   ├── vs_router.py
+│   ├── data_ingestion_router.py
+│   └── chunking_router.py
+├── Graph/
+│   ├── graph_builder.py       # LangGraph pipeline
+│   └── state.py               # AgentState
+├── retriever/
 │   ├── kg_retriever/
 │   └── vs_retriever/
-├── routers/             # API endpoints
-│   ├── case_router.py
-│   ├── data_ingestion_router.py
-│   └── ...
-├── Vectorstore/         # Vector store operations
-│   ├── vectorstore.py
-│   └── __init__.py
-├── Utils/               # Utility functions
-│   ├── helpers.py
-│   └── __init__.py
-└── pipeline.py          # Processing pipelines
+├── Graphstore/                # Neo4j builder
+├── Vectorstore/               # FAISS builder
+├── Chunking/                  # Document processing
+├── Config/                    # Configuration
+└── LLMs/                      # LLM models
 ```
 
 ---
 
-## Adding New Features
+## Adding a New Agent
 
-### Adding a New API Endpoint
+### 1. Create Agent Structure
+```bash
+mkdir -p src/agents/my_new_agent
+touch src/agents/my_new_agent/{my_agent.py,my_agent_prompt.py,my_agent_output_model.py}
+```
 
-1. **Create router file** in `src/routers/`:
-
+### 2. Define Output Model
 ```python
-# src/routers/new_feature_router.py
+# src/agents/my_new_agent/my_agent_output_model.py
+from pydantic import BaseModel
+
+class MyAgentOutput(BaseModel):
+    analysis_result: str
+    confidence_score: float
+    recommendations: list[str]
+```
+
+### 3. Create Agent Class
+```python
+# src/agents/my_new_agent/my_agent.py
+from src.agents.agent_base.agent_base import AgentBase
+from .my_agent_output_model import MyAgentOutput
+
+class MyNewAgent(AgentBase):
+    def __init__(self):
+        super().__init__()
+        self.agent_type = "my_new_agent"
+    
+    def run(self, state):
+        # Implement agent logic
+        result = MyAgentOutput(
+            analysis_result="...",
+            confidence_score=0.95,
+            recommendations=[...]
+        )
+        state.my_new_agent_output = result
+        return state
+```
+
+### 4. Register in Graph Builder
+```python
+# src/Graph/graph_builder.py
+from src.agents.my_new_agent.my_agent import MyNewAgent
+
+agents = {
+    ...
+    "my_new_agent": MyNewAgent(),
+}
+
+# Add edges
+builder.add_edge("previous_agent", "my_new_agent")
+builder.add_edge("my_new_agent", "next_agent")
+```
+
+---
+
+## Adding a New Endpoint
+
+### 1. Create Router
+```python
+# src/routers/my_router.py
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/api/v1/new_feature", tags=["New Feature"])
+my_router = APIRouter(prefix="/my_feature", tags=["My Feature"])
 
-class NewFeatureRequest(BaseModel):
-    param1: str
-    param2: int = 10
+class MyRequest(BaseModel):
+    query: str
 
-@router.post("/process")
-async def process(request: NewFeatureRequest):
-    """Process new feature request"""
+class MyResponse(BaseModel):
+    result: str
+
+@my_router.post("/endpoint")
+async def my_endpoint(req: MyRequest) -> MyResponse:
     try:
-        result = await perform_processing(request.param1, request.param2)
-        return {
-            "status": "success",
-            "data": result
-        }
+        result = "process: " + req.query
+        return MyResponse(result=result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-async def perform_processing(param1: str, param2: int):
-    """Implementation details"""
-    pass
 ```
 
-2. **Register router** in `main.py`:
-
+### 2. Register Router
 ```python
-from src.routers.new_feature_router import router as new_feature_router
+# main.py
+from src.routers.my_router import my_router
 
-app.include_router(new_feature_router)
-```
-
-### Adding a New Agent
-
-1. **Create agent file** in `src/agents/`:
-
-```python
-# src/agents/new_agent.py
-from src.agents.base_agent import BaseAgent
-
-class NewAgent(BaseAgent):
-    def __init__(self, name: str = "NewAgent"):
-        super().__init__(name)
-    
-    async def execute(self, input_data: dict) -> dict:
-        """Execute agent task"""
-        # Implementation
-        return {"status": "completed", "result": "..."}
-```
-
-2. **Integrate** with graph:
-
-```python
-# In src/Graph/graph_builder.py
-from src.agents.new_agent import NewAgent
-
-new_agent = NewAgent()
-# Add to workflow graph
-```
-
-### Adding a New Data Processor
-
-1. **Create processor** in `src/Chunking/`:
-
-```python
-# src/Chunking/new_processor.py
-class NewProcessor:
-    def __init__(self, config: dict = None):
-        self.config = config or {}
-    
-    def process(self, data):
-        """Process data"""
-        # Implementation
-        return processed_data
+app.include_router(my_router)
 ```
 
 ---
 
 ## Testing
 
-### Unit Testing
+### Run Tests
+```bash
+pytest tests/ -v
+```
 
+### Test Coverage
+```bash
+pytest tests/ --cov=src
+```
+
+### Example Test
 ```python
-# tests/test_chunking.py
-import pytest
-from src.Chunking.chunker import DocumentChunker
-
-class TestDocumentChunker:
-    @pytest.fixture
-    def chunker(self):
-        return DocumentChunker(chunk_size=512)
-    
-    def test_chunk_creation(self, chunker):
-        text = "Sample text " * 100
-        chunks = chunker.chunk(text)
-        assert len(chunks) > 0
-        assert all(len(c) <= 512 for c in chunks)
-    
-    def test_empty_input(self, chunker):
-        chunks = chunker.chunk("")
-        assert len(chunks) == 0
-```
-
-### Running Tests
-
-```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=src
-
-# Run specific test file
-pytest tests/test_chunking.py
-
-# Run with verbose output
-pytest -v
-
-# Run and show print statements
-pytest -s
-```
-
-### Test Coverage Report
-
-```bash
-# Generate coverage report
-pytest --cov=src --cov-report=html
-
-# Open report
-open htmlcov/index.html
+# tests/test_agents.py
+def test_data_ingestion_agent():
+    from src.agents.data_ingestion_agent.data_ingestion_agent import DataIngestionAgent
+    agent = DataIngestionAgent()
+    # Test implementation
 ```
 
 ---
 
-## Code Style & Standards
+## Code Standards
 
-### Code Formatting with Black
+### Style Guide
+- Follow PEP 8
+- Use type hints
+- Max line length: 100 characters
+- Docstrings for all functions
 
-```bash
-# Format all Python files
-black src/
-
-# Check without formatting
-black --check src/
-```
-
-### Linting with Flake8
-
-```bash
-# Check code style
-flake8 src/
-
-# Ignore specific rules
-flake8 src/ --ignore=E501,W503
-```
-
-### Type Checking with MyPy
-
-```bash
-# Type check code
-mypy src/
-
-# With strict mode
-mypy --strict src/
-```
-
-### Python Style Guide
-
+### Example
 ```python
-# ✓ Good
-def process_document(doc: str, chunk_size: int = 512) -> List[str]:
+def process_document(content: str, language: str = "ar") -> dict[str, any]:
     """
-    Process document into chunks.
+    Process a legal document.
     
     Args:
-        doc: Input document text
-        chunk_size: Maximum chunk size
+        content: Document text content
+        language: Language code (default: "ar" for Arabic)
     
     Returns:
-        List of document chunks
+        Processed document data
+    
+    Raises:
+        ValueError: If content is empty
     """
-    chunks = []
+    if not content:
+        raise ValueError("Content cannot be empty")
+    
     # Implementation
-    return chunks
+    return {}
+```
 
-# ✗ Bad
-def processDocument(doc, chunk_size=512):
-    # Process document
-    chunks = []
-    return chunks
+---
+
+## Debugging
+
+### Enable Debug Logging
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
+```
+
+### Use Debugger
+```python
+import pdb; pdb.set_trace()  # Breakpoint
+```
+
+### Print LangGraph State
+```python
+from src.Graph.state import AgentState
+state = AgentState(...)
+print(state.model_dump())
+```
+
+---
+
+## Performance Optimization
+
+### Caching
+```python
+from functools import lru_cache
+
+@lru_cache(maxsize=128)
+def expensive_function(param: str) -> str:
+    # Cached results
+    return compute(param)
+```
+
+### Async Operations
+```python
+import asyncio
+
+async def process_batch(items: list):
+    tasks = [process_item(item) for item in items]
+    results = await asyncio.gather(*tasks)
+    return results
+```
+
+### Parallel Processing
+```python
+from concurrent.futures import ThreadPoolExecutor
+
+with ThreadPoolExecutor(max_workers=4) as executor:
+    results = list(executor.map(process_func, items))
+```
+
+---
+
+## Database Operations
+
+### Neo4j Queries
+```python
+from src.Graphstore.KG_builder import LegalKnowledgeGraph
+
+graph = LegalKnowledgeGraph(...)
+stats = graph.get_statistics()
+```
+
+### FAISS Operations
+```python
+from src.Vectorstore.vector_store_builder import load_vector_store
+
+vs = load_vector_store("na2d_faiss_index", embeddings)
+results = vs.similarity_search("query", k=5)
+```
+
+---
+
+## Logging
+
+### Configure Logging
+```python
+# src/Config/log_config.py
+import logging
+
+logger = logging.getLogger(__name__)
+logger.info("Application started")
+```
+
+### Log Levels
+- DEBUG: Detailed info for debugging
+- INFO: General informational messages
+- WARNING: Warning messages
+- ERROR: Error messages
+- CRITICAL: Critical failures
+
+---
+
+## Version Control
+
+### Commit Message Format
+```
+[TYPE] Brief description
+
+Detailed explanation if needed
+
+- Bullet point 1
+- Bullet point 2
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+```
+
+### Branch Naming
+- `feature/description` - New features
+- `fix/description` - Bug fixes
+- `docs/description` - Documentation
+- `refactor/description` - Refactoring
+
+---
+
+## Documentation
+
+### Code Documentation
+- Add docstrings to all public functions
+- Use type hints
+- Include usage examples
+
+### Update Docs
+- Edit relevant .md files in PROFESSIONAL_DOCS/
+- Keep API_REFERENCE.md in sync
+- Update ARCHITECTURE.md for major changes
+
+---
+
+## Common Development Tasks
+
+### Add LLM Provider
+```python
+# src/LLMs/NEW_PROVIDER_MODEL.py
+from langchain_community.llms import NewProvider
+
+class NewProviderModel:
+    def __init__(self):
+        self.model = NewProvider(api_key="...")
+```
+
+### Update Prompt
+```python
+# src/agents/agent_name/agent_name_prompt.py
+AGENT_PROMPT = """
+Your prompt here...
+"""
+```
+
+### Modify State
+```python
+# src/Graph/state.py
+class AgentState(TypedDict):
+    new_field: str
+    new_field_value: list[str]
+```
+
+---
+
+## Troubleshooting
+
+### Import Errors
+```bash
+# Reinstall dependencies
+pip install -r requirements.txt --force-reinstall
+```
+
+### Neo4j Errors
+```bash
+# Check Neo4j connection
+docker ps  # Verify container running
+docker logs neo4j  # Check logs
+```
+
+### FAISS Errors
+```bash
+# Rebuild index
+curl -X POST http://localhost:8000/vs/build
 ```
 
 ---
 
 ## Contributing
 
-### Contribution Workflow
-
-1. **Fork and clone** the repository
-2. **Create feature branch**: `git checkout -b feature/new-feature`
-3. **Make changes** and commit: `git commit -m "Add new feature"`
-4. **Push** to branch: `git push origin feature/new-feature`
-5. **Create Pull Request**
-
-### Commit Message Standards
-
-```
-# Good commit messages
-[FEATURE] Add document ingestion endpoint
-[FIX] Fix vector similarity calculation
-[DOCS] Update API documentation
-[REFACTOR] Reorganize chunking logic
-[TEST] Add unit tests for retrieval
-
-# Format
-[TYPE] Brief description
-
-Body (optional):
-- Detailed explanation
-- Implementation notes
-```
-
-### Code Review Checklist
-
-- [ ] Code follows style guidelines
-- [ ] Functions have docstrings
-- [ ] Tests pass (pytest)
-- [ ] Code is tested (>80% coverage)
-- [ ] Documentation is updated
-- [ ] No hardcoded values or secrets
-- [ ] Performance impact considered
-- [ ] Backwards compatibility maintained
+1. Create feature branch
+2. Make changes
+3. Add/update tests
+4. Update documentation
+5. Commit with descriptive message
+6. Push to branch
+7. Create pull request
 
 ---
 
-## Debugging
-
-### Enabling Debug Mode
-
-```bash
-# Set debug flag
-export APP_DEBUG=True
-
-# Run with debug output
-python main.py --debug
-
-# Or in code
-import logging
-logging.basicConfig(level=logging.DEBUG)
-```
-
-### Viewing Logs
-
-```bash
-# View application logs
-tail -f logs/app.log
-
-# Filter by level
-tail -f logs/app.log | grep ERROR
-
-# View Docker logs
-docker-compose logs -f app
-docker-compose logs -f neo4j
-```
-
-### Using Python Debugger
-
-```python
-# Add breakpoint
-import pdb; pdb.set_trace()
-
-# Or use breakpoint() (Python 3.7+)
-breakpoint()
-
-# Commands:
-# n - Next line
-# s - Step into
-# c - Continue
-# p variable_name - Print variable
-```
-
-### Debugging with VS Code
-
-Create `.vscode/launch.json`:
-
-```json
-{
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "name": "Python: Main",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/main.py",
-      "console": "integratedTerminal",
-      "justMyCode": true
-    }
-  ]
-}
-```
-
----
-
-## Database Debugging
-
-### Neo4j Cypher Queries
-
-```bash
-# Access Neo4j browser
-# Open: http://localhost:7474/browser
-
-# Test connection
-:help
-
-# Show databases
-SHOW DATABASES;
-
-# Query data
-MATCH (n) RETURN COUNT(n);
-
-# Clear data (careful!)
-MATCH (n) DETACH DELETE n;
-```
-
-### Vector Store Debugging
-
-```python
-# Test FAISS
-import faiss
-import numpy as np
-
-# Create index
-dimension = 384
-index = faiss.IndexFlatL2(dimension)
-
-# Add vectors
-vectors = np.random.random((100, 384)).astype('float32')
-index.add(vectors)
-
-# Search
-query = np.random.random((1, 384)).astype('float32')
-distances, indices = index.search(query, 5)
-```
-
----
-
-## Performance Profiling
-
-```python
-# Use cProfile
-import cProfile
-import pstats
-
-profiler = cProfile.Profile()
-profiler.enable()
-
-# Code to profile
-perform_analysis()
-
-profiler.disable()
-stats = pstats.Stats(profiler)
-stats.sort_stats('cumulative')
-stats.print_stats(20)
-```
-
----
-
-## Performance Optimization Tips
-
-1. **Database Queries**: Use indices and limit results
-2. **Vector Searches**: Pre-filter before similarity search
-3. **Caching**: Cache frequently accessed data
-4. **Async Processing**: Use async/await for I/O operations
-5. **Batch Operations**: Process in batches when possible
-
----
-
-**Happy coding! For questions, refer to the project documentation or reach out to the team.**
+**Last Updated**: June 2024  
+**Version**: 1.0.0
