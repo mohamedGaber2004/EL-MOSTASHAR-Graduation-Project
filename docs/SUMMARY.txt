@@ -1,0 +1,138 @@
+EL-MOSTASHAR — SYSTEM SUMMARY
+==============================
+
+APPLICATION
+-----------
+FastAPI application (main.py) running on port 8000.
+Serves 7 router groups: cases, agents, Services (chunking), kg, kg/retriever, vs, vs/retriever.
+
+AGENT PIPELINE (LangGraph StateGraph)
+--------------------------------------
+10 agents, all extending AgentBase (src/agents/agent_base/agent_base.py).
+
+Order:
+  1. DataIngestionAgent          — extract entities from uploaded .txt files
+  2. ProceduralAuditorAgent      — check procedural validity; may short-circuit to judge
+  3. LegalResearcherAgent        — retrieve laws and Cassation principles
+  4. EvidenceAnalystAgent        — score evidence (parallel)
+  5. ConfessionValidityAgent     — assess confessions (parallel)
+  6. WitnessCredibilityAgent     — assess witness credibility (parallel)
+  7. ProsecutionAnalystAgent     — build prosecution theory
+  8. DefenseAnalystAgent         — analyse defense arguments
+  9. SentencingAgent             — determine sentencing factors
+ 10. JudgeAgent                  — produce final verdict
+
+Shared state: AgentState (src/Graph/state.py) — Pydantic BaseModel, ~40 fields.
+
+DOCUMENT TYPES (DataIngestionAgent)
+------------------------------------
+amr_ihala        : referral order
+mahdar_dabt      : arrest report
+mahdar_istijwab  : interrogation report
+aqual_elshuhud   : witness statements
+taqrir_tibbi     : medical/lab report
+mozakeret_difa   : defense memorandum
+sgl_genaey       : criminal record
+
+KNOWLEDGE GRAPH (Neo4j)
+------------------------
+Module: src/Graphstore/KG_builder.py
+Nodes: Law, Article, Penalty, Definition, Topic, Amendment, Table, TableChunk
+Relationships: CONTAINS, HAS_PENALTY, DEFINES, TAGGED_WITH, REFERENCES, AMENDED_BY,
+               SUPERSEDES, HAS_TABLE, HAS_CHUNK, HAS_AMENDMENT
+
+Build pipeline (build_knowledge_graph):
+  Phase 1: extract law summaries (LawExtractor)
+  Phase 2: import laws, articles, penalties, definitions, topics, references
+  Phase 3: import amendments (AmendmentExtractor)
+  Phase 4: import tables as Table + TableChunk nodes
+
+KG RETRIEVAL (LegalRetriever)
+------------------------------
+Module: src/retriever/kg_retriever/kg_retriever.py
+Steps:
+  1. Embed query (HuggingFace)
+  2. ANN search over Article nodes (Neo4j vector index, cosine similarity)
+  3. ANN search over TableChunk nodes
+  4. BM25 search over articles (rank_bm25, in-memory, Arabic tokenizer)
+  5. RRF merge (bm25_weight=0.4, vector_weight=0.6 by default)
+  6. Graph expansion per article (penalties, amendments, definitions, topics, refs, tables)
+  7. Filter by threshold, deduplicate
+  8. Assemble context string (max 9000 chars)
+
+VECTOR STORE (FAISS)
+---------------------
+Module: src/Vectorstore/vector_store_builder.py
+Module: src/retriever/vs_retriever/vs_reriever.py
+Built from Na2d corpus (rulings + principles).
+Three modes: dense (FAISS), sparse (BM25Retriever), hybrid (EnsembleRetriever, default 0.6/0.4).
+
+CORPUS CHUNKING (CorpusChunker)
+--------------------------------
+Module: src/Chunking/chunking.py
+Laws: article chunks, preamble chunks, amended-article chunks, table chunks
+Na2d: ruling chunks (300 words, 40 overlap), principle-book chunks (400 words, 50 overlap)
+Law splitter: regex on Arabic article headers
+
+LAWS COVERED
+------------
+penal_code (3okobat)
+criminal_procedure (egra2at_gena2ya)
+anti_drugs (drugs)
+anti_terror (erhab)
+money_laundering (8asl_amwal)
+weapons_ammunition (Asle7a)
+criminal_constitution (dostor_gena2y)
+emergency_law (taware2)
+cybercrime (technology)
+
+LLM PROVIDERS (configurable per agent)
+---------------------------------------
+open_router | groq | mistral | google | vertex | cloudflare | celebras
+Set via <AGENT>_PROVIDER in .env
+
+RETRY BEHAVIOR
+--------------
+Max retries: INVOKATION_MAX_RETRIES (env)
+Back-off: exponential (base 2.0, cap 60s) + jitter
+Rate-limit detection: HTTP 429, "rate_limit", "tokens per minute", "please try again"
+Retry-After header: honoured when present
+OpenRouter 402: raises immediately, no retry
+
+SINGLETONS
+----------
+LegalKnowledgeGraph      : thread-safe double-checked locking (kg_router.py)
+LegalRetriever           : thread-safe double-checked locking (kg_retriever_router.py)
+FAISS vector store       : thread-safe lock (vs_router.py)
+BM25 sparse retriever    : thread-safe lock (vs_retriever_router.py)
+Na2d chunk cache         : module-level global (agent_base.py)
+LangGraph graph          : lru_cache(maxsize=1) (graph_builder.py)
+KG statistics cache      : TTLCache 60s (kg_router.py)
+Amendments cache         : TTLCache 300s
+Article history cache    : TTLCache 300s
+
+LOGGING
+-------
+Config: src/Config/log_config.py
+Output: src/logs/system.log + console
+Level: INFO
+Format: %(asctime)s - %(name)s - %(levelname)s - %(message)s
+LangSmith: optional, controlled by LANGSMITH_* env vars
+
+DEPLOYMENT
+----------
+Docker image: python:3.12-slim
+Port: 8000
+Volumes: ./Datasets:/app/Datasets, hf_cache:/cache/hf
+Env file: .env
+Command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+Restart: unless-stopped
+
+KEY ENV VARS
+------------
+DataPath, na2d_data_path, FAISS_INDEX_PATH
+ARABIC_NATIVE_EMBEDDING_MODEL
+NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD
+INVOKATION_MAX_RETRIES, INTER_AGENTS_DELAY, INGESTION_AGENT_MAX_CHARS
+<AGENT>_MODEL, <AGENT>_TEMP, <AGENT>_PROVIDER  (one set per agent)
+LANGSMITH_TRACING, LANGSMITH_API_KEY, LANGSMITH_ENDPOINT, LANGSMITH_PROJECT
