@@ -14,6 +14,7 @@ class Settings(BaseSettings):
 
     # API Keys
     GOOGLE_API_KEY: Optional[str] = None
+    NVIDIA_API_KEY: Optional[str] = None
     COHERE_API_KEY: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None
     HUGGINGFACE_API_TOKEN: Optional[str] = None

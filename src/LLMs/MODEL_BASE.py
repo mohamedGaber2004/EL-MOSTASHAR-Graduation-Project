@@ -3,6 +3,7 @@ from langchain_openai import ChatOpenAI
 from langchain_mistralai import ChatMistralAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_cerebras import ChatCerebras
+from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
 from dotenv import load_dotenv
 from src.Config import get_settings
@@ -60,6 +61,12 @@ class BaseModel :
             api_key=self.cfg.CELEBRAS_API_KEY,
             max_tokens=4096
         )
+        self.as_nvidia_llm = ChatNVIDIA(
+            model=self.model_name,
+            temperature=self.temperature,
+            api_key=self.cfg.NVIDIA_API_KEY,
+            max_completion_tokens=4096
+        )
 
     def get_as_llm(self):
         return {
@@ -69,5 +76,6 @@ class BaseModel :
             "google_llm":self.as_google_llm,
             "vertex_llm":self.as_vertex_llm,
             "cloudflare_llm":self.as_cloudflare_llm,
-            "celebras_llm":self.as_celebras_llm
+            "celebras_llm":self.as_celebras_llm,
+            "nvidia_llm":self.as_nvidia_llm
         }

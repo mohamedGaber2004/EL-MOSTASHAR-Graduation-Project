@@ -64,11 +64,7 @@ class AgentBase:
         return datetime.now(timezone.utc)
 
     # ── hybrid retrieval ──────────────────────────────────────────────────────
-    def hybrid_retrieve_logic(
-        self,
-        req: HybridRetrieveRequest,
-        vs,
-    ) -> RetrieveResponse:
+    def hybrid_retrieve_logic(self,req: HybridRetrieveRequest,vs) -> RetrieveResponse:
         """
         Run a hybrid dense+sparse retrieval over the na2d corpus.
         The hybrid retriever is cached per (vs identity, k, weights) so the
@@ -351,7 +347,7 @@ class AgentBase:
         "CONFESSION_VALIDITY_MODEL": ("src.LLMs.CONFESSION_VALIDITY_MODEL", "get_confession_validity_model"),
         "WITNESS_CREDIBILITY_MODEL": ("src.LLMs.WITNESS_CREDIBILITY_MODEL", "get_witness_credibility_model"),
         "PROSECUTION_ANALYST_MODEL": ("src.LLMs.PROSECUTION_ANALYST_MODEL", "get_prosecution_analyst_model"),
-        "SENTENCING_MODEL":          ("src.LLMs.SENTENCING_MODEL",           "get_sentencing_model"),
+        "SENTENCING_MODEL":          ("src.LLMs.SENTENCING_MODEL",          "get_sentencing_model"),
     }
 
     _PROVIDER_KEY_MAP: dict[str, str] = {
@@ -362,6 +358,7 @@ class AgentBase:
         "vertex":      "vertex_llm",
         "cloudflare":  "cloudflare_llm",
         "celebras":    "celebras_llm",
+        "nvidia":      "nvidia_llm"
     }
 
     def _init_llm(self, agent_name: str):
@@ -459,13 +456,7 @@ class AgentBase:
         return None
 
     # ── state update helper ───────────────────────────────────────────────────
-    def _empty_update(
-        self,
-        state: Any,
-        agent_key: str,
-        output: Any,
-        inter_agent_delay: float = None,
-    ) -> dict:
+    def _empty_update(self,state: Any,agent_key: str,output: Any,inter_agent_delay: float = None) -> dict:
         if inter_agent_delay is None:
             inter_agent_delay = self.cfg.INTER_AGENTS_DELAY
 
