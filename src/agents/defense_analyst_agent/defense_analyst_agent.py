@@ -48,19 +48,28 @@ class DefenseAnalystAgent(AgentBase):
         }
 
     def _build_prior_agents_context(self, state: AgentState) -> dict:
-        audit      = state.procedural_audit
-        violations = audit.violations or []
+        audit = state.procedural_audit
+        violations = []
+        critical_nullities = []
+        overall_assessment = ""
+        excluded_claims = []
+
+        if audit:
+            violations = audit.violations or []
+            critical_nullities = audit.critical_nullities or []
+            overall_assessment = audit.overall_assessment or ""
+            excluded_claims = audit.excluded_defense_claims or []
 
         nullities = [
             {
-                "procedure_source":   p.procedure_source,
-                "procedure_type":     p.procedure_type,
-                "issue_description":  p.issue_description,
-                "warrant_present":    p.warrant_present,
-                "conducting_officer": p.conducting_officer,
-                "nullity_type":       p.nullity_type,
-                "nullity_effect":     p.nullity_effect,
-                "article_basis":      p.article_basis,
+                "procedure_source":   p.procedure_source   or "",
+                "procedure_type":     p.procedure_type     or "",
+                "issue_description":  p.issue_description  or "",
+                "warrant_present":    p.warrant_present     if p.warrant_present is not None else False,
+                "conducting_officer": p.conducting_officer or "",
+                "nullity_type":       p.nullity_type       or "",
+                "nullity_effect":     p.nullity_effect     or "",
+                "article_basis":      p.article_basis      or "",
             }
             for p in violations
             if p.nullity_type
@@ -72,29 +81,60 @@ class DefenseAnalystAgent(AgentBase):
             if p.nullity_type and p.source_document_id
         ]
 
+        def safe_list(items):
+            """اتحول كل item لـ dict نظيف من غير None values"""
+            result = []
+            for item in (items or []):
+                dumped = self._safe_dump(item)
+                if isinstance(dumped, dict):
+                    cleaned = {k: (v if v is not None else "") for k, v in dumped.items()}
+                    result.append(cleaned)
+                else:
+                    result.append(str(dumped) if dumped is not None else "")
+            return result
+
         return {
-            "procedural_nullities":      nullities,
-            "critical_nullities":        audit.critical_nullities or [],
-            "overall_audit_assessment":  audit.overall_assessment,
-            "excluded_defense_claims":   [
-                {"claim": c.claim, "reason": c.reason}
-                for c in (audit.excluded_defense_claims or [])
+            "procedural_nullities":       nullities,
+            "critical_nullities":         [str(n) for n in critical_nullities if n is not None],
+            "overall_audit_assessment":   overall_assessment,
+            "excluded_defense_claims":    [
+                {
+                    "claim":  c.claim  or "",
+                    "reason": c.reason or "",
+                }
+                for c in excluded_claims
             ],
-            "invalidated_evidence":      invalidated_ids,
-            "evidence_scores":           [self._safe_dump(s) for s in (state.evidence_scores or [])],
-            "chain_of_custody_issues":   state.chain_of_custody_issues or [],
-            "confession_assessments":    [self._safe_dump(c) for c in (state.confession_assessments or [])],
-            "witness_credibility_scores":[self._safe_dump(w) for w in (state.witness_credibility_scores or [])],
+            "invalidated_evidence":       [str(i) for i in invalidated_ids if i is not None],
+            "evidence_scores":            safe_list(state.evidence_scores),
+            "chain_of_custody_issues":    [str(i) for i in (state.chain_of_custody_issues or []) if i is not None],
+            "confession_assessments":     safe_list(state.confession_assessments),
+            "witness_credibility_scores": safe_list(state.witness_credibility_scores),
             "case_articles": [
-                a.get("article_number", str(a)) if isinstance(a, dict) else a
+                a.get("article_number", str(a)) if isinstance(a, dict) else str(a)
                 for a in (state.case_articles or [])
+                if a is not None
             ],
-            "applied_principles":        [self._safe_dump(p) for p in (state.applied_principles or [])],
-            "prosecution_theory":        self._safe_dump(state.prosecution_theory) if state.prosecution_theory else {},
-            "prosecution_arguments":     [self._safe_dump(a) for a in (state.prosecution_arguments or [])],
+            "applied_principles":         safe_list(state.applied_principles),
+            "prosecution_theory":         (
+                {k: (v if v is not None else "") for k, v in self._safe_dump(state.prosecution_theory).items()}
+                if state.prosecution_theory else {}
+            ),
+            "prosecution_arguments":      safe_list(state.prosecution_arguments),
         }
 
     def _build_prompt(self, defense_data: dict, prior_context: dict, state) -> str:
+        # ── clean defense_data من None ──────────────────────────────
+        def clean(obj):
+            if isinstance(obj, dict):
+                return {k: clean(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [clean(i) for i in obj if i is not None]
+            return obj if obj is not None else ""
+
+        defense_data  = clean(defense_data)
+        prior_context = clean(prior_context)
+        
+        
         case_basics = json.dumps(
             {
                 "defendants": [getattr(d, "name", str(d)) for d in (state.defendants or [])],

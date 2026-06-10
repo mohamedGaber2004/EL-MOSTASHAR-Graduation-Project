@@ -75,15 +75,43 @@ async def invoke_case(case_id: str = Form(...),files: List[UploadFile] = File(..
         logger.error(f"Failed to process case {case_id}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-@router.post("/invoke_case_from_device")
+@router.post(
+    "/invoke_case_from_device",
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["case_id", "files"],
+                        "properties": {
+                            "case_id": {
+                                "type": "string",
+                                "description": "Unique case identifier, e.g. CASE-2024-001"
+                            },
+                            "files": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "format": "binary"      # ← this triggers the real OS file picker
+                                },
+                                "description": "One or more files (.pdf .png .jpg .jpeg .docx .txt .csv) — max 20MB each"
+                            }
+                        }
+                    }
+                }
+            },
+            "required": True
+        }
+    }
+)
 async def invoke_case_from_device(case_id: str = Form(...),files: List[UploadFile] = File(...)):
     """
-    Endpoint to invoke AI processing on a case with files uploaded directly from a user device.
-    Accepts multipart/form-data with case_id and one or more files.
-
-    Allowed file types: TXT
-    Max file size: 20MB per file
+    Upload files directly from your device for AI processing.
+    - Allowed: `.pdf` `.png` `.jpg` `.jpeg` `.docx` `.txt` `.csv`
+    - Max **20MB** per file
     """
+
     ALLOWED_EXTENSIONS = {".txt"}
     MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024  # 20MB
 

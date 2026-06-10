@@ -24,7 +24,7 @@ class BaseModel :
         self.as_open_router_llm = ChatOpenAI(
             model=self.model_name,
             temperature=self.temperature,
-            max_completion_tokens=2048,
+            max_tokens=2048,
             base_url=self.cfg.OPENAI_BASE_URL,
             api_key=self.cfg.OPENAI_BASE_ROUTER_API_KEY
         )
@@ -47,14 +47,6 @@ class BaseModel :
             max_tokens = 4096,
             api_key=self.cfg.GOOGLE_API_KEY
         )
-        self.as_vertex_llm = ChatGoogleGenerativeAI(
-            model=self.model_name,
-            temperature=self.temperature,
-            project = "el-mosta4ar",
-            vertexai = True,
-            max_tokens = 4096,
-            api_key=self.cfg.VERTIX_API_KEY
-        )
         self.as_celebras_llm = ChatCerebras(
             model=self.model_name,
             temperature=self.temperature,
@@ -65,7 +57,7 @@ class BaseModel :
             model=self.model_name,
             temperature=self.temperature,
             api_key=self.cfg.NVIDIA_API_KEY,
-            max_completion_tokens=4096
+            max_tokens=2048
         )
 
     def get_as_llm(self):
@@ -74,7 +66,6 @@ class BaseModel :
             "open_router_llm": self.as_open_router_llm,
             "mistral_llm": self.as_mistral_llm,
             "google_llm":self.as_google_llm,
-            "vertex_llm":self.as_vertex_llm,
             "cloudflare_llm":self.as_cloudflare_llm,
             "celebras_llm":self.as_celebras_llm,
             "nvidia_llm":self.as_nvidia_llm

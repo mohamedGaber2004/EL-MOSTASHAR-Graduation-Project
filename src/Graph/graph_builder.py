@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # Error wrapper 
 # ─────────────────────────────────────────────────────────────────────────────
 def _safe_run(agent_key: str, agent):
-    @functools.wraps(agent.run)          # ← preserves __name__, __doc__, etc.
+    @functools.wraps(agent.run)
     def _wrapped(state):
         try:
             result = agent.run(state)
@@ -52,7 +52,7 @@ def _safe_run(agent_key: str, agent):
                 "errors":           [f"{agent_key}: {str(e)[:200]}"],
             }
 
-    _wrapped.__name__ = agent_key       # ← unique key LangGraph uses as node ID
+    _wrapped.__name__ = agent_key
     _wrapped.__qualname__ = agent_key
     return _wrapped
 
@@ -115,7 +115,6 @@ def build_legal_graph():
 
     agents = {
         "data_ingestion":     DataIngestionAgent(),
-        "procedural_auditor": ProceduralAuditorAgent(kg=kg, embeddings=emb, vector_store=vs),
         "legal_researcher":   LegalResearcherAgent(kg=kg, embeddings=emb, vector_store=vs),
         "evidence_analyst":   EvidenceAnalystAgent(),
         "defense_analyst":    DefenseAnalystAgent(),
@@ -136,17 +135,7 @@ def build_legal_graph():
 
     builder.add_edge(START, "data_ingestion")
 
-    builder.add_edge("data_ingestion", "procedural_auditor")
-
-    builder.add_conditional_edges(
-        "procedural_auditor",
-        _route_after_procedural_audit,
-        {
-            "legal_researcher": "legal_researcher",
-            "judge":            "judge",
-        },
-    )
-
+    builder.add_edge("data_ingestion", "legal_researcher")
     builder.add_edge("legal_researcher", "evidence_analyst")
     builder.add_edge("legal_researcher", "confession_validity")
     builder.add_edge("legal_researcher", "witness_credibility")
@@ -158,7 +147,7 @@ def build_legal_graph():
     builder.add_edge("sentencing", "judge")
     builder.add_edge("judge", END)
 
-    logger.info("✅ Legal graph built — 10 agents | conditional routing active")
+    logger.info("✅ Legal graph built — 9 agents | conditional routing active")
     return builder.compile()
 
 def get_graph_visualization():

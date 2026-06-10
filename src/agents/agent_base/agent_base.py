@@ -355,7 +355,6 @@ class AgentBase:
         "groq":        "groq_llm",
         "mistral":     "mistral_llm",
         "google":      "google_llm",
-        "vertex":      "vertex_llm",
         "cloudflare":  "cloudflare_llm",
         "celebras":    "celebras_llm",
         "nvidia":      "nvidia_llm"
@@ -393,9 +392,18 @@ class AgentBase:
         return llm_map[key]
 
     # ── retry wrapper ─────────────────────────────────────────────────────────
-    def _llm_invoke_with_retries(self,llm_callable: Callable,messages: List[Any],max_retries: int = None,backoff_base: float = 2.0) -> Any:
+    def _llm_invoke_with_retries(
+        self,
+        llm_callable: Callable,
+        messages: List[Any],
+        max_retries: int = None,
+        backoff_base: float = 2.0,
+    ) -> Any:
         if max_retries is None:
             max_retries = self.cfg.INVOKATION_MAX_RETRIES
+
+        # ── sanitize messages قبل أي حاجة ──────────────────────────
+        messages = self._sanitize_messages(messages)
 
         for attempt in range(1, max_retries + 1):
             try:
@@ -407,7 +415,6 @@ class AgentBase:
                         logger.warning("Empty response on attempt %d — retrying in %.2fs", attempt, wait)
                         time.sleep(wait)
                         continue
-                    logger.error("Empty response after %d attempt(s) — giving up", attempt)
                     raise RuntimeError(f"LLM returned empty content after {attempt} attempt(s)")
 
                 if attempt > 1:
@@ -418,24 +425,39 @@ class AgentBase:
                 err_raw = str(e)
                 err     = err_raw.lower()
 
+                # ── 402 credits ──────────────────────────────────────
                 if "402" in err_raw and "credits" in err_raw:
-                    logger.error("OpenRouter 402 — insufficient credits for %s.", self.__class__.__name__)
+                    logger.error("402 — insufficient credits.")
+                    raise RuntimeError(f"Insufficient credits — {self.__class__.__name__}") from e
+
+                # ── 500 unit variant → payload مشكلة مش هتتحل بـ retry
+                if "500" in err_raw and "unit variant" in err_raw:
+                    logger.error("500 unit variant — payload contains null values, no retry.")
                     raise RuntimeError(
-                        f"Insufficient OpenRouter credits — cannot invoke {self.__class__.__name__}."
+                        "Payload contains null/invalid fields — fix _sanitize_messages."
                     ) from e
 
+                # ── 504 gateway timeout → retry مع backoff أطول ──────
+                is_timeout = "504" in err_raw or "gateway timeout" in err_raw
+
+                # ── rate limit / 429 / 503 → retry عادي ─────────────
                 is_rate = any(k in err for k in AgentsEnums.AGENT_INVOKATION_ERRORS)
-                if is_rate and attempt < max_retries:
-                    retry_after = self._extract_retry_after(err_raw)
-                    if retry_after:
-                        wait = min(120.0, retry_after) + random.uniform(1.0, 3.0)
-                        logger.warning(
-                            "Rate-limit on attempt %d — honouring Retry-After=%.0fs → waiting %.1fs",
-                            attempt, retry_after, wait,
-                        )
+
+                if (is_timeout or is_rate) and attempt < max_retries:
+                    if is_timeout:
+                        wait = min(120.0, backoff_base * (2 ** attempt)) + random.uniform(1.0, 3.0)
+                        logger.warning("504 timeout on attempt %d — waiting %.1fs", attempt, wait)
                     else:
-                        wait = min(60.0, backoff_base * (2 ** (attempt - 1))) + random.random()
-                        logger.warning("Rate-limit / timeout on attempt %d — waiting %.2fs", attempt, wait)
+                        retry_after = self._extract_retry_after(err_raw)
+                        if retry_after:
+                            wait = min(120.0, retry_after) + random.uniform(1.0, 3.0)
+                            logger.warning(
+                                "Rate-limit on attempt %d — Retry-After=%.0fs → waiting %.1fs",
+                                attempt, retry_after, wait,
+                            )
+                        else:
+                            wait = min(60.0, backoff_base * (2 ** (attempt - 1))) + random.random()
+                            logger.warning("Rate-limit on attempt %d — waiting %.2fs", attempt, wait)
                     time.sleep(wait)
                     continue
 
@@ -443,6 +465,29 @@ class AgentBase:
                 raise
 
         raise RuntimeError(f"LLM failed after {max_retries} attempt(s)")
+
+
+    # ── helper بيضمن مفيش None في الـ messages ────────────────────────
+    def _sanitize_messages(self, messages: List[Any]) -> List[Any]:
+        clean = []
+        for msg in messages:
+            if hasattr(msg, "content"):
+                content = msg.content
+                if content is None or (isinstance(content, str) and not content.strip()):
+                    # SystemMessage فاضي → skip | HumanMessage فاضي → بدّل بـ placeholder
+                    if isinstance(msg, SystemMessage):
+                        continue
+                    msg.content = " "
+                elif isinstance(content, list):
+                    # multi-part content — نظّف كل part
+                    msg.content = [
+                        {k: (v if v is not None else "") for k, v in part.items()}
+                        if isinstance(part, dict) else part
+                        for part in content
+                        if part is not None
+                    ]
+            clean.append(msg)
+        return clean
 
     @staticmethod
     def _extract_retry_after(err_raw: str) -> Optional[float]:
