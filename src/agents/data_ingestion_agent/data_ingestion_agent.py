@@ -339,7 +339,50 @@ class DataIngestionAgent(AgentBase):
                         HumanMessage(content=f"النص:\n\n{chunk_content}"),
                     ],
                 )
-                result = self._parse_llm_json(response.content)
+                result = self._parse_agent_json(response.content)
+
+                # ── الإضافة الدفاعية هنا: تصحيح القوائم الناتجة عن خطأ النموذج ──
+                if isinstance(result, list):
+                    if len(result) == 0:
+                        raise ValueError("النموذج أعاد قائمة فارغة")
+
+                    if len(result) == 1 and isinstance(result[0], dict):
+                        result = result[0]
+
+                    elif all(isinstance(item, dict) for item in result):
+                        # Merge list of partial extractions correctly:
+                        # - case_meta: first-write-wins (it's a scalar dict, not a list)
+                        # - list fields: accumulate across all items
+                        merged_result: dict = {}
+                        list_keys = set(DI_enums._LIST_KEYS.value)
+
+                        for item in result:
+                            for k, v in item.items():
+                                if k == "case_meta":
+                                    # First-write-wins for scalar dict
+                                    if "case_meta" not in merged_result:
+                                        merged_result["case_meta"] = v if isinstance(v, dict) else {}
+                                    else:
+                                        # Fill in missing sub-keys only
+                                        if isinstance(v, dict):
+                                            for sub_k, sub_v in v.items():
+                                                if merged_result["case_meta"].get(sub_k) is None:
+                                                    merged_result["case_meta"][sub_k] = sub_v
+                                elif k in list_keys:
+                                    if k not in merged_result:
+                                        merged_result[k] = []
+                                    if isinstance(v, list):
+                                        merged_result[k].extend(v)
+                                    elif isinstance(v, dict):
+                                        merged_result[k].append(v)
+                                else:
+                                    # Unknown scalar field: first-write-wins
+                                    if k not in merged_result:
+                                        merged_result[k] = v
+                        result = merged_result
+                    else:
+                        raise ValueError("النموذج أعاد قائمة غير متوافقة")
+                # ─────────────────────────────────────────────────────────────
 
                 is_valid, reason = _validate_extracted(result)
                 if not is_valid:

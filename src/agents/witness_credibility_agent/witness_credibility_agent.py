@@ -61,15 +61,9 @@ class WitnessCredibilityAgent(AgentBase):
         return self.prompt.format(context=json.dumps(ctx, ensure_ascii=False, indent=2))
 
     def _call_llm(self, prompt_text: str) -> str:
-        from langchain_core.messages import HumanMessage, SystemMessage
+        from langchain_core.messages import HumanMessage
 
-        messages = [
-            SystemMessage(content=(
-                "أنت خبير في تقييم الشهادات وفقاً للقانون الجنائي المصري. "
-                "تجيب بـ JSON فقط بلا أي نص خارجه."
-            )),
-            HumanMessage(content=prompt_text),
-        ]
+        messages = [HumanMessage(content=prompt_text)]
         result = self._llm_invoke_with_retries(self._llm, messages)
         return result.content if hasattr(result, "content") else str(result)
 
@@ -95,8 +89,8 @@ class WitnessCredibilityAgent(AgentBase):
                 )
 
         return scores
-    
-        # ── public entry point ────────────────────────────────────────
+
+    # ── public entry point ────────────────────────────────────────
 
     def run(self, state: AgentState) -> AgentState:
         logger.info(

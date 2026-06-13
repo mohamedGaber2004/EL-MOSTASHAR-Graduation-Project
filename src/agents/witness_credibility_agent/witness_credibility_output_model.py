@@ -9,7 +9,7 @@ from src.agents.agent_base.agents_enums import (
  
 class WitnessCredibility(BaseModel):
 
-    witness_name:              str           = Field(description="اسم الشاهد")
+    witness_name:              Optional[str] = Field(default="غير معروف", description="اسم الشاهد")
     statement_date:            Optional[str] = Field(default=None,description="تاريخ أداء الشهادة")
     relationship_to_defendant: Optional[str] = Field(default=None,description="صلة الشاهد بالمتهم أو المجني عليه إن وُجدت")
  
@@ -26,10 +26,10 @@ class WitnessCredibility(BaseModel):
     potential_bias: Optional[str] = Field(default=None,description="أي مؤشر على تحيز محتمل (عداوة / مصلحة / ضغط)")
     demeanor_notes: Optional[str] = Field(default=None,description="ملاحظات على سلوك الشاهد أثناء الأداء إن وُجدت في الأوراق")
  
-    # ── الحكم النهائي ─────────────────────────────────────────────
     reliability_level:     WitnessReliabilityLevel = Field(description="درجة الموثوقية الإجمالية")
-    reliability_reasoning: str                     = Field(description="التسبيب الموجز لدرجة الموثوقية المُقدَّرة")
+    reliability_reasoning: str                     = Field(default="لم يقدم النموذج تسبيباً", description="التسبيب الموجز لدرجة الموثوقية المُقدَّرة")
     weight_in_case:        str                     = Field(
+        default="غير محدد",
         description=(
             "الوزن المقترح في سلسلة الإثبات: "
             "'ركيزة أساسية' / 'مساند' / 'استئناسي' / 'يُهمَل'"

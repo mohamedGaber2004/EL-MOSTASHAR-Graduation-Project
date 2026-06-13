@@ -1,15 +1,12 @@
 import json
 import logging
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 
 from ..agent_base.agent_base import AgentBase
 from src.Graph.state import AgentState
 from src.agents.defense_analyst_agent.defense_analyst_output_model import DefenseAnalysis
-from src.agents.defense_analyst_agent.defense_analysis_prompt import (
-    DEFENSE_ANALYSIS_AGENT_PROMPT,
-    EXPECTED_OUTPUT_SCHEMA,
-)
+from src.agents.defense_analyst_agent.defense_analysis_prompt import DEFENSE_ANALYSIS_AGENT_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +120,7 @@ class DefenseAnalystAgent(AgentBase):
         }
 
     def _build_prompt(self, defense_data: dict, prior_context: dict, state) -> str:
-        # ── clean defense_data من None ──────────────────────────────
+        # ── clean من None ──────────────────────────────────────────
         def clean(obj):
             if isinstance(obj, dict):
                 return {k: clean(v) for k, v in obj.items()}
@@ -133,58 +130,27 @@ class DefenseAnalystAgent(AgentBase):
 
         defense_data  = clean(defense_data)
         prior_context = clean(prior_context)
-        
-        
-        case_basics = json.dumps(
-            {
-                "defendants": [getattr(d, "name", str(d)) for d in (state.defendants or [])],
-                "charges":    [getattr(c, "statute", str(c)) for c in (state.charges or [])],
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
 
-        return (
-            "## معطيات القضية الأساسية:\n"
-            f"{case_basics}\n\n"
+        case_basics = {
+            "defendants": [getattr(d, "name", str(d)) for d in (state.defendants or [])],
+            "charges":    [getattr(c, "statute", str(c)) for c in (state.charges or [])],
+        }
 
-            "## دفوع المتهم:\n"
-            f"{json.dumps(defense_data, ensure_ascii=False, indent=2)}\n\n"
+        context = {
+            "case_basics":                case_basics,
+            "defense_data":                defense_data,
+            "procedural_nullities":        prior_context["procedural_nullities"],
+            "invalidated_evidence":        prior_context["invalidated_evidence"],
+            "evidence_scores":             prior_context["evidence_scores"],
+            "chain_of_custody_issues":     prior_context["chain_of_custody_issues"],
+            "confession_assessments":      prior_context["confession_assessments"],
+            "witness_credibility_scores":  prior_context["witness_credibility_scores"],
+            "applied_principles":          prior_context["applied_principles"],
+            "prosecution_theory":           prior_context["prosecution_theory"],
+        }
 
-            "## البطلانيات الإجرائية المؤكدة:\n"
-            f"{json.dumps(prior_context['procedural_nullities'], ensure_ascii=False, indent=2)}\n\n"
-
-            "## مصفوفة الأدلة:\n"
-            f"{json.dumps(prior_context['evidence_scores'], ensure_ascii=False, indent=2)}\n\n"
-
-            "## مشكلات سلسلة الحيازة:\n"
-            f"{json.dumps(prior_context['chain_of_custody_issues'], ensure_ascii=False, indent=2)}\n\n"
-
-            "## تقييم الاعترافات:\n"
-            f"{json.dumps(prior_context['confession_assessments'], ensure_ascii=False, indent=2)}\n\n"
-
-            "## موثوقية الشهود:\n"
-            f"{json.dumps(prior_context['witness_credibility_scores'], ensure_ascii=False, indent=2)}\n\n"
-
-            "## المبادئ القانونية المطبقة:\n"
-            f"{json.dumps(prior_context['applied_principles'], ensure_ascii=False, indent=2)}\n\n"
-
-            "## نظرية الاتهام:\n"
-            f"{json.dumps(prior_context['prosecution_theory'], ensure_ascii=False, indent=2)}\n\n"
-
-            f"## أدلة مستبعدة بالبطلان: {prior_context['invalidated_evidence']}\n\n"
-
-            "## التعليمات:\n"
-            "لكل دفع شكلي وموضوعي:\n"
-            "1. حدد سنده القانوني الدقيق (المادة + القانون).\n"
-            "2. قيّم قوته بناءً على الأدلة والبطلانيات — مع التسبيب.\n"
-            "3. اربطه بأي بطلان إجرائي مؤكد إن وجد.\n"
-            "4. حدد الأدلة التي تدحضه إن وجدت.\n"
-            "5. قيّم الـ alibi في ضوء مصفوفة الأدلة.\n"
-            "6. استثمر ضعف نظرية الاتهام ومشكلات سلسلة الحيازة.\n\n"
-
-            "## صيغة الإجابة (JSON فقط — بلا مقدمة ولا شرح خارج JSON):\n"
-            f"{EXPECTED_OUTPUT_SCHEMA}"
+        return self.prompt.format(
+            context=json.dumps(context, ensure_ascii=False, indent=2)
         )
 
     # ── mapping ───────────────────────────────────────────────────────
@@ -242,7 +208,7 @@ class DefenseAnalystAgent(AgentBase):
         prompt   = self._build_prompt(defense_data, prior_context, state)
         response = self._llm_invoke_with_retries(
             self._llm,
-            [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
+            [HumanMessage(content=prompt)],
         )
 
         analysis = self._parse_agent_json(response.content)
@@ -260,7 +226,6 @@ class DefenseAnalystAgent(AgentBase):
             len(analysis.get("substantive_defenses", [])),
         )
 
-        analysis = self._parse_agent_json(response.content)
         defense_analysis = DefenseAnalysis(**analysis)
 
         return self._empty_update(state, "defense_analyst", {

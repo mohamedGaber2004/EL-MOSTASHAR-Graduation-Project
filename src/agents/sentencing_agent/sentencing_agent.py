@@ -5,6 +5,8 @@ import logging
 from typing import Any
 from pydantic import BaseModel
 
+from langchain_core.messages import HumanMessage
+
 from src.Graph.state import AgentState
 from src.agents.sentencing_agent.sentencing_output_model import CivilClaim, CivilClaimStatus
 from src.agents.sentencing_agent.sentencing_agent_prompt import  SENTENCING_PROMPT
@@ -64,15 +66,7 @@ class SentencingAgent(AgentBase):
         return self.prompt.format(context=json.dumps(ctx, ensure_ascii=False, indent=2, default=lambda o: o.model_dump() if isinstance(o, BaseModel) else str(o)))
 
     def _call_llm(self, prompt_text: str) -> str:
-        from langchain_core.messages import HumanMessage, SystemMessage
-
-        messages = [
-            SystemMessage(content=(
-                "أنت مستشار قانوني متخصص في تقدير العقوبات المصرية. "
-                "تجيب بـ JSON فقط بلا أي نص خارجه."
-            )),
-            HumanMessage(content=prompt_text),
-        ]
+        messages = [HumanMessage(content=prompt_text)]
         result = self._llm_invoke_with_retries(self._llm, messages)
         return result.content if hasattr(result, "content") else str(result)
 
@@ -98,11 +92,11 @@ class SentencingAgent(AgentBase):
         if raw_civil and isinstance(raw_civil, dict):
             try:
                 status_map: dict[str, CivilClaimStatus] = {
-                    "مقامة":            CivilClaimStatus.FILED,
-                    "لم تُقَم":         CivilClaimStatus.NOT_FILED,
-                    "محجوزة للفصل":    CivilClaimStatus.RESERVED,
-                    "مقضي بها":        CivilClaimStatus.AWARDED,
-                    "مرفوضة":           CivilClaimStatus.REJECTED,
+                    "مقامة":     CivilClaimStatus.FILED,
+                    "لم تُقَم":  CivilClaimStatus.NOT_FILED,
+                    "محجوزة":    CivilClaimStatus.RESERVED,
+                    "مقضي بها":  CivilClaimStatus.AWARDED,
+                    "مرفوضة":    CivilClaimStatus.REJECTED,
                 }
                 raw_civil["status"] = status_map.get(
                     raw_civil.get("status", "لم تُقَم"),
@@ -116,7 +110,7 @@ class SentencingAgent(AgentBase):
                 logger.warning("[%s] فشل بناء CivilClaim: %s", self.AGENT_KEY, exc)
 
         return updates
-    
+
     # ── public entry point ────────────────────────────────────────
 
     def run(self, state: AgentState) -> AgentState:

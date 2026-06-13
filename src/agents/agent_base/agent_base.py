@@ -209,48 +209,44 @@ class AgentBase:
         return result
 
     # ── JSON parsers ──────────────────────────────────────────────────────────
-    def _parse_llm_json(self, content: Any) -> dict:
-        """Parse + entity-validate LLM output (data ingestion agent)."""
-        if isinstance(content, list):
-            content = "".join(
-                block["text"] if isinstance(block, dict) and "text" in block else str(block)
-                for block in content
-            )
-
-        if not content or not isinstance(content, str):
-            logger.warning("Empty or invalid content: type=%s repr=%s", type(content), repr(content)[:100])
-            return {}
-
+    def _parse_llm_json(self, content: str) -> dict:
+        """نسخة محسنة دفاعياً لتحليل JSON"""
         try:
-            cleaned  = self._strip_md_fences(content)
-            repaired = repair_json(cleaned)
-            data     = json.loads(repaired)
-            if isinstance(data, str):
-                data = json.loads(repair_json(data))
+            clean_content = content.strip()
+            if clean_content.startswith("```"):
+                clean_content = clean_content.split("```")[1]
+                if clean_content.startswith("json"):
+                    clean_content = clean_content[4:]
+            
+            data = json.loads(clean_content.strip())
+
+            if isinstance(data, list):
+                if len(data) == 1 and isinstance(data[0], dict):
+                    logger.warning("Detected List-wrapped JSON, unwrapping...")
+                    return data[0]
+                elif len(data) > 0 and isinstance(data[0], dict):
+                    logger.warning("Detected Multi-item List, flattening...")
+                    merged = {}
+                    for item in data:
+                        if isinstance(item, dict):
+                            merged.update(item)
+                    return merged
+                else:
+                    return {}
+
+            return data if isinstance(data, dict) else {}
         except Exception as e:
-            logger.error("JSON parse/repair failed: %s | content[:200]=%s", e, content[:200])
+            logger.error(f"JSON Parsing failed: {e}")
             return {}
 
-        if not isinstance(data, dict):
-            logger.warning("Parsed JSON is not a dict: %s", type(data))
-            return {}
-
-        result = self._extract_with_entity_validation(data)
-        if result:
-            logger.info("Validated %d entity categories", len(result))
-        else:
-            logger.warning("No valid entities found in JSON output")
-        return result
-
-    def _parse_agent_json(self, content: Any) -> dict:
-        """Parse LLM output for non-ingestion agents (no entity validation)."""
+    def _parse_agent_json(self, content: Any) -> Any:  # return Any, not dict
+        """Parse LLM output. Returns dict normally, or list if model misbehaved."""
         if isinstance(content, list):
             content = "".join(
                 block.get("text", "") if isinstance(block, dict) else str(block)
                 for block in content
             )
 
-        logger.debug("_parse_agent_json received: type=%s | value=%s", type(content), repr(content[:300]) if isinstance(content, str) else repr(content))
         if not content or not isinstance(content, str):
             logger.warning("Empty or invalid content: type=%s", type(content))
             return {}
@@ -266,7 +262,7 @@ class AgentBase:
             return {}
 
         if not isinstance(data, dict):
-            logger.warning("Parsed JSON is not a dict: %s", type(data))
+            logger.debug("Parsed JSON is a %s — passing to caller for handling", type(data).__name__)
             return data
 
         logger.info("Agent JSON parsed — %d top-level key(s)", len(data))

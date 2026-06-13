@@ -8,15 +8,15 @@ from src.agents.agent_base.agents_enums import (
 
 class ProsecutionNarrative(BaseModel):
     # ── وقائع الاتهام ─────────────────────────────────────────────
-    summary:                 str           = Field(description="ملخص موجز لوقائع الاتهام كما يراها المدّعي العام (3-5 جمل)")
-    incident_reconstruction: str           = Field(description="إعادة تسلسل وقائع الحادثة زمنياً من منظور النيابة")
-    motive:                  Optional[str] = Field(default=None,description="الدافع المزعوم للجريمة إن ظهر من الأوراق")
+    summary:                 str           = Field(default="غير متوفر", description="ملخص موجز لوقائع الاتهام كما يراها المدّعي العام (3-5 جمل)")
+    incident_reconstruction: str           = Field(default="لم يقم النموذج بإعادة بناء التسلسل", description="إعادة تسلسل وقائع الحادثة زمنياً من منظور النيابة")
+    motive:                  Optional[str] = Field(default=None, description="الدافع المزعوم للجريمة إن ظهر من الأوراق")
  
     # ── ربط الأدلة بالاتهام ───────────────────────────────────────
-    evidence_chain:     List[str]     = Field(default_factory=list,description="سلسلة الأدلة المادية الداعمة للاتهام مرتبةً حسب الأهمية")
-    confession_role:    Optional[str] = Field(default=None,description="دور الاعتراف — إن وُجد — في بناء الاتهام")
-    witness_summary:    Optional[str] = Field(default=None,description="ملخص إسهام شهادات الشهود في تأييد رواية النيابة")
-    lab_report_summary: Optional[str] = Field(default=None,description="ملخص دور التقارير الفنية والمعملية في إثبات الاتهام")
+    evidence_chain:     List[str]     = Field(default_factory=list, description="سلسلة الأدلة المادية الداعمة للاتهام مرتبةً حسب الأهمية")
+    confession_role:    Optional[str] = Field(default=None, description="دور الاعتراف — إن وُجد — في بناء الاتهام")
+    witness_summary:    Optional[str] = Field(default=None, description="ملخص إسهام شهادات الشهود في تأييد رواية النيابة")
+    lab_report_summary: Optional[str] = Field(default=None, description="ملخص دور التقارير الفنية والمعملية في إثبات الاتهام")
  
     # ── ربط التهم بعناصرها القانونية ──────────────────────────────
     charge_element_mapping: List[dict] = Field(
@@ -29,8 +29,9 @@ class ProsecutionNarrative(BaseModel):
  
     # ── التقييم الكلي ─────────────────────────────────────────────
     overall_strength:              ProsecutionArgumentStrength = Field(description="التقدير الإجمالي لقوة ملف الاتهام")
-    weaknesses:                    List[str]                   = Field(default_factory=list,description="نقاط الضعف في ملف الاتهام التي ينبغي أن يراها القاضي")
+    weaknesses:                    List[str]                   = Field(default_factory=list, description="نقاط الضعف في ملف الاتهام التي ينبغي أن يراها القاضي")
     recommended_verdict_direction: str = Field(
+        default="توجيه غير محدد",
         description=(
             "توجيه الحكم المقترح من منظور الاتهام: "
             "'إدانة كاملة' / 'إدانة جزئية' / 'تخفيف' مع مبرر"

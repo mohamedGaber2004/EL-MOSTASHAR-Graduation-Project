@@ -2,11 +2,11 @@ import json
 import logging
 from pydantic import BaseModel
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 
 from ..agent_base.agent_base import AgentBase
-from src.agents.judge_agent.judge_agent_prompt import JUDGE_AGENT_PROMPT, EXPECTED_OUTPUT_SCHEMA
 from src.agents.judge_agent.judge_agent_output_model import FinalJudgment
+from src.agents.judge_agent.judge_agent_prompt import JUDGE_AGENT_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -117,34 +117,11 @@ class JudgeAgent(AgentBase):
 
     # ── prompt builder ────────────────────────────────────────────────
     def _build_prompt(self, ctx: dict) -> str:
-        nullities_count   = len(ctx["procedural_nullities"])
-        invalidated_count = len(ctx["invalidated_evidence"])
-        principles_count  = len(ctx["applied_principles"])
-
-        return (
-            "## ملف القضية الكامل للمداولة:\n"
-            f"{json.dumps(ctx, ensure_ascii=False, indent=2, default=lambda o: o.model_dump() if isinstance(o, BaseModel) else str(o))}\n\n"
-
-            "## مبادئ إصدار الحكم:\n"
-            "1. الشك يُفسَّر لصالح المتهم — إن وُجد شك جدي في أي تهمة تكون البراءة.\n"
-            "2. الدليل الباطل لا يُعتد به ولا يُستأنس به ولو بشكل غير مباشر.\n"
-            "3. رُد على كل دفع من الدفوع المُثارة صراحةً في الحكم.\n"
-            "4. قيّم كل دليل على حدة قبل الحكم الإجمالي.\n"
-            f"5. يوجد {nullities_count} بطلان إجرائي و{invalidated_count} دليل مستبعد"
-            " — ضعها في الاعتبار عند تقدير الأدلة.\n"
-            f"6. يوجد {principles_count} مبدأ من محكمة النقض — استشهد بها عند التسبيب"
-            " إن كانت وثيقة الصلة.\n"
-            "7. استند إلى charge_conviction_map من عميل التقدير كنقطة انطلاق.\n"
-            "8. راعِ aggravating_factors و mitigating_factors وأثر المادة 17 عند تحديد العقوبة.\n"
-            "9. أصدر الحكم في أربعة أقسام: ديباجة → وقائع → أسباب → منطوق.\n\n"
-
-            "## التعليمات:\n"
-            "أصدر حكماً مسبباً يناقش كل تهمة على حدة، "
-            "ويرد على كل دفع، ويوضح أثر البطلانيات على منظومة الإثبات، "
-            "ويتضمن الفصل في الدعوى المدنية إن وُجدت.\n\n"
-
-            "## صيغة الإجابة (JSON فقط — بلا مقدمة ولا شرح خارج JSON):\n"
-            f"{EXPECTED_OUTPUT_SCHEMA}"
+        return self.prompt.format(
+            context=json.dumps(
+                ctx, ensure_ascii=False, indent=2,
+                default=lambda o: o.model_dump() if isinstance(o, BaseModel) else str(o),
+            )
         )
 
     # ── main entry ────────────────────────────────────────────────────
@@ -165,7 +142,7 @@ class JudgeAgent(AgentBase):
 
         response = self._llm_invoke_with_retries(
             self._llm,
-            [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
+            [HumanMessage(content=prompt)],
         )
 
         judgment = self._parse_agent_json(response.content)
@@ -173,26 +150,33 @@ class JudgeAgent(AgentBase):
         if not isinstance(judgment, dict):
             logger.error("Judge LLM response could not be parsed — issuing safe acquittal")
             judgment = {
-                "overall_verdict":   "براءة",
-                "overall_penalty":   None,
-                "operative_text":    "فشل إصدار الحكم — براءة احتياطية",
-                "preamble":          None,
-                "established_facts": None,
-                "per_charge_rulings": [],
-                "confidence_score":  0.0,
-                "raw_response":      str(judgment),
+                "verdict":             "براءة",
+                "total_prison_years":  0,
+                "total_prison_months": 0,
+                "total_fine_amount":   0.0,
+                "operative_text":      "فشل إصدار الحكم — براءة احتياطية",
+                "preamble":            None,
+                "established_facts":   None,
+                "per_charge_rulings":  [],
+                "confidence_score":    0.0,
+                "raw_response":        str(judgment),
             }
 
         logger.info(
-            "Verdict issued: %s (confidence=%.2f)",
+            "Verdict issued: %s (confidence=%.2f) - Years: %s, Months: %s",
             judgment.get("verdict", ""),
             float(judgment.get("confidence_score", 0.0)),
+            judgment.get("total_prison_years", 0),
+            judgment.get("total_prison_months", 0),
         )
 
+        # تم ربط المخرجات بنموذج FinalJudgment الجديد
         return self._empty_update(state, "judge", {
             "suggested_verdict": FinalJudgment(
-                verdict             = judgment.get("overall_verdict"),
-                recommended_penalty = judgment.get("overall_penalty"),
+                verdict             = judgment.get("verdict"),
+                total_prison_years  = judgment.get("total_prison_years", 0),
+                total_prison_months = judgment.get("total_prison_months", 0),
+                total_fine_amount   = float(judgment.get("total_fine_amount", 0.0)),
                 operative_text      = judgment.get("operative_text"),
                 per_charge_rulings  = judgment.get("per_charge_rulings", []),
                 confidence_score    = float(judgment.get("confidence_score", 0.0)),

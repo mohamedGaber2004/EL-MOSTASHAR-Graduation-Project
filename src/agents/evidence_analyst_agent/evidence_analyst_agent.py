@@ -6,8 +6,7 @@ from typing import Any, Dict
 from ..agent_base.agent_base import AgentBase
 from src.Graph.state import AgentState
 from src.agents.evidence_analyst_agent.evidence_analyst_prompt import (
-    EVIDENCE_ANALYST_AGENT_PROMPT,
-    EXPECTED_OUTPUT_SCHEMA,
+    EVIDENCE_ANALYST_AGENT_PROMPT
 )
 
 logger = logging.getLogger(__name__)
@@ -121,25 +120,16 @@ class EvidenceAnalystAgent(AgentBase):
         context = self._build_case_context(state, invalidated_ids)
 
         invalidated_note = (
-            f"⚠️ الأدلة الباطلة التالية يجب استبعادها تماماً: {invalidated_ids}\n"
-            "الدليل الباطل لا يُعتد به ولا يُستأنس به ولو بشكل غير مباشر.\n\n"
+            f"⚠️ الأدلة الباطلة التالية يجب استبعادها تماماً: {', '.join(invalidated_ids)}\n"
+            "الدليل الباطل لا يُعتد به ولا يُستأنس به ولو بشكل غير مباشر.\n"
             if invalidated_ids
-            else "لا توجد أدلة باطلة مُحددة من المدقق الإجرائي.\n\n"
+            else "لا توجد أدلة باطلة مُحددة من المدقق الإجرائي.\n"
         )
 
         return (
             "## بيانات الأدلة والتهم والمشكلات الإجرائية:\n"
             f"{context}\n\n"
             f"{invalidated_note}"
-            "## التعليمات:\n"
-            "لكل دليل:\n"
-            "1. قيّم قوته ومدى قبوله مع التسبيب.\n"
-            "2. رصد التناقضات بينه وبين الأدلة الأخرى.\n"
-            "3. حدد مشكلات سلسلة الحيازة إن وُجدت.\n"
-            "4. حدد درجة الإثبات الإجمالية لكل تهمة.\n"
-            "5. لا تستخدم الأدلة الباطلة في بناء قناعتك.\n\n"
-            "## صيغة الإجابة (JSON فقط — بلا مقدمة ولا شرح خارج JSON):\n"
-            f"{EXPECTED_OUTPUT_SCHEMA}"
         )
 
     # ── Agents utils ───────────────────────────────────────────
@@ -164,19 +154,36 @@ class EvidenceAnalystAgent(AgentBase):
         return cleaned
     
     def _extract_scores(self, result: dict) -> list:
-        scores = []
-        for incident in result.get("evidence_scores", []):
-            for ev in incident.get("supporting_evidence", []):
+            """
+            Flatten evidence_scores into a per-incident structure that preserves
+            the full schema from EVIDENCE_ANALYST_AGENT_PROMPT: incident-level
+            summary, contradictions, and proof_reasoning, alongside the
+            supporting_evidence list.
+            """
+            scores = []
+            for incident in result.get("evidence_scores", []):
+                supporting_evidence = [
+                    {
+                        "evidence_id":     ev.get("evidence_id"),
+                        "type":            ev.get("type"),
+                        "description":     ev.get("description"),
+                        "strength":        ev.get("strength"),
+                        "strength_reason": ev.get("strength_reason"),
+                        "admissibility":   ev.get("admissibility"),
+                        "proof_degree":    ev.get("proof_degree"),
+                    }
+                    for ev in incident.get("supporting_evidence", [])
+                ]
+
                 scores.append({
-                    "evidence_id":   ev.get("evidence_id"),
-                    "type":          ev.get("type"),
-                    "description":   ev.get("description"),
-                    "strength":      ev.get("strength"),
-                    "strength_reason": ev.get("strength_reason"),
-                    "admissibility": ev.get("admissibility"),
-                    "proof_degree":  ev.get("proof_degree"),
+                    "incident_id":        incident.get("incident_id"),
+                    "incident_summary":   incident.get("incident_summary"),
+                    "supporting_evidence": supporting_evidence,
+                    "contradictions":     incident.get("contradictions", []),
+                    "proof_reasoning":    incident.get("proof_reasoning"),
                 })
-        return scores
+
+            return scores
     
     # ── main entry ────────────────────────────────────────────────────
     def run(self, state):

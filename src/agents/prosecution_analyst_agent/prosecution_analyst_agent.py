@@ -5,7 +5,7 @@ import logging
 from typing import Any
 from pydantic import BaseModel
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 
 from src.Graph.state import AgentState
 from src.agents.agent_base.agent_base import AgentBase
@@ -61,13 +61,7 @@ class ProsecutionAnalystAgent(AgentBase):
     # ── LLM call ──────────────────────────────────────────────────
 
     def _call_llm(self, prompt_text: str) -> str:
-        messages = [
-            SystemMessage(content=(
-                "أنت محلل اتهامي قانوني متخصص في القانون الجنائي المصري. "
-                "تجيب بـ JSON فقط. الجواب يبدأ بـ { مباشرة بلا أي نص قبله."
-            )),
-            HumanMessage(content=prompt_text),
-        ]
+        messages = [HumanMessage(content=prompt_text)]
         result = self._llm_invoke_with_retries(self._llm, messages)
         return result.content if hasattr(result, "content") else str(result)
 

@@ -7,7 +7,7 @@ from src.agents.agent_base.agents_enums import (
 
 class CivilClaim(BaseModel):
     # ── بيانات المدّعي المدني ─────────────────────────────────────
-    plaintiff_name:     Optional[str] = Field(description="اسم المدّعي المدني (المجني عليه أو ورثته)")
+    plaintiff_name:     Optional[str] = Field(default="غير معروف",description="اسم المدّعي المدني (المجني عليه أو ورثته)")
     plaintiff_capacity: Optional[str] = Field(default=None,description="صفة المدّعي: مجني عليه / وارث / ولي / وكيل")
  
     # ── طلبات التعويض ─────────────────────────────────────────────

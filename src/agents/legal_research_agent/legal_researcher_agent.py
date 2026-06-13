@@ -9,7 +9,6 @@ from src.Graph.state import AgentState
 from src.routers.kg_retriever_router import get_kg_retriever
 from src.agents.legal_research_agent.legal_researcher_prompt import (
     LEGAL_RESEARCHER_AGENT_PROMPT,
-    EXPECTED_OUTPUT_SCHEMA,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,9 +31,7 @@ class LegalResearcherAgent(AgentBase):
         return {"case_articles": [], "applied_principles": [], "_fallback": True}
 
     # ── KG article retrieval ──────────────────────────────────────────────────
-    def _retrieve_articles_for_charge(
-        self, text: str, k: int = 15, threshold: float = 0.45
-    ) -> list[dict]:
+    def _retrieve_articles_for_charge(self, text: str, k: int = 15, threshold: float = 0.45) -> list[dict]:
         if self.kg is None or self.embeddings is None:
             logger.warning("KG or embeddings not available — skipping article retrieval")
             return []
@@ -108,12 +105,7 @@ class LegalResearcherAgent(AgentBase):
         return result
 
     # ── accumulate unique principles across charges, violations, incidents ────
-    def _resolve_principles(
-        self,
-        charges: list,
-        procedural_violations: list,
-        incidents: list,
-    ) -> list[dict]:
+    def _resolve_principles(self,charges: list,procedural_violations: list,incidents: list) -> list[dict]:
         if self.vs is None:
             logger.warning("No vector store — skipping principles retrieval.")
             return []
@@ -164,12 +156,7 @@ class LegalResearcherAgent(AgentBase):
         return result
 
     # ── prompt builder ────────────────────────────────────────────────────────
-    def _build_prompt(
-        self,
-        state: AgentState,
-        case_articles: list[dict],
-        applied_principles: list,
-    ) -> str:
+    def _build_prompt(self,state: AgentState,case_articles: list[dict],applied_principles: list) -> str:
         case_summary = json.dumps(
             {
                 "charges": [
@@ -198,16 +185,6 @@ class LegalResearcherAgent(AgentBase):
 
             "## مبادئ محكمة النقض المسترجعة من الـ Vector Store:\n"
             f"{json.dumps(applied_principles, ensure_ascii=False, indent=2)}\n\n"
-
-            "## التعليمات:\n"
-            "ابنِ حزمة بحث قانوني لكل تهمة من المعطيات أعلاه فقط.\n"
-            "لكل تهمة:\n"
-            "  - حدد أركانها ونطاق عقوبتها من المواد المسترجعة.\n"
-            "  - أدرج مبادئ النقض ذات الصلة من المبادئ المسترجعة.\n"
-            "  - استند فقط إلى ما في السياق المسترجع — لا تخترع مواد أو أحكاماً.\n\n"
-
-            "## صيغة الإجابة (JSON فقط — بلا مقدمة ولا شرح خارج JSON):\n"
-            f"{EXPECTED_OUTPUT_SCHEMA}"
         )
 
     # ── main entry ────────────────────────────────────────────────────────────
@@ -221,16 +198,9 @@ class LegalResearcherAgent(AgentBase):
                 "applied_principles": [],
             })
 
-        procedural_violations = (
-            state.procedural_audit.violations if state.procedural_audit else []
-        )
-
+        procedural_violations = (state.procedural_audit.violations if state.procedural_audit else [])
         case_articles      = self._resolve_articles_for_charges(state.charges)
-        applied_principles = self._resolve_principles(
-            state.charges,
-            procedural_violations,
-            state.incidents or [],
-        )
+        applied_principles = self._resolve_principles(state.charges,procedural_violations,state.incidents or [],)
 
         prompt = self._build_prompt(state, case_articles, applied_principles)
 

@@ -1,7 +1,78 @@
-from typing import List, Optional
+from typing import List, Optional, Any
 from pydantic import BaseModel, Field
 from pydantic import BaseModel, field_validator
-import json
+import json, re
+
+
+# ══════════════════════════════════════════════════════
+#  Shared coercion helpers (module-level, reused across models)
+# ══════════════════════════════════════════════════════
+ 
+def _coerce_str_list(v: Any) -> List[str]:
+    """
+    Normalise an LLM list-of-strings field.
+ 
+    Handles:
+      - None / missing           → []
+      - bare string              → [string]
+      - list of strings          → as-is
+      - list of dicts            → extract first non-null string value per dict
+      - list of mixed types      → best-effort extraction
+    """
+    if v is None:
+        return []
+    if isinstance(v, str):
+        return [v] if v.strip() else []
+    if isinstance(v, list):
+        result: list[str] = []
+        for item in v:
+            if isinstance(item, str):
+                if item.strip():
+                    result.append(item)
+            elif isinstance(item, dict):
+                # pick the first non-empty string value in the dict
+                for val in item.values():
+                    if isinstance(val, str) and val.strip():
+                        result.append(val)
+                        break
+        return result
+    return []
+ 
+ 
+def _coerce_bool_required(v: Any) -> bool:
+    """
+    Coerce an LLM boolean field where the default is False.
+    Handles Arabic affirmatives, English strings, ints.
+    """
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int):
+        return bool(v)
+    if isinstance(v, str):
+        return v.strip().lower() in {"true", "yes", "1", "نعم", "صحيح", "موجود"}
+    return False
+ 
+ 
+def _coerce_bool_optional(v: Any) -> Optional[bool]:
+    """
+    Coerce an LLM boolean field where None is semantically meaningful
+    (i.e. 'we don't know').
+    """
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int):
+        return bool(v)
+    if isinstance(v, str):
+        stripped = v.strip().lower()
+        if stripped in {"true", "yes", "1", "نعم", "صحيح", "موجود"}:
+            return True
+        if stripped in {"false", "no", "0", "لا", "غير موجود", "لم"}:
+            return False
+        return None  # ambiguous string → unknown
+    return None
+
 
 # ══════════════════════════════════════════════════════
 #  Core Entities
@@ -20,6 +91,23 @@ class Defendant(BaseModel):
     address:            Optional[str] = None   # العنوان
     complicity_role:    Optional[str] = None   # فاعل أصلي / شريك / محرّض / متدخل
     source_document_id: Optional[str] = None
+    @field_validator("age", mode="before")
+    @classmethod
+    def coerce_age(cls, v: Any) -> Optional[int]:
+        """
+        LLMs often return age as a string ('32', 'نحو 30', '~30').
+        Extract the first integer found; return None if not parsable.
+        """
+        if v is None:
+            return None
+        if isinstance(v, int):
+            return v
+        if isinstance(v, float):
+            return int(v)
+        if isinstance(v, str):
+            m = re.search(r'\d+', v)
+            return int(m.group()) if m else None
+        return None
 
 
 class Charge(BaseModel):
@@ -34,6 +122,15 @@ class Charge(BaseModel):
     charge_location:        Optional[str] = None # المكان
     linked_defendant_names: List[str]     = Field(default_factory=list) # اسم المتهم
     source_document_id:     Optional[str] = None
+    @field_validator("attempt_flag", mode="before")
+    @classmethod
+    def coerce_attempt_flag(cls, v: Any) -> bool:
+        return _coerce_bool_required(v)
+ 
+    @field_validator("linked_defendant_names", mode="before")
+    @classmethod
+    def coerce_linked_defendant_names(cls, v: Any) -> List[str]:
+        return _coerce_str_list(v)
 
 
 class CaseIncident(BaseModel):
@@ -47,7 +144,11 @@ class CaseIncident(BaseModel):
     source_document_id:   Optional[str] = None
     @field_validator("incident_date", mode="before")
     @classmethod
-    def coerce_date(cls, v):
+    def coerce_date(cls, v: Any) -> Optional[str]:
+        """
+        Normalise date fields — LLMs sometimes return a dict with
+        'start' / 'end' keys for date ranges.
+        """
         if isinstance(v, dict):
             start = v.get("start", "")
             end   = v.get("end", "")
@@ -55,6 +156,11 @@ class CaseIncident(BaseModel):
                 return f"{start} إلى {end}"
             return start or end or None
         return v
+ 
+    @field_validator("perpetrator_names", "victim_names", mode="before")
+    @classmethod
+    def coerce_name_lists(cls, v: Any) -> List[str]:
+        return _coerce_str_list(v)
 
 
 class Evidence(BaseModel):
@@ -68,6 +174,10 @@ class Evidence(BaseModel):
     seizure_warrant_present: bool          = False  # وجود امر او اذن نيابه
     linked_defendant_name:   Optional[str] = None   # اسم المتهم الذي ضُبط الحرز بحوزته.
     source_document_id:      Optional[str] = None
+    @field_validator("seizure_warrant_present", mode="before")
+    @classmethod
+    def coerce_seizure_warrant_present(cls, v: Any) -> bool:
+        return _coerce_bool_required(v)
 
 
 class EvidenceItem(BaseModel):
@@ -87,21 +197,44 @@ class LabReport(BaseModel):
     
     @field_validator("items_sent_for_analysis", mode="before")
     @classmethod
-    def coerce_items(cls, v):
+    def coerce_items(cls, v: Any) -> list:
+        """
+        Normalise items_sent_for_analysis:
+          - bare string        → [{"description": string}]
+          - list of strings    → [{"description": s} for s in list]
+          - list of dicts      → ensure 'description' key is always present
+          - missing desc       → reconstruct from sibling keys or repr
+        """
         if not isinstance(v, list):
+            if isinstance(v, str) and v.strip():
+                return [{"description": v}]
             return []
+ 
         coerced = []
         for item in v:
             if isinstance(item, str):
-                coerced.append({"description": item})
+                if item.strip():
+                    coerced.append({"description": item})
             elif isinstance(item, dict):
+                if not item.get("description"):
+                    # Try common sibling keys before falling back to repr
+                    item["description"] = (
+                        item.get("name")
+                        or item.get("item")
+                        or item.get("content")
+                        or item.get("text")
+                        or str(item)
+                    )
                 coerced.append(item)
         return coerced
-    
-    @field_validator("result", mode="before") 
+ 
+    @field_validator("result", mode="before")
     @classmethod
-    def coerce_result(cls, v):
+    def coerce_result(cls, v: Any) -> Optional[str]:
+        """LLMs sometimes return structured dict results — serialise to string."""
         if isinstance(v, dict):
+            return json.dumps(v, ensure_ascii=False)
+        if isinstance(v, list):
             return json.dumps(v, ensure_ascii=False)
         return v
 
@@ -119,9 +252,15 @@ class WitnessStatement(BaseModel):
 
     @field_validator("statement_summary", mode="before")
     @classmethod
-    def coerce_statement_summary(cls, v):
+    def coerce_statement_summary(cls, v: Any) -> Optional[str]:
+        """
+        Normalise statement_summary:
+          - list of Q/A dicts → formatted string
+          - list of strings   → joined string
+          - plain string      → as-is
+        """
         if isinstance(v, list):
-            parts = []
+            parts: list[str] = []
             for item in v:
                 if isinstance(item, dict):
                     q = item.get("question") or ""
@@ -131,6 +270,12 @@ class WitnessStatement(BaseModel):
                     parts.append(item)
             return "\n\n".join(filter(None, parts)) or None
         return v
+ 
+    @field_validator("was_sworn_in", "presence_at_scene", mode="before")
+    @classmethod
+    def coerce_optional_bools(cls, v: Any) -> Optional[bool]:
+        # None = "not mentioned in document" — preserve that distinction
+        return _coerce_bool_optional(v)
 
 
 
@@ -144,6 +289,15 @@ class Confession(BaseModel):
     coercion_claimed:      bool          = False # تعرض لتهديد او اكراه
     key_admissions:        List[str]     = Field(default_factory=list) # نقاط أقرّ بها المتهم حتى لو كان إنكاره جزئياً.
     source_document_id:    Optional[str] = None
+    @field_validator("legal_counsel_present", "coercion_claimed", mode="before")
+    @classmethod
+    def coerce_bools(cls, v: Any) -> bool:
+        return _coerce_bool_required(v)
+ 
+    @field_validator("key_admissions", mode="before")
+    @classmethod
+    def coerce_key_admissions(cls, v: Any) -> List[str]:
+        return _coerce_str_list(v)
 
 
 class CriminalRecord(BaseModel):
@@ -152,6 +306,10 @@ class CriminalRecord(BaseModel):
     record_summary:     Optional[str] = None                         # ملخص مختصر لمحتوى الصحيفة
     prior_cases:        List[str]     = Field(default_factory=list)  # قضايا سابقة إن ذُكرت
     source_document_id: Optional[str] = None
+    @field_validator("prior_cases", mode="before")
+    @classmethod
+    def coerce_prior_cases(cls, v: Any) -> List[str]:
+        return _coerce_str_list(v)
 
 class CriminalProceedings(BaseModel):
     procedure_type:     Optional[str] = None  # ضبط / قبض / استجواب / تفتيش
@@ -159,6 +317,11 @@ class CriminalProceedings(BaseModel):
     warrant_present:    Optional[bool]= False # false إن كان الإذن غائباً
     conducting_officer: Optional[str] = None  # اسم وصفة الضابط المعني.
     source_document_id: Optional[str] = None
+    @field_validator("warrant_present", mode="before")
+    @classmethod
+    def coerce_warrant_present(cls, v: Any) -> Optional[bool]:
+        # Optional — None is meaningful ("not mentioned"), so use optional coercion
+        return _coerce_bool_optional(v)
 
 class DefenseDocument(BaseModel):
     submitted_by:          Optional[str]       = None # اسم المحامي مُقدِّم المذكرة.
@@ -170,13 +333,32 @@ class DefenseDocument(BaseModel):
     alibi_description:     Optional[str]       = None # وصف إن وُجد (المكان، الزمان، الشهود الداعمون).
     source_document_id:    Optional[str]       = None
 
+    @field_validator("alibi_claimed", mode="before")
+    @classmethod
+    def coerce_alibi_claimed(cls, v: Any) -> bool:
+        return _coerce_bool_required(v)
+ 
+    @field_validator(
+        "formal_defenses",
+        "substantive_defenses",
+        "supporting_principles",
+        mode="before",
+    )
+    @classmethod
+    def coerce_defense_lists(cls, v: Any) -> List[str]:
+        return _coerce_str_list(v)
+ 
     @field_validator("alibi_description", mode="before")
     @classmethod
-    def coerce_alibi_description(cls, v):
+    def coerce_alibi_description(cls, v: Any) -> Optional[str]:
+        """
+        LLMs sometimes return alibi as a structured dict with
+        time / location / supporting_witnesses keys.
+        """
         if isinstance(v, dict):
             time      = v.get("time", "")
             location  = v.get("location", "")
             witnesses = "، ".join(v.get("supporting_witnesses", []))
-            parts = filter(None, [time, location, f"شهود: {witnesses}" if witnesses else ""])
+            parts     = filter(None, [time, location, f"شهود: {witnesses}" if witnesses else ""])
             return " — ".join(parts) or None
         return v

@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from src.Graph.state import AgentState
+from langchain_core.messages import HumanMessage
 from src.agents.confessoin_validity_agent.confession_validity_prompt import CONFESSION_VALIDITY_PROMPT
 from src.agents.confessoin_validity_agent.confession_validity_output_model import ConfessionAssessment
 from src.agents.confessoin_validity_agent.CV_enums import CV_Enums, CoercionType, ConfessionAdmissibilityStatus
@@ -31,7 +32,7 @@ class ConfessionValidityAgent(AgentBase):
             temp_config_key="CONFESSION_VALIDITY_TEMP",
             prompt=CONFESSION_VALIDITY_PROMPT,
         )
-    
+
     # ── private helpers ───────────────────────────────────────────
     def _build_context(self, state: AgentState) -> str:
         audit      = state.procedural_audit
@@ -64,15 +65,9 @@ class ConfessionValidityAgent(AgentBase):
         return self.prompt.format(context=json.dumps(ctx, ensure_ascii=False, indent=2))
 
     def _call_llm(self, prompt_text: str) -> str:
-        from langchain_core.messages import HumanMessage, SystemMessage
 
-        messages = [
-            SystemMessage(content=(
-                "أنت خبير قانوني في الإجراءات الجنائية المصرية. "
-                "تجيب بـ JSON فقط بلا أي نص خارجه."
-            )),
-            HumanMessage(content=prompt_text),
-        ]
+
+        messages = [HumanMessage(content=prompt_text)]
         result = self._llm_invoke_with_retries(self._llm, messages)
         return result.content if hasattr(result, "content") else str(result)
 
@@ -137,6 +132,3 @@ class ConfessionValidityAgent(AgentBase):
         )
 
         return self._empty_update(state, CV_Enums.AGENT_KEY.value, updates)
-
-
-
