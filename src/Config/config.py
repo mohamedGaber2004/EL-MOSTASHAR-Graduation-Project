@@ -41,10 +41,6 @@ class Settings(BaseSettings):
     DATA_INGESTION_TEMP: float
     DATA_INGESTION_PROVIDER: str = "open_router"
 
-    PROCEDURAL_AUDITOR_MODEL: str 
-    PROCEDURAL_AUDITOR_TEMP: float
-    PROCEDURAL_AUDITOR_PROVIDER: str = "open_router"
-
     LEGAL_RESEARCHER_MODEL: str 
     LEGAL_RESEARCHER_TEMP: float
     LEGAL_RESEARCHER_PROVIDER: str = "open_router"
