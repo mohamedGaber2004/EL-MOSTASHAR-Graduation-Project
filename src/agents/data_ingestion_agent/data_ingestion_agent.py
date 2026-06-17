@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time , json
 from pathlib import Path
-from typing import List, Optional, Any
+from typing import Optional, Any
 
 from ..agent_base.agent_base import AgentBase
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -22,6 +22,35 @@ from src.agents.data_ingestion_agent.data_ingestion_prompt import (
 logger = logging.getLogger(__name__)
 
 
+# ─────────────────────────────────────────────────────────────────
+#  Helpers
+# ─────────────────────────────────────────────────────────────────
+def _wrap_entity_list(doc_id: str, items: list[dict], envelope_map: dict[str, str]) -> dict:
+    """
+    The model returned a bare list of entity records instead of the
+    expected {"key": [...]} envelope.  Reconstruct the envelope using
+    the doc_id → envelope_key map.
+
+    If doc_id is not in the map (multi-key prompts like mahdar_dabt /
+    amr_ihala), we cannot safely infer the key — raise so the caller
+    logs it as a real error rather than silently dropping data.
+    """
+    # strip to stem in case a full path slipped through
+    stem = doc_id.split("/")[-1].split("\\")[-1]
+    doc_type = _route_stem(stem)
+
+    envelope_key = envelope_map.get(doc_type) if doc_type else None
+    if envelope_key is None:
+        raise ValueError(
+            f"النموذج أعاد قائمة مباشرة لنوع مستند متعدد المفاتيح [{doc_id}] — "
+            f"تعذّر إعادة بناء المغلف تلقائياً"
+        )
+
+    logger.warning(
+        "[%s] النموذج أعاد قائمة مباشرة — تم تصحيحها تلقائياً تحت المفتاح '%s'",
+        doc_id, envelope_key,
+    )
+    return {envelope_key: items}
 # ─────────────────────────────────────────────────────────────────
 #  Empty state template
 # ─────────────────────────────────────────────────────────────────
@@ -77,54 +106,6 @@ def _route_stem(stem: str) -> Optional[str]:
     return None
 
 # ─────────────────────────────────────────────────────────────────
-#  Text chunking with document-context header
-# ─────────────────────────────────────────────────────────────────
-def chunk_text(text: str,max_chars: int,overlap: int = 500,doc_id: str = "") -> List[tuple[int, str]]:
-    """Split text into (chunk_index, chunk_text) pairs with overlap."""
-
-    if len(text) <= max_chars:
-        return [(1, text)]
-
-    raw_chunks: list[str] = []
-    start = 0
-
-    while start < len(text):
-        end = start + max_chars
-
-        if end < len(text):
-            search_start = max(start, end - 300)
-            for punct in [".\n", ".\r\n", ". ", "!\n", "?\n", "\n\n"]:
-                idx = text.rfind(punct, search_start, end)
-                if idx != -1:
-                    end = idx + len(punct)
-                    break
-
-        chunk = text[start:end].strip()
-        if chunk:
-            raw_chunks.append(chunk)
-
-        start = end - overlap
-        if start >= len(text):
-            break
-        if start <= 0:
-            start = end
-
-    n = len(raw_chunks)
-    result: list[tuple[int, str]] = []
-    for i, chunk in enumerate(raw_chunks):
-        if i == 0:
-            result.append((1, chunk))
-        else:
-            header = (
-                f"[ملاحظة: هذا النص جزء ({i + 1}/{n}) من المستند '{doc_id}'. "
-                f"استمر في الاستخراج من حيث توقف الجزء السابق. "
-                f"لا تعيد استخراج ما سبق إلا إن ظهرت معلومة جديدة.]\n\n"
-            )
-            result.append((i + 1, header + chunk))
-
-    return result
-
-# ─────────────────────────────────────────────────────────────────
 #  Schema validation before merging
 # ─────────────────────────────────────────────────────────────────
 def _validate_extracted(result: dict) -> tuple[bool, str]:
@@ -176,6 +157,14 @@ class DataIngestionAgent(AgentBase):
             DI_LegalDocType.TAQRIR_TIBBI.value:    DATA_INGESTION_AGENT_PROMPT_taqrir_tibbi,
             DI_LegalDocType.MOZAKARET_DIFA.value:  DATA_INGESTION_AGENT_PROMPT_mozakeret_difa,
             DI_LegalDocType.SAWABIQ.value:         DATA_INGESTION_AGENT_PROMPT_sawabiq,
+        }
+        self._prompt_envelope_key: dict[str, str] = {
+            DI_LegalDocType.MAHDAR_ISTIJWAB.value: "confessions",
+            DI_LegalDocType.AQWAL_SHUHUD.value:    "witness_statements",
+            DI_LegalDocType.TAQRIR_TIBBI.value:    "lab_reports",
+            DI_LegalDocType.MOZAKERET_DIFA.value:  "defense_documents",
+            DI_LegalDocType.SAWABIQ.value:         "criminal_records",
+            # mahdar_dabt and amr_ihala produce multi-key output — no single envelope
         }
 
     # Dedup helpers
@@ -300,86 +289,84 @@ class DataIngestionAgent(AgentBase):
         return self._prompt_map.get(doc_type)
 
     # ── single file processor ─────────────────────────────────────
-    def _process_file(self,path: Path,doc_id: str,all_extracted: dict,file_errors: list,processed_docs: list,prompt: str) -> dict:
-        """
-        Read, chunk, invoke LLM, validate, and merge a single .txt file.
-        Always returns the (possibly updated) all_extracted dict.
-        """
-        # ── read file ────────────────────────────────────────────
-        raw_text: Optional[str] = None
-        for enc in DI_enums.AGENT_INGESTION_TXT_FILES_ENCODING.value:
-            try:
-                raw_text = path.read_text(encoding=enc).strip()
-                break
-            except (UnicodeDecodeError, OSError):
-                continue
+    def _process_file(self, path: Path, doc_id: str, all_extracted: dict, file_errors: list, processed_docs: list, prompt: str) -> dict:
+            """
+            Read, invoke LLM, validate, and merge a single .txt file.
+            Always returns the (possibly updated) all_extracted dict.
+            """
+            # ── read file ────────────────────────────────────────────
+            raw_text: Optional[str] = None
+            for enc in DI_enums.AGENT_INGESTION_TXT_FILES_ENCODING.value:
+                try:
+                    raw_text = path.read_text(encoding=enc).strip()
+                    break
+                except (UnicodeDecodeError, OSError):
+                    continue
 
-        if not raw_text:
-            msg = f"[{doc_id}] فشل قراءة الملف أو الملف فارغ"
-            logger.warning(msg)
-            file_errors.append(msg)
-            return all_extracted
+            if not raw_text:
+                msg = f"[{doc_id}] فشل قراءة الملف أو الملف فارغ"
+                logger.warning(msg)
+                file_errors.append(msg)
+                return all_extracted
 
-        # ── chunk ────────────────────────────────────────────────
-        max_chars = self.cfg.INGESTION_AGENT_MAX_CHARS
-        chunks = chunk_text(raw_text, max_chars, doc_id=doc_id)
-        total = len(chunks)
-        if total > 1:
-            logger.info("[%s] split into %d chunks (%d chars)", doc_id, total, len(raw_text))
-
-        # ── process each chunk ───────────────────────────────────
-        any_success = False
-        for chunk_idx, chunk_content in chunks:
-            chunk_id = f"{doc_id}_chunk_{chunk_idx}" if total > 1 else doc_id
+            # ── process full document ────────────────────────────────
             try:
                 response = self._llm_invoke_with_retries(
                     self._llm,
                     [
                         SystemMessage(content=prompt),
-                        HumanMessage(content=f"النص:\n\n{chunk_content}"),
+                        HumanMessage(content=f"النص:\n\n{raw_text}"),
                     ],
                 )
                 result = self._parse_agent_json(response.content)
 
-                # ── الإضافة الدفاعية هنا: تصحيح القوائم الناتجة عن خطأ النموذج ──
                 if isinstance(result, list):
                     if len(result) == 0:
                         raise ValueError("النموذج أعاد قائمة فارغة")
 
+                    # ── Case 1: single wrapper dict  {"confessions": [...], ...}
                     if len(result) == 1 and isinstance(result[0], dict):
-                        result = result[0]
-
-                    elif all(isinstance(item, dict) for item in result):
-                        # Merge list of partial extractions correctly:
-                        # - case_meta: first-write-wins (it's a scalar dict, not a list)
-                        # - list fields: accumulate across all items
-                        merged_result: dict = {}
+                        candidate = result[0]
                         list_keys = set(DI_enums._LIST_KEYS.value)
+                        # It's a real wrapper if its keys are known list/meta keys,
+                        # not entity-field names like defendant_name / text / etc.
+                        if any(k in list_keys or k == "case_meta" for k in candidate):
+                            result = candidate
+                        else:
+                            # Single entity record wrapped in a list — use envelope key
+                            result = _wrap_entity_list(doc_id, [candidate], self._prompt_envelope_key)
 
-                        for item in result:
-                            for k, v in item.items():
-                                if k == "case_meta":
-                                    # First-write-wins for scalar dict
-                                    if "case_meta" not in merged_result:
-                                        merged_result["case_meta"] = v if isinstance(v, dict) else {}
-                                    else:
-                                        # Fill in missing sub-keys only
-                                        if isinstance(v, dict):
+                    # ── Case 2: multiple dicts — could be wrapper dicts OR entity records
+                    elif all(isinstance(item, dict) for item in result):
+                        list_keys = set(DI_enums._LIST_KEYS.value)
+                        first = result[0]
+
+                        # Heuristic: if ANY key of the first item is a known list key or
+                        # "case_meta", treat the whole list as wrapper dicts to be merged.
+                        if any(k in list_keys or k == "case_meta" for k in first):
+                            merged_result: dict = {}
+                            for item in result:
+                                for k, v in item.items():
+                                    if k == "case_meta":
+                                        if "case_meta" not in merged_result:
+                                            merged_result["case_meta"] = v if isinstance(v, dict) else {}
+                                        elif isinstance(v, dict):
                                             for sub_k, sub_v in v.items():
                                                 if merged_result["case_meta"].get(sub_k) is None:
                                                     merged_result["case_meta"][sub_k] = sub_v
-                                elif k in list_keys:
-                                    if k not in merged_result:
-                                        merged_result[k] = []
-                                    if isinstance(v, list):
-                                        merged_result[k].extend(v)
-                                    elif isinstance(v, dict):
-                                        merged_result[k].append(v)
-                                else:
-                                    # Unknown scalar field: first-write-wins
-                                    if k not in merged_result:
-                                        merged_result[k] = v
-                        result = merged_result
+                                    elif k in list_keys:
+                                        merged_result.setdefault(k, [])
+                                        if isinstance(v, list):
+                                            merged_result[k].extend(v)
+                                        elif isinstance(v, dict):
+                                            merged_result[k].append(v)
+                                    else:
+                                        merged_result.setdefault(k, v)
+                            result = merged_result
+                        else:
+                            # Entity records at the top level — wrap them
+                            result = _wrap_entity_list(doc_id, result, self._prompt_envelope_key)
+
                     else:
                         raise ValueError("النموذج أعاد قائمة غير متوافقة")
                 # ─────────────────────────────────────────────────────────────
@@ -393,20 +380,17 @@ class DataIngestionAgent(AgentBase):
                     if isinstance(value_list, list):
                         for item in value_list:
                             if isinstance(item, dict) and not item.get("source_document_id"):
-                                item["source_document_id"] = chunk_id
+                                item["source_document_id"] = doc_id
 
                 all_extracted = self._merge_extracted(all_extracted, result)
-                any_success = True
+                processed_docs.append(doc_id)
 
             except Exception as exc:
-                msg = f"[{chunk_id}] فشل المعالجة: {exc}"
+                msg = f"[{doc_id}] فشل المعالجة: {exc}"
                 logger.error(msg)
                 file_errors.append(msg)
 
-        if any_success:
-            processed_docs.append(doc_id)
-
-        return all_extracted
+            return all_extracted
 
     # ── route + process ───────────────────────────────────────────
     def _route_and_process(self,path: Path,doc_id: str,all_extracted: dict,file_errors: list,processed_docs: list) -> dict:
