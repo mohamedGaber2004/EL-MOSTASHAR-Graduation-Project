@@ -16,6 +16,10 @@ class JudgeModel(BaseModel):
             api_key=self.cfg.OPENAI_BASE_ROUTER_API_KEY
         )
 
+def get_as_llm(self):
+        return {
+            "open_router_llm": self.as_open_router_llm,
+        }
 def get_judge_model():
     cfg = get_settings()
     model = cfg.JUDGE_MODEL
