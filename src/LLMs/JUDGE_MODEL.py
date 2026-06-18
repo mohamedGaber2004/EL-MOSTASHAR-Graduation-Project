@@ -12,14 +12,15 @@ class JudgeModel(BaseModel):
             model=self.model_name,
             temperature=self.temperature,
             max_tokens=4096,
+            model_kwargs={
+            "extra_body": {
+                "reasoning": {"max_tokens": 1024}
+                }
+            },
             base_url=self.cfg.OPENAI_BASE_URL,
             api_key=self.cfg.OPENAI_BASE_ROUTER_API_KEY
         )
-
-def get_as_llm(self):
-        return {
-            "open_router_llm": self.as_open_router_llm,
-        }
+    
 def get_judge_model():
     cfg = get_settings()
     model = cfg.JUDGE_MODEL
