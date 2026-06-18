@@ -31,7 +31,9 @@ class JudgeAgent(AgentBase):
                 "warrant_present":   p.warrant_present,
                 "conducting_officer":p.conducting_officer,
                 "nullity_type":      p.nullity_type,
-                "nullity_effect":    p.nullity_effect,
+                "effect_on_void_act":        getattr(p, "effect_on_void_act", None),
+                "effect_on_prior_acts":      getattr(p, "effect_on_prior_acts", None),
+                "effect_on_subsequent_acts": getattr(p, "effect_on_subsequent_acts", None),
                 "article_basis":     p.article_basis,
                 "source_document_id":p.source_document_id,
             }
@@ -89,7 +91,7 @@ class JudgeAgent(AgentBase):
             "critical_nullities":         audit.critical_nullities,
             "overall_audit_assessment":   audit.overall_assessment,
             "excluded_defense_claims":    [
-                {"claim": c.claim, "reason": c.reason}
+                {"claim": c.claim, "reason": c.rejection_reason}
                 for c in (audit.excluded_defense_claims or [])
             ],
             "invalidated_evidence":       invalidated_ids,

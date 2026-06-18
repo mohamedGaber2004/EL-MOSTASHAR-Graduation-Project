@@ -91,26 +91,28 @@ class EvidenceAnalystAgent(AgentBase):
             for i in (state.incidents or [])
         ]
 
-        audit     = state.procedural_audit
+        audit      = state.procedural_audit
         violations = audit.violations if audit else []
         procedural_issues = [
             {
-                "procedure_type":     p.procedure_type,
-                "issue_description":  p.issue_description,
-                "nullity_type":       p.nullity_type,
-                "nullity_effect":     p.nullity_effect,
-                "source_document_id": p.source_document_id,
+                "procedure_type":          getattr(p, "procedure_type", None),
+                "issue_description":       getattr(p, "issue_description", None),
+                "nullity_type":            getattr(p, "nullity_type", None),
+                "effect_on_void_act":      getattr(p, "effect_on_void_act", None),
+                "effect_on_prior_acts":    getattr(p, "effect_on_prior_acts", None),
+                "effect_on_subsequent_acts": getattr(p, "effect_on_subsequent_acts", None),
+                "source_document_id":      getattr(p, "source_document_id", None),
             }
             for p in violations
         ]
 
         return json.dumps(
             {
-                "charges":            charges,
-                "incidents":          incidents,
-                "evidences":          evidences,
-                "lab_reports":        lab_reports,
-                "procedural_issues":  procedural_issues,
+                "charges":           charges,
+                "incidents":         incidents,
+                "evidences":         evidences,
+                "lab_reports":       lab_reports,
+                "procedural_issues": procedural_issues,
             },
             ensure_ascii=False,
             indent=2,

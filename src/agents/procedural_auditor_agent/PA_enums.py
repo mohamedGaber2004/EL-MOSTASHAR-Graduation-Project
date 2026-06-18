@@ -16,3 +16,8 @@ class PA_Enums(Enum):
     """
 
     CRIMINAL_PROCEDURE_LAW_ID = "criminal_procedure"
+
+class PipelineFatalityLevel(str, Enum):
+    NONE     = "none"       # الإجراءات سليمة أو فيها عيوب قابلة للتصحيح
+    PARTIAL  = "partial"    # بطلان مطلق في دليل معين — يُستبعد الدليل ويكمل
+    FATAL    = "fatal"      # الدعوى ساقطة أو المحكمة غير مختصة — يذهب للقاضي مباشرة

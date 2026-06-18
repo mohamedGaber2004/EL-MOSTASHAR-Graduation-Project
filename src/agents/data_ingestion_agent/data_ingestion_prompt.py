@@ -42,6 +42,8 @@ DATA_INGESTION_AGENT_PROMPT_mahdar_dabt = f"""\
 [criminal_proceedings] — إجراء مستقل لكل فعل (ضبط/تفتيش/قبض/معاينة/إخطار...)
 - procedure_type, description, conducting_officer
 - warrant_present: true=إذن صريح | false=غياب الإذن | null=لم يُذكر
+- procedure_datetime: التاريخ والوقت الفعلي لتنفيذ الإجراء كما ورد بالمحضر —
+  null إن لم يُذكر صراحةً أو كان الحقل فارغاً/غير معبأ في الأصل (مثل "--------").
 
 {_SHARED_RULES}
 
@@ -63,7 +65,8 @@ DATA_INGESTION_AGENT_PROMPT_mahdar_istijwab = f"""\
 - text: ملخص يشمل: (أ) اعتراف أم إنكار (ب) روايته (ج) دفاعه (د) موقفه من الأحراز.
   مثال: "أنكر المتهم وادّعى تواجده في مكان آخر، وأنكر ملكية الحرز."
 - confession_date, confession_stage (تحقيق/محكمة)
-- legal_counsel_present: true=حضر محامٍ صراحةً | false=غياب أو عدم ذكر
+- legal_counsel_present: true=حضر محامٍ صراحةً، أو قرر المتهم صراحةً أنه لا يحتاج محاميًا الآن، أو لا يرغب في استدعائه حاليًا | false=لم يحضر المحامي ولم يصدر من المتهم أي تصريح يفيد الاستغناء عنه أو عدم الحاجة إليه
+تنبيه: لا تعتبر غياب المحامي false إذا كان المتهم قد صرّح بأنه لا يحتاجه حاليًا؛ في هذه الحالة تُسجَّل true.
 - coercion_claimed: true فقط إن ادّعى الإكراه صراحةً
 - key_admissions: نقاط أقرّ بها — [] إن أنكر كلياً
 

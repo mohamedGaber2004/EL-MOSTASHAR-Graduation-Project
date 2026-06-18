@@ -26,15 +26,6 @@ logger = logging.getLogger(__name__)
 #  Helpers
 # ─────────────────────────────────────────────────────────────────
 def _wrap_entity_list(doc_id: str, items: list[dict], envelope_map: dict[str, str]) -> dict:
-    """
-    The model returned a bare list of entity records instead of the
-    expected {"key": [...]} envelope.  Reconstruct the envelope using
-    the doc_id → envelope_key map.
-
-    If doc_id is not in the map (multi-key prompts like mahdar_dabt /
-    amr_ihala), we cannot safely infer the key — raise so the caller
-    logs it as a real error rather than silently dropping data.
-    """
     # strip to stem in case a full path slipped through
     stem = doc_id.split("/")[-1].split("\\")[-1]
     doc_type = _route_stem(stem)
@@ -162,7 +153,7 @@ class DataIngestionAgent(AgentBase):
             DI_LegalDocType.MAHDAR_ISTIJWAB.value: "confessions",
             DI_LegalDocType.AQWAL_SHUHUD.value:    "witness_statements",
             DI_LegalDocType.TAQRIR_TIBBI.value:    "lab_reports",
-            DI_LegalDocType.MOZAKERET_DIFA.value:  "defense_documents",
+            DI_LegalDocType.MOZAKARET_DIFA.value:  "defense_documents",
             DI_LegalDocType.SAWABIQ.value:         "criminal_records",
             # mahdar_dabt and amr_ihala produce multi-key output — no single envelope
         }

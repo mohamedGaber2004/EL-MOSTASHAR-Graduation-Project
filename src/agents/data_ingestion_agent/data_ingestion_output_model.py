@@ -402,11 +402,13 @@ class CriminalRecord(BaseModel):
         return _coerce_str_list(v)
 
 class CriminalProceedings(BaseModel):
-    procedure_type:     Optional[str] = None  # ضبط / قبض / استجواب / تفتيش
-    description:        Optional[str] = None  # الوصف
-    warrant_present:    Optional[bool]= False # false إن كان الإذن غائباً
-    conducting_officer: Optional[str] = None  # اسم وصفة الضابط المعني.
-    source_document_id: Optional[str] = None
+    procedure_type:      Optional[str]  = None  # ضبط / قبض / استجواب / تفتيش
+    description:         Optional[str]  = None  # الوصف
+    procedure_datetime:  Optional[str]  = None  # تاريخ ووقت تنفيذ الإجراء — null إن لم يُذكر بالمحضر
+    warrant_present:     Optional[bool] = False # false إن كان الإذن غائباً
+    conducting_officer:  Optional[str]  = None  # اسم وصفة الضابط المعني.
+    source_document_id:  Optional[str]  = None
+
     @field_validator("warrant_present", mode="before")
     @classmethod
     def coerce_warrant_present(cls, v: Any) -> Optional[bool]:
@@ -415,8 +417,28 @@ class CriminalProceedings(BaseModel):
     @field_validator("conducting_officer", mode="before")
     @classmethod
     def coerce_conducting_officer(cls, v: Any) -> Optional[str]:
-        """Same 'name + rank' drift risk as examiner_name/seized_by."""
         return _coerce_name_with_title(v)
+
+    @field_validator("procedure_datetime", mode="before")
+    @classmethod
+    def coerce_procedure_datetime(cls, v: Any) -> Optional[str]:
+        """
+        Same dict-shape drift as CaseIncident.incident_date. Also normalises
+        an unfilled placeholder copied verbatim from a محضر (e.g. '--------')
+        down to a clean None, so 'timestamp missing' reaches the auditor as
+        an actual null rather than a string of dashes it has to interpret.
+        """
+        if isinstance(v, dict):
+            date = v.get("date", "") or v.get("التاريخ", "")
+            time = v.get("time", "") or v.get("الوقت", "")
+            combined = " ".join(p for p in (date, time) if p).strip()
+            return combined or None
+        if isinstance(v, str):
+            stripped = v.strip()
+            if not stripped or set(stripped) <= {"-", "_", "."}:
+                return None
+            return stripped
+        return v
 
 class DefenseDocument(BaseModel):
     submitted_by:          Optional[str]       = None # اسم المحامي مُقدِّم المذكرة.

@@ -15,6 +15,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 from src.agents.data_ingestion_agent.data_ingestion_agent import DataIngestionAgent
 from src.agents.procedural_auditor_agent.procedural_auditor_agent import ProceduralAuditorAgent
+from src.agents.procedural_auditor_agent.PA_enums import PipelineFatalityLevel
 from src.agents.legal_research_agent.legal_researcher_agent import LegalResearcherAgent
 from src.agents.evidence_analyst_agent.evidence_analyst_agent import EvidenceAnalystAgent
 from src.agents.defense_analyst_agent.defense_analyst_agent import DefenseAnalystAgent
@@ -60,38 +61,18 @@ def _safe_run(agent_key: str, agent):
 # Conditional routing
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _route_after_procedural_audit(state: AgentState) -> Literal["legal_researcher", "judge"]:
-    """
-    إذا اكتشف المدقق الإجرائي مشكلة قاتلة (سقوط بالتقادم / بطلان مطلق /
-    عدم اختصاص) تجاوز بقية العملاء وأرسل القضية مباشرة إلى القاضي.
-    """
-    fatal_keywords = {
-        "سقوط", "تقادم", "بطلان مطلق", "عدم اختصاص",
-        "انقضاء الدعوى", "وفاة المتهم",
-    }
+def _route_after_procedural_audit(
+    state: AgentState,
+) -> Literal["legal_researcher", "judge"]:
 
     audit = getattr(state, "procedural_audit", None)
-    if not audit:
-        return "legal_researcher"
 
-    # fast path: check critical_nullities list first (agent already flagged these)
-    for nullity in (audit.critical_nullities or []):
-        if any(kw in (nullity or "") for kw in fatal_keywords):
-            logger.warning(
-                "⚡ بطلان مطلق حرج — تجاوز مباشر إلى القاضي: %s", nullity[:80]
-            )
-            return "judge"
-
-    # slow path: scan every violation's description and nullity_type
-    for issue in (audit.violations or []):
-        desc        = getattr(issue, "issue_description", "") or ""
-        nullity_type = getattr(issue, "nullity_type", "") or ""
-
-        if any(kw in desc or kw in nullity_type for kw in fatal_keywords):
-            logger.warning(
-                "⚡ مشكلة إجرائية قاتلة — تجاوز مباشر إلى القاضي: %s", desc[:80]
-            )
-            return "judge"
+    if audit and audit.pipeline_fatality == PipelineFatalityLevel.FATAL:
+        logger.warning(
+            "⚡ procedural_auditor: fatal — تجاوز مباشر إلى القاضي | السبب: %s",
+            getattr(audit, "fatality_reason", "غير محدد"),
+        )
+        return "judge"
 
     return "legal_researcher"
 
@@ -109,45 +90,57 @@ def _route_after_parallel_analysis(state: AgentState) -> Literal["prosecution_an
 
 @lru_cache(maxsize=1)
 def build_legal_graph():
-    kg = get_kg()
-    vs = get_vector_store()
-    emb= HuggingFaceEmbeddings(model_name=get_settings().ARABIC_NATIVE_EMBEDDING_MODEL)
+    kg  = get_kg()
+    vs  = get_vector_store()
+    emb = HuggingFaceEmbeddings(
+        model_name=get_settings().ARABIC_NATIVE_EMBEDDING_MODEL
+    )
 
     agents = {
-        "data_ingestion":     DataIngestionAgent(),
-        "legal_researcher":   LegalResearcherAgent(kg=kg, embeddings=emb, vector_store=vs),
-        "evidence_analyst":   EvidenceAnalystAgent(),
-        "defense_analyst":    DefenseAnalystAgent(),
-        "confession_validity":  ConfessionValidityAgent(),
-        "witness_credibility":  WitnessCredibilityAgent(),
-        "prosecution_analyst":  ProsecutionAnalystAgent(),
-        "sentencing":           SentencingAgent(),
-        "judge":              JudgeAgent(),
+        "data_ingestion":      DataIngestionAgent(),
+        "procedural_auditor":  ProceduralAuditorAgent(kg=kg, embeddings=emb, vector_store=vs),
+        "legal_researcher":    LegalResearcherAgent(kg=kg, embeddings=emb, vector_store=vs),
+        "evidence_analyst":    EvidenceAnalystAgent(),
+        "confession_validity": ConfessionValidityAgent(),
+        "witness_credibility": WitnessCredibilityAgent(),
+        "prosecution_analyst": ProsecutionAnalystAgent(),
+        "defense_analyst":     DefenseAnalystAgent(),
+        "sentencing":          SentencingAgent(),
+        "judge":               JudgeAgent(),
     }
 
     builder = StateGraph(AgentState)
 
-    # ── The Nodes ───────────────────────────────────────────────
     for name, agent in agents.items():
         builder.add_node(name, _safe_run(name, agent))
 
-    # ── The Edges ────────────────────────────────────────────────────
-
+    # ── Edges ──────────────────────────────────────────────────
     builder.add_edge(START, "data_ingestion")
 
-    builder.add_edge("data_ingestion", "legal_researcher")
+    builder.add_edge("data_ingestion", "procedural_auditor")
+
+    builder.add_conditional_edges(
+        "procedural_auditor",
+        _route_after_procedural_audit,
+        {
+            "legal_researcher": "legal_researcher",
+            "judge":            "judge",
+        }
+    )
     builder.add_edge("legal_researcher", "evidence_analyst")
     builder.add_edge("legal_researcher", "confession_validity")
     builder.add_edge("legal_researcher", "witness_credibility")
-    builder.add_edge("evidence_analyst",  "prosecution_analyst")
+
+    builder.add_edge("evidence_analyst",    "prosecution_analyst")
     builder.add_edge("confession_validity", "prosecution_analyst")
     builder.add_edge("witness_credibility", "prosecution_analyst")
-    builder.add_edge("prosecution_analyst", "defense_analyst")
-    builder.add_edge("defense_analyst", "sentencing")
-    builder.add_edge("sentencing", "judge")
-    builder.add_edge("judge", END)
 
-    logger.info("✅ Legal graph built — 9 agents | conditional routing active")
+    builder.add_edge("prosecution_analyst", "defense_analyst")
+    builder.add_edge("defense_analyst",     "sentencing")
+    builder.add_edge("sentencing",          "judge")
+    builder.add_edge("judge",               END)
+
+    logger.info("✅ Legal graph built — 10 agents | conditional routing active")
     return builder.compile()
 
 def get_graph_visualization():

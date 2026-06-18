@@ -44,7 +44,9 @@ class ConfessionValidityAgent(AgentBase):
                 "procedure_type":    p.procedure_type,
                 "issue_description": p.issue_description,
                 "nullity_type":      p.nullity_type,
-                "nullity_effect":    p.nullity_effect,
+                "effect_on_void_act":        getattr(p, "effect_on_void_act", None) or "",
+                "effect_on_prior_acts":      getattr(p, "effect_on_prior_acts", None) or "",
+                "effect_on_subsequent_acts": getattr(p, "effect_on_subsequent_acts", None) or "",
             }
             for p in violations
             if p.procedure_type and "استجواب" in (p.procedure_type or "")

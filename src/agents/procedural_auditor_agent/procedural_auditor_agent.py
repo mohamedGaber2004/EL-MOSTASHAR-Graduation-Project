@@ -1,5 +1,5 @@
 from __future__ import annotations
-import logging
+import logging, json
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -33,9 +33,7 @@ class ProceduralAuditorAgent(AgentBase):
         self.embeddings = embeddings
 
     # ── KG article retrieval ──────────────────────────────────────────────────
-    def _retrieve_articles_for_proceeding(
-        self, text: str, k: int = 15, threshold: float = 0.45
-    ) -> list[dict]:
+    def _retrieve_articles_for_proceeding(self, text: str, k: int = 15, threshold: float = 0.45) -> list[dict]:
         if self.kg is None or self.embeddings is None:
             logger.warning("KG or embeddings not available — skipping retrieval")
             return []
@@ -76,21 +74,46 @@ class ProceduralAuditorAgent(AgentBase):
     # ── text extractor ────────────────────────────────────────────────────────
     @staticmethod
     def _extract_text(entry) -> str:
+        """
+        يستخرج نص وصفي كامل من CriminalProceedings object أو dict
+        لاستخدامه في KG retrieval query.
+        """
+        # لو Pydantic model
+        if hasattr(entry, "__dict__") or hasattr(entry, "model_fields"):
+            parts = []
+            if getattr(entry, "procedure_type", None):
+                parts.append(f"نوع الإجراء: {entry.procedure_type}")
+            if getattr(entry, "description", None):
+                parts.append(f"الوصف: {entry.description}")
+            if getattr(entry, "conducting_officer", None):
+                parts.append(f"المنفذ: {entry.conducting_officer}")
+
+            # ← الإضافة الجديدة هنا
+            proc_dt = getattr(entry, "procedure_datetime", None)
+            parts.append(f"توقيت الإجراء: {proc_dt}" if proc_dt else "توقيت الإجراء: غير مذكور بالمحضر")
+
+            warrant = getattr(entry, "warrant_present", None)
+            if warrant is not None:
+                parts.append(f"إذن النيابة: {'موجود' if warrant else 'غير موجود'}")
+            return " | ".join(parts)
+
+        # لو dict
         if isinstance(entry, dict):
-            return (
-                entry.get("issue_description")
-                or entry.get("procedure_type")
-                or entry.get("warrant_present")
-                or entry.get("description")
-                or entry.get("text")
-                or ""
-            ).strip()
+            parts = []
+            if entry.get("procedure_type"):
+                parts.append(f"نوع الإجراء: {entry['procedure_type']}")
+            if entry.get("description"):
+                parts.append(f"الوصف: {entry['description']}")
+            if entry.get("formal_defenses"):
+                defenses = entry["formal_defenses"]
+                if isinstance(defenses, list):
+                    parts.append("دفوع: " + " / ".join(defenses))
+            return " | ".join(parts)
+
         return str(entry).strip()
 
     # ── deduplicated article accumulator ──────────────────────────────────────
-    def _accumulate_unique_articles(
-        self, entries: list, label: str
-    ) -> list[dict]:
+    def _accumulate_unique_articles(self, entries: list, label: str) -> list[dict]:
         seen:   set[str]   = set()
         result: list[dict] = []
 
@@ -115,9 +138,7 @@ class ProceduralAuditorAgent(AgentBase):
         return result
 
     # ── deduplicated principle accumulator ────────────────────────────────────
-    def _accumulate_unique_principles(
-        self, entries: list, label: str
-    ) -> list[dict]:
+    def _accumulate_unique_principles(self, entries: list, label: str) -> list[dict]:
         """
         Retrieve unique judicial principles for a list of entries.
         Returns plain dicts (not RetrievedDoc objects) for easy JSON serialisation.
@@ -157,159 +178,210 @@ class ProceduralAuditorAgent(AgentBase):
         return result
 
     # ── resolve articles + principles for proceedings and defense ─────────────
-    def _resolve_all(
-        self,
-        criminal_proceedings: list,
-        defense_procedural_issues: list,
-    ) -> tuple[list, list, list, list]:
-        """
-        Returns (proceedings_articles, defense_articles,
-                 proceedings_principles, defense_principles).
-        Articles are capped at _MAX_ARTICLES_IN_PROMPT to prevent context overflow.
-        """
-        proceedings_articles = self._accumulate_unique_articles(
-            criminal_proceedings, "criminal_proceedings"
-        )
+    def _resolve_all(self,all_proceedings: list,defense_procedural_issues: list) -> tuple[list, list, list, list]:
 
+        proceedings_articles = self._accumulate_unique_articles(
+            all_proceedings, "all_proceedings"
+        )
         defense_articles = self._accumulate_unique_articles(
             defense_procedural_issues, "defense_procedural_issues"
         )
-
         proceedings_principles = self._accumulate_unique_principles(
-            criminal_proceedings, "criminal_proceedings"
+            all_proceedings, "all_proceedings"
         )
         defense_principles = self._accumulate_unique_principles(
             defense_procedural_issues, "defense_procedural_issues"
         )
-
         return proceedings_articles, defense_articles, proceedings_principles, defense_principles
 
     # ── prompt builder ────────────────────────────────────────────────────────
     def _build_prompt(self, state: AgentState) -> str:
-        incidents = getattr(state, "incidents", []) or []
-        criminal_proceedings = getattr(state, "criminal_proceedings", []) or []
-        defense_procedural_issues = [
-            {"formal_defenses": getattr(doc, "formal_defenses", [])}
-            for doc in (state.defense_documents or [])
-        ]
+            
+            def serialize_proceedings(procs):
+                result = []
+                for p in procs:
+                    result.append({
+                        "procedure_type":     getattr(p, "procedure_type", None),
+                        "description":        getattr(p, "description", None),
+                        "warrant_present":    getattr(p, "warrant_present", None),
+                        "conducting_officer": getattr(p, "conducting_officer", None),
+                        "source_document_id": getattr(p, "source_document_id", None),
+                    })
+                return json.dumps(result, ensure_ascii=False, indent=2)
 
-        (
-            proceedings_articles,
-            defense_articles,
-            proceedings_principles,
-            defense_principles,
-        ) = self._resolve_all(criminal_proceedings, defense_procedural_issues)
+            def serialize_defense(docs):
+                result = []
+                for doc in docs:
+                    for defense in (getattr(doc, "formal_defenses", []) or []):
+                        result.append({
+                            "formal_defense": defense,
+                            "defendant_name": getattr(doc, "defendant_name", None),
+                            "submitted_by":   getattr(doc, "submitted_by", None),
+                        })
+                return json.dumps(result, ensure_ascii=False, indent=2)
 
-        return (
-            "## المسائل الإجرائية المستخرجة من وقائع القضية:\n"
-            f"{criminal_proceedings}\n\n"
+            def serialize_confessions_as_proceedings(confessions):
+                """
+                يحول الاعترافات لإجراءات إجرائية للمراجعة:
+                - غياب المحامي → إجراء محتمل الخلل
+                - ادعاء الإكراه → بطلان مطلق
+                """
+                result = []
+                for c in confessions:
+                    result.append({
+                        "procedure_type":      "استجواب",
+                        "defendant_name":      getattr(c, "defendant_name", None),
+                        "confession_stage":    getattr(c, "confession_stage", None),
+                        "legal_counsel_present": getattr(c, "legal_counsel_present", None),
+                        "coercion_claimed":    getattr(c, "coercion_claimed", None),
+                        "summary":             getattr(c, "text", None),
+                    })
+                return json.dumps(result, ensure_ascii=False, indent=2)
 
-            "## الإشكاليات الإجرائية المُثارة من محامي الدفاع (تحتاج تحققاً):\n"
-            f"{defense_procedural_issues}\n\n"
+            confessions          = getattr(state, "confessions", []) or []
+            criminal_proceedings      = getattr(state, "criminal_proceedings", []) or []
+            defense_procedural_issues = [
+                {"formal_defenses": getattr(doc, "formal_defenses", [])}
+                for doc in (state.defense_documents or [])
+            ]
 
-            "## تفاصيل الحوادث والقبض:\n"
-            f"{incidents}\n\n"
+            all_proceedings_for_retrieval = list(criminal_proceedings) + [
+                type("obj", (), {
+                    "procedure_type":   "استجواب",
+                    "description":      getattr(c, "text", ""),
+                    "procedure_datetime": getattr(c, "confession_date", None),
+                    "warrant_present":  None,
+                    "conducting_officer": None,
+                })()
+                for c in confessions
+            ]
 
-            "---\n"
-            "## المواد القانونية ذات الصلة بوقائع القضية:\n"
-            f"{proceedings_articles}\n\n"
+            (
+                proceedings_articles, defense_articles,
+                proceedings_principles, defense_principles,
+            ) = self._resolve_all(all_proceedings_for_retrieval, defense_procedural_issues)
 
-            "## المبادئ القضائية ذات الصلة بوقائع القضية:\n"
-            f"{proceedings_principles}\n\n"
+            return (
+                "## الإجراءات الجنائية في القضية:\n"
+                f"{serialize_proceedings(criminal_proceedings)}\n\n"
 
-            "## المواد القانونية ذات الصلة بدفوع المحامي:\n"
-            f"{defense_articles}\n\n"
+                "## الدفوع الإجرائية للمحامي:\n"
+                f"{serialize_defense(state.defense_documents or [])}\n\n"
 
-            "## المبادئ القضائية ذات الصلة بدفوع المحامي:\n"
-            f"{defense_principles}\n\n"
+                "## إجراءات الاستجواب (من محضر الاستجواب):\n"
+                f"{serialize_confessions_as_proceedings(confessions)}\n\n"
+                "⚠️ انتبه: coercion_claimed=true = بطلان مطلق للاعتراف فوراً.\n"
+                "⚠️ انتبه: legal_counsel_present=false لا يعني بطلاناً تلقائياً — "
+                "لكن يستوجب الفحص إذا كان الاستجواب في مرحلة التحقيق.\n\n"
 
-            "---\n"
-            "## التعليمات النهائية:\n"
-            "1. استخرج جميع المسائل الإجرائية التي تراها أنت في الوقائع — بصرف النظر عما أثاره المحامي.\n"
-            "2. لكل مسألة أثارها محامي الدفاع: إن كانت صحيحة وثابتة → أدرجها. إن كانت خاطئة → أدرجها في excluded_defense_claims فقط مع بيان سبب الاستبعاد.\n"
-            "3. حدد لكل مخالفة: نوع البطلان (مطلق/نسبي) وأثره على الأدلة المترتبة.\n"
-            "4. الاعتراف المنتزع بإكراه = بطلان مطلق حتماً.\n"
-            "5. لا تذكر مادة قانونية لم ترد في السياق أعلاه.\n\n"
+                "---\n"
+                "## المواد القانونية ذات الصلة بوقائع القضية:\n"
+                f"{json.dumps(proceedings_articles, ensure_ascii=False, indent=2)}\n\n"
 
-            "## صيغة الإجابة (JSON فقط — بلا أي نص خارج JSON):\n"
-            f"{EXPECTED_OUTPUT_SCHEMA}"
-        )
+                "## المبادئ القضائية ذات الصلة بوقائع القضية:\n"
+                f"{json.dumps(proceedings_principles, ensure_ascii=False, indent=2)}\n\n"
 
-    # ── main entry ────────────────────────────────────────────────────────────
-    def run(self, state):
-        criminal_proceedings = getattr(state, "criminal_proceedings", []) or []
-        defense_procedural_issues = [
-            item
-            for doc in (state.defense_documents or [])
-            for item in (getattr(doc, "formal_defenses", []) or [])
-        ]
+                "## المواد القانونية ذات الصلة بدفوع المحامي:\n"
+                f"{json.dumps(defense_articles, ensure_ascii=False, indent=2)}\n\n"
 
-        logger.info(
-            "ProceduralAuditorAgent starting — %d proceeding(s), %d defense issue(s)",
-            len(criminal_proceedings),
-            len(defense_procedural_issues),
-        )
+                "## المبادئ القضائية ذات الصلة بدفوع المحامي:\n"
+                f"{json.dumps(defense_principles, ensure_ascii=False, indent=2)}\n\n"
 
-        if not criminal_proceedings and not defense_procedural_issues:
-            return self._empty_update(state, "procedural_auditor", {
-                "procedural_audit": ProceduralAuditResult(
-                    overall_assessment="لا توجد مسائل إجرائية للمراجعة",
-                )
-            })
+                "---\n"
+                "## التعليمات النهائية:\n"
+                "1. طبّق الاختبار المزدوج على كل إجراء: (أ) القاعدة جوهرية؟ (ب) ضرر فعلي على حق الدفاع؟\n"
+                "2. حدد sanction_type الصحيح: بطلان مطلق / بطلان نسبي / انعدام / سقوط / عدم القبول.\n"
+                "3. وضّح الأثر على ثلاث طبقات: الإجراء ذاته / الإجراءات السابقة / الإجراءات اللاحقة.\n"
+                "4. لكل مخالفة: هل هي قابلة للتصحيح (م.335)؟ هل تحققت الغاية رغم العيب (م.334)؟\n"
+                "5. كل دفع أثاره المحامي يظهر في violations أو excluded_defense_claims — لا يُحذف صمتاً.\n"
+                "6. الاعتراف المنتزع بإكراه = بطلان مطلق دائماً.\n"
+                "7. لا تذكر مادة قانونية لم ترد في السياق أعلاه.\n\n"
 
-        _fallback = ProceduralAuditResult(
-            overall_assessment="فشل استدعاء النموذج — لا يمكن إتمام المراجعة الإجرائية",
-        )
-
-        try:
-            prompt   = self._build_prompt(state)
-            response = self._llm_invoke_with_retries(
-                self._llm,
-                [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
+                "## صيغة الإجابة (JSON فقط — بلا أي نص خارج JSON):\n"
+                f"{EXPECTED_OUTPUT_SCHEMA}"
             )
-            raw_package = self._parse_agent_json(response.content)
-        except Exception as e:
-            logger.error("ProceduralAuditorAgent LLM invocation failed: %s", e)
-            raw_package = None
 
-        if not isinstance(raw_package, dict):
-            logger.error("ProceduralAuditorAgent: LLM response is not a dict — using fallback")
-            audit_result = _fallback
-        else:
-            try:
-                audit_result = ProceduralAuditResult(
-                    violations=[
-                        ProceduralIssue(**v)
-                        for v in raw_package.get("violations", [])
-                        if isinstance(v, dict)
-                    ],
-                    excluded_defense_claims=[
-                        ExcludedDefenseClaim(**c)
-                        for c in raw_package.get("excluded_defense_claims", [])
-                        if isinstance(c, dict)
-                    ],
-                    overall_assessment = raw_package.get("overall_assessment"),
-                    critical_nullities = raw_package.get("critical_nullities", []),
-                    kg_articles_used   = raw_package.get("kg_articles_used", []),
-                )
-            except Exception as e:
-                logger.error("ProceduralAuditorAgent: Pydantic validation failed: %s", e)
-                audit_result = _fallback
+    def run(self, state):
+            criminal_proceedings = getattr(state, "criminal_proceedings", []) or []
+            confessions          = getattr(state, "confessions", []) or []
+            defense_procedural_issues = [
+                item
+                for doc in (state.defense_documents or [])
+                for item in (getattr(doc, "formal_defenses", []) or [])
+            ]
 
             logger.info(
-                "Procedural audit complete — %d violation(s), %d excluded claim(s), %d critical nullit(ies)",
+                "ProceduralAuditorAgent starting — "
+                "%d proceeding(s) | %d confession(s) | %d defense issue(s)",
+                len(criminal_proceedings),
+                len(confessions),
+                len(defense_procedural_issues),
+            )
+
+            if not criminal_proceedings and not confessions and not defense_procedural_issues:
+                return self._empty_update(state, "procedural_auditor", {
+                    "procedural_audit": ProceduralAuditResult(
+                        overall_assessment="لا توجد مسائل إجرائية للمراجعة",
+                    )
+                })
+
+            _fallback = ProceduralAuditResult(
+                overall_assessment="فشل استدعاء النموذج — لا يمكن إتمام المراجعة الإجرائية",
+            )
+
+            raw_package = None
+            try:
+                prompt   = self._build_prompt(state)
+                response = self._llm_invoke_with_retries(
+                    self._llm,
+                    [SystemMessage(content=self.prompt), HumanMessage(content=prompt)],
+                )
+                raw_package = self._parse_agent_json(response.content)
+            except Exception as e:
+                logger.error("ProceduralAuditorAgent LLM invocation failed: %s", e)
+
+            if not isinstance(raw_package, dict):
+                logger.error("ProceduralAuditorAgent: LLM response is not a dict — using fallback")
+                audit_result = _fallback
+            else:
+                try:
+                    audit_result = ProceduralAuditResult(
+                        violations=[
+                            ProceduralIssue(**v)
+                            for v in raw_package.get("violations", [])
+                            if isinstance(v, dict)
+                        ],
+                        excluded_defense_claims=[
+                            ExcludedDefenseClaim(**c)
+                            for c in raw_package.get("excluded_defense_claims", [])
+                            if isinstance(c, dict)
+                        ],
+                        overall_assessment = raw_package.get("overall_assessment"),
+                        critical_nullities  = raw_package.get("critical_nullities", []),
+                        correctable_issues  = raw_package.get("correctable_issues", []),
+                        kg_articles_used    = raw_package.get("kg_articles_used", []),
+                            meta = {
+                                "proceedings_count":    len(criminal_proceedings),
+                                "confessions_count":    len(confessions),
+                                "defense_issues_count": len(defense_procedural_issues),
+                                "kg_connected":         self.kg is not None,
+                                "vs_connected":         self.vs is not None,
+                            },
+                    )
+                except Exception as e:
+                    logger.error("ProceduralAuditorAgent: Pydantic validation failed: %s", e)
+                    audit_result = _fallback
+
+            logger.info(
+                "Procedural audit complete — "
+                "%d violation(s) | %d excluded claim(s) | "
+                "%d critical nullit(ies) | %d correctable issue(s)",
                 len(audit_result.violations),
                 len(audit_result.excluded_defense_claims),
                 len(audit_result.critical_nullities),
+                len(audit_result.correctable_issues),
             )
 
-        audit_result._meta = {
-            "proceedings_count":    len(criminal_proceedings),
-            "defense_issues_count": len(defense_procedural_issues),
-            "kg_connected":         self.kg is not None,
-            "vs_connected":         self.vs is not None,
-        }
-
-        return self._empty_update(state, "procedural_auditor", {
-            "procedural_audit": audit_result,
-        })
+            return self._empty_update(state, "procedural_auditor", {
+                "procedural_audit": audit_result,
+            })

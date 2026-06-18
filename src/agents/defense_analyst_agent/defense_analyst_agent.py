@@ -65,7 +65,9 @@ class DefenseAnalystAgent(AgentBase):
                 "warrant_present":    p.warrant_present     if p.warrant_present is not None else False,
                 "conducting_officer": p.conducting_officer or "",
                 "nullity_type":       p.nullity_type       or "",
-                "nullity_effect":     p.nullity_effect     or "",
+                "effect_on_void_act":        getattr(p, "effect_on_void_act", None) or "",
+                "effect_on_prior_acts":      getattr(p, "effect_on_prior_acts", None) or "",
+                "effect_on_subsequent_acts": getattr(p, "effect_on_subsequent_acts", None) or "",
                 "article_basis":      p.article_basis      or "",
             }
             for p in violations
@@ -97,7 +99,7 @@ class DefenseAnalystAgent(AgentBase):
             "excluded_defense_claims":    [
                 {
                     "claim":  c.claim  or "",
-                    "reason": c.reason or "",
+                    "reason": c.rejection_reason or "",
                 }
                 for c in excluded_claims
             ],
