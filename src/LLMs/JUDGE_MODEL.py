@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
 from src.Config import get_settings
 from .MODEL_BASE import BaseModel
 
