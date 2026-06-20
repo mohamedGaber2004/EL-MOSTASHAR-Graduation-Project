@@ -39,11 +39,13 @@ DATA_INGESTION_AGENT_PROMPT_mahdar_dabt = f"""\
 - statement_date, presence_at_scene (true/false/null)
 - was_sworn_in: true=أدى اليمين صراحةً | false=لم يؤدِّها | null=لم يُذكر
 
-[criminal_proceedings] — إجراء مستقل لكل فعل (ضبط/تفتيش/قبض/معاينة/إخطار...)
-- procedure_type, description, conducting_officer
-- warrant_present: true=إذن صريح | false=غياب الإذن | null=لم يُذكر
-- procedure_datetime: التاريخ والوقت الفعلي لتنفيذ الإجراء كما ورد بالمحضر —
-  null إن لم يُذكر صراحةً أو كان الحقل فارغاً/غير معبأ في الأصل (مثل "--------").
+[criminal_proceedings]  — كل الإجراءات الواردة في المحضر
+سجّل كل إجراء ذُكر صراحةً: ضبط، تفتيش، قبض، انتقال، معاينة، تحليل، إخطار نيابة...
+كل إجراء = سجل منفصل حتى لو نفّذه نفس الضابط.
+    procedure_type: ضبط / تفتيش / قبض / معاينة / انتقال / إخطار / غيره.
+    description: وصف الإجراء كما ورد في النص.
+    warrant_present: true → وُجد إذن قضائي صريح أو إشارة لإذن النيابة. false → حالة تلبس صريحة أو غياب أي ذكر لإذن. null → لم يُشَر للموضوع أصلاً ولا يمكن الجزم.
+    conducting_officer: اسم وصفة الضابط المعني.
 
 {_SHARED_RULES}
 
