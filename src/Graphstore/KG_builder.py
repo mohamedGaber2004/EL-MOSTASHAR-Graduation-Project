@@ -658,13 +658,16 @@ class LegalKnowledgeGraph:
             return out
 
     def get_article(self, law_id: str, article_number: str) -> Optional[str]:
+        clean_article_number = str(article_number).strip()
+        
         with self.driver.session() as session:
             record = session.run(f"""
                 MATCH (a:{NodeLabel.ARTICLE.value} {{law_id: $law_id, article_number: $article_number}})
                 RETURN a.text AS text
                 ORDER BY a.version DESC
                 LIMIT 1
-            """, law_id=law_id, article_number=article_number).single()
+            """, law_id=law_id, article_number=clean_article_number).single()
+            
         return record["text"] if record else None
 
 

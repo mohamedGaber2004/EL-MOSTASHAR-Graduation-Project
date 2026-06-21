@@ -1,12 +1,162 @@
-from typing import List, Optional, Any
-from pydantic import BaseModel, Field
-from pydantic import BaseModel, field_validator
-import json, re
+from __future__ import annotations
+
+from typing import List, Optional, Any, Literal
+from pydantic import BaseModel, Field, field_validator, ConfigDict
+import json
+import re
+import logging
 
 
-# ══════════════════════════════════════════════════════
-#  Shared coercion helpers (module-level, reused across models)
-# ══════════════════════════════════════════════════════
+# =========================================================================
+# Strict schema literals
+# =========================================================================
+
+LawCodeLiteral = Literal[
+    "anti_drugs",
+    "anti_terror",
+    "criminal_constitution",
+    "criminal_procedure",
+    "cybercrime",
+    "emergency_law",
+    "money_laundering",
+    "penal_code",
+    "weapons_ammunition",
+]
+
+LegalBasisType = Literal[
+    "explicit_warrant",
+    "flagrancy",
+    "incidental_to_lawful_arrest",
+    "statutory_authority",
+    "express_no_authority",
+    "unknown",
+]
+
+VALID_LAW_CODES = set(LawCodeLiteral.__args__)
+
+logger = logging.getLogger(__name__)
+
+
+# =========================================================================
+# Normalisation helpers
+# =========================================================================
+
+_ARABIC_INDIC_TRANS = str.maketrans(
+    "\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669"  # ٠١٢٣٤٥٦٧٨٩
+    "\u06F0\u06F1\u06F2\u06F3\u06F4\u06F5\u06F6\u06F7\u06F8\u06F9",  # ۰۱۲۳۴۵۶۷۸۹
+    "01234567890123456789",
+)
+
+_LETTER_EQUIV = {
+    "ا": "أ",
+    "أ": "أ",
+    "إ": "أ",
+    "آ": "أ",
+    "ى": "ي",
+    "ي": "ي",
+}
+
+_VALID_ARTICLE_RE = re.compile(
+    r"^\d+"
+    r"(?:\s+(?:مكرر(?:\s*\([^)]+\))?|\([^)]+\)|[أبجدھهوزحطيكلمنسعفصقرشتثخذضظغ]))?"
+    r"(?:\s+\d+)?$"
+)
+
+
+def _clean_spaces(text: str) -> str:
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s*/\s*", "/", text)
+    text = re.sub(r"\s*\(\s*", " (", text)
+    text = re.sub(r"\s*\)\s*", ")", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+def _normalize_article_number(v: Any) -> Optional[str]:
+    """
+    Robustly coerce an article_number value to a clean string.
+
+    Accepts common legal forms such as:
+      - 3 مكرر
+      - 309/ب
+      - 77 (أ)
+      - 78(أ)
+      - 86 مكرر (أ)
+      - 1/7
+      - 1/34
+      - 1 ف(1)
+      - 1/1/30
+      - 25 مكرراً
+
+    The goal is to preserve the legal form while removing noise and
+    standardizing spacing/punctuation enough for exact matching and
+    downstream comparison.
+    """
+    if v is None:
+        return None
+
+    if isinstance(v, (int, float)):
+        if isinstance(v, float) and not v.is_integer():
+            return str(v)
+        return str(int(v))
+
+    if not isinstance(v, str):
+        v = str(v)
+
+    s = v.strip()
+    if not s:
+        return None
+
+    # Translate Arabic-Indic and Eastern Arabic numerals to Western numerals
+    s = s.translate(_ARABIC_INDIC_TRANS)
+
+    # Normalize common spelling variants of "مكرر"
+    s = s.replace("مكرراً", "مكرر")
+    s = s.replace("مكررا", "مكرر")
+    s = s.replace("مكررة", "مكرر")
+    s = s.replace("مكـرر", "مكرر")
+
+    # Remove zero-width and decorative artifacts
+    s = s.replace("\u200f", "").replace("\u200e", "").replace("ـ", "")
+
+    s = _clean_spaces(s)
+    s = s.strip("\"'،,.;: ")
+
+    # Normalize forms like 78(أ) -> 78 (أ)
+    s = re.sub(r"^(\d+)\(([^)]+)\)$", r"\1 (\2)", s)
+
+    # Normalize forms like 78أ -> 78 (أ)
+    s = re.sub(
+        r"^(\d+)\s*([أإآا])$",
+        lambda m: f"{m.group(1)} ({_LETTER_EQUIV.get(m.group(2), m.group(2))})",
+        s,
+    )
+
+    # Normalize forms like 86 مكررأ -> 86 مكرر (أ)
+    s = re.sub(
+        r"^(\d+)\s*مكرر\s*([أإآا])$",
+        lambda m: f"{m.group(1)} مكرر ({_LETTER_EQUIV.get(m.group(2), m.group(2))})",
+        s,
+    )
+
+    # Normalize forms like 86 مكرر(أ) -> 86 مكرر (أ)
+    s = re.sub(r"^(\d+)\s*مكرر\s*\(([^)]+)\)$", r"\1 مكرر (\2)", s)
+
+    # Normalize forms like 1 ف (1) or 1 ف(1) -> 1 ف(1)
+    s = re.sub(r"^(\d+)\s*ف\s*\(\s*(\d+)\s*\)$", r"\1 ف(\2)", s)
+    s = re.sub(r"^(\d+)\s*ف\s+(\d+)$", r"\1 ف(\2)", s)
+
+    # Normalize some weird slash spacing
+    s = re.sub(r"\s*/\s*", "/", s)
+
+    # Final cleanup
+    s = _clean_spaces(s)
+
+    return s or None
+
+
+# =========================================================================
+# Shared coercion helpers
+# =========================================================================
 def _coerce_str_list(v: Any) -> List[str]:
     """
     Normalise an LLM list-of-strings field.
@@ -27,12 +177,11 @@ def _coerce_str_list(v: Any) -> List[str]:
         for item in v:
             if isinstance(item, str):
                 if item.strip():
-                    result.append(item)
+                    result.append(item.strip())
             elif isinstance(item, dict):
-                # pick the first non-empty string value in the dict
                 for val in item.values():
                     if isinstance(val, str) and val.strip():
-                        result.append(val)
+                        result.append(val.strip())
                         break
         return result
     return []
@@ -67,79 +216,64 @@ def _coerce_bool_optional(v: Any) -> Optional[bool]:
             return True
         if stripped in {"false", "no", "0", "لا", "غير موجود", "لم"}:
             return False
-        return None  # ambiguous string → unknown
+        return None
     return None
 
 def _coerce_name_with_title(v: Any) -> Optional[str]:
     """
-    Coerce an LLM 'name + title/rank' field (officer name + rank,
-    examiner name + title, etc).
-
-    Handles:
-      - plain string                       → as-is
-      - dict {"name": ..., "title": ...}   → combined "name - title",
-        dropping whichever side is missing/empty instead of inserting
-        the literal word 'None'
-      - list (defensive)                   → joined string
-
-    Fixes the production error where examiner_name arrived as
-    {'name': None, 'title': '...نائي المختص'} and Pydantic rejected it
-    because the field is a plain str with no coercion.
+    Coerce a field meant to contain a person's name plus optional title/rank.
     """
     if v is None:
         return None
     if isinstance(v, str):
-        return v
+        return v.strip() or None
     if isinstance(v, dict):
-        name  = v.get("name")  or v.get("الاسم")  or ""
-        title = v.get("title") or v.get("الصفة")  or v.get("role") or v.get("صفة") or ""
+        name = v.get("name") or v.get("الاسم") or ""
+        title = v.get("title") or v.get("الصفة") or v.get("role") or v.get("صفة") or ""
         parts = [str(p).strip() for p in (name, title) if p and str(p).strip()]
         return " - ".join(parts) or None
     if isinstance(v, list):
         flat = _coerce_str_list(v)
         return "، ".join(flat) or None
-    return v
+    return str(v).strip() or None
 
 def _coerce_singular_name(v: Any) -> Optional[str]:
     """
-    Coerce a field meant to hold ONE person's name, but which LLMs
-    sometimes wrap in a list (single- or multi-element) or return as
-    a dict.
-
-    Fixes the production error where linked_defendant_name arrived as
-    ['شريف محمد خل...د فرحات سعيد'] and Pydantic rejected it because
-    the field is a plain str with no coercion.
+    Coerce a field meant to hold one person's name, but which LLMs may
+    return as list/dict/string.
     """
     if v is None:
         return None
     if isinstance(v, str):
-        return v
+        return v.strip() or None
     if isinstance(v, list):
         flat = _coerce_str_list(v)
         return "، ".join(flat) or None
     if isinstance(v, dict):
         for val in v.values():
             if isinstance(val, str) and val.strip():
-                return val
+                return val.strip()
         return None
-    return v
+    return str(v).strip() or None
 
-# ══════════════════════════════════════════════════════
-#  Core Entities
-# ══════════════════════════════════════════════════════
+# =========================================================================
+# Core Entities
+# =========================================================================
 class Defendant(BaseModel):
     """متهم في القضية"""
-    name:               Optional[str] = None   # الاسم
-    alias:              Optional[str] = None   # اسم الشهره
-    national_id:        Optional[str] = None   # الرقم القومي
-    gender:             Optional[str] = None   # ذكر / أنثى
-    date_of_birth:      Optional[str] = None   # الميلاد
-    age:                Optional[int] = None   # السن
-    occupation:         Optional[str] = None   # العمل
-    nationality:        Optional[str] = "مصري" # الجنسيه
-    address:            Optional[str] = None   # العنوان
-    complicity_role:    Optional[str] = None   # فاعل أصلي / شريك / محرّض / متدخل
+
+    name:               Optional[str] = None
+    alias:              Optional[str] = None
+    national_id:        Optional[str] = None
+    gender:             Optional[str] = None
+    date_of_birth:      Optional[str] = None
+    age:                Optional[int] = None
+    occupation:         Optional[str] = None
+    nationality:        Optional[str] = "مصري"
+    address:            Optional[str] = None
+    complicity_role:    Optional[str] = None
     source_document_id: Optional[str] = None
+
     @field_validator("age", mode="before")
     @classmethod
     def coerce_age(cls, v: Any) -> Optional[int]:
@@ -154,7 +288,7 @@ class Defendant(BaseModel):
         if isinstance(v, float):
             return int(v)
         if isinstance(v, str):
-            m = re.search(r'\d+', v)
+            m = re.search(r"\d+", v)
             return int(m.group()) if m else None
         return None
 
@@ -162,14 +296,7 @@ class Defendant(BaseModel):
     @classmethod
     def coerce_nationality(cls, v: Any) -> str:
         """
-        The shared prompt rule tells the model to emit null for any
-        unstated field. Egyptian criminal documents usually only state
-        nationality explicitly when it's NOT Egyptian, so a literal
-        null from the model would otherwise wipe out the 'مصري'
-        default (Pydantic only applies a field default when the key is
-        missing, not when it's present as null). Re-apply the default
-        here so that behavior survives regardless of what the model
-        sends.
+        Preserve default 'مصري' when the model returns null.
         """
         if v is None:
             return "مصري"
@@ -179,16 +306,68 @@ class Defendant(BaseModel):
 
 class Charge(BaseModel):
     """تهمة موجهة"""
-    law_code:               Optional[str] = None # قانون العقوبات / قانون المخدرات …
-    article_number:         Optional[str] = None # رقم الماده
-    description:            Optional[str] = None # وصف التهمه
-    incident_type:          Optional[str] = None # نوع الجريمة
-    charge_classification:  Optional[str] = None # جناية / جنحة / مخالفة
-    attempt_flag:           bool          = False # شروع ام لا
-    charge_date:            Optional[str] = None # التاريخ
-    charge_location:        Optional[str] = None # المكان
-    linked_defendant_names: List[str]     = Field(default_factory=list) # اسم المتهم
-    source_document_id:     Optional[str] = None
+
+    law_code:              Optional[LawCodeLiteral] = None
+    article_number:        Optional[str] = None
+    description:           Optional[str] = None
+    incident_type:         Optional[str] = None
+    charge_classification:  Optional[str] = None
+    attempt_flag:          bool = False
+    charge_date:           Optional[str] = None
+    charge_location:       Optional[str] = None
+    linked_defendant_names: List[str] = Field(default_factory=list)
+    source_document_id:    Optional[str] = None
+
+    @field_validator("law_code", mode="before")
+    @classmethod
+    def coerce_law_code(cls, v: Any) -> Optional[str]:
+        if not v:
+            return None
+
+        val_str = str(v).strip().lower()
+
+        if val_str in VALID_LAW_CODES:
+            return val_str
+
+        arabic_fallback_map = {
+            "قانون العقوبات": "penal_code",
+            "عقوبات": "penal_code",
+            "قانون الإجراءات الجنائية": "criminal_procedure",
+            "إجراءات جنائية": "criminal_procedure",
+            "قانون مكافحة المخدرات": "anti_drugs",
+            "مخدرات": "anti_drugs",
+            "قانون مكافحة الإرهاب": "anti_terror",
+            "إرهاب": "anti_terror",
+            "قانون الأسلحة والذخائر": "weapons_ammunition",
+            "أسلحة وذخائر": "weapons_ammunition",
+            "قانون مكافحة غسل الأموال": "money_laundering",
+            "غسل أموال": "money_laundering",
+            "قانون مكافحة جرائم تقنية المعلومات": "cybercrime",
+            "جرائم إلكترونية": "cybercrime",
+            "جرائم تقنية": "cybercrime",
+            "قانون الطوارئ": "emergency_law",
+            "طوارئ": "emergency_law",
+            "الدستور": "criminal_constitution",
+        }
+
+        for arabic_key, english_val in arabic_fallback_map.items():
+            if arabic_key in val_str:
+                return english_val
+
+        logger.warning("law_code has unexpected format or value: %s", val_str)
+        return None
+
+    @field_validator("article_number", mode="before")
+    @classmethod
+    def coerce_article_number(cls, v: Any) -> Optional[str]:
+        result = _normalize_article_number(v)
+        if result and not _VALID_ARTICLE_RE.match(result):
+            logger.warning(
+                "article_number has unexpected format after normalisation: %r",
+                result,
+            )
+        return result
+
     @field_validator("attempt_flag", mode="before")
     @classmethod
     def coerce_attempt_flag(cls, v: Any) -> bool:
@@ -201,13 +380,15 @@ class Charge(BaseModel):
 
 class CaseIncident(BaseModel):
     """واقعة / حادثة"""
-    incident_type:        Optional[str] = None # نوع الجريمة
-    incident_date:        Optional[str] = None # التاريخ
-    incident_location:    Optional[str] = None # المكان
-    incident_description: Optional[str] = None # وصف الجريمه
-    perpetrator_names:    List[str]     = Field(default_factory=list) # اسماء الجناه
-    victim_names:         List[str]     = Field(default_factory=list) # اسماء المجني عليهم
+
+    incident_type:        Optional[str] = None
+    incident_date:        Optional[str] = None
+    incident_location:    Optional[str] = None
+    incident_description: Optional[str] = None
+    perpetrator_names:    List[str] = Field(default_factory=list)
+    victim_names:         List[str] = Field(default_factory=list)
     source_document_id:   Optional[str] = None
+
     @field_validator("incident_date", mode="before")
     @classmethod
     def coerce_date(cls, v: Any) -> Optional[str]:
@@ -217,10 +398,13 @@ class CaseIncident(BaseModel):
         """
         if isinstance(v, dict):
             start = v.get("start", "")
-            end   = v.get("end", "")
+            end = v.get("end", "")
             if start and end:
                 return f"{start} إلى {end}"
             return start or end or None
+        if isinstance(v, str):
+            s = v.strip()
+            return s or None
         return v
 
     @field_validator("perpetrator_names", "victim_names", mode="before")
@@ -230,15 +414,17 @@ class CaseIncident(BaseModel):
 
 class Evidence(BaseModel):
     """دليل مادي / إجرائي (حرز)"""
-    evidence_type:           Optional[str] = None   # سلاح / مخدر / مستند / هاتف …
-    description:             Optional[str] = None   # وصف الحرز المختصر
-    detailed_text:           Optional[str] = None   # النص الكامل للوصف كما ورد في المحضر
-    seizure_date:            Optional[str] = None   # تاريخ ووقت الضبط
-    seizure_location:        Optional[str] = None   # مكان الضبط
-    seized_by:               Optional[str] = None   # اسم وصفة الضابط
-    seizure_warrant_present: bool          = False  # وجود امر او اذن نيابه
-    linked_defendant_name:   Optional[str] = None   # اسم المتهم الذي ضُبط الحرز بحوزته.
-    source_document_id:      Optional[str] = None
+
+    evidence_type:         Optional[str] = None
+    description:           Optional[str] = None
+    detailed_text:         Optional[str] = None
+    seizure_date:          Optional[str] = None
+    seizure_location:      Optional[str] = None
+    seized_by:             Optional[str] = None
+    seizure_warrant_present: bool = False
+    linked_defendant_name:  Optional[str] = None
+    source_document_id:     Optional[str] = None
+
     @field_validator("seizure_warrant_present", mode="before")
     @classmethod
     def coerce_seizure_warrant_present(cls, v: Any) -> bool:
@@ -247,58 +433,41 @@ class Evidence(BaseModel):
     @field_validator("seized_by", mode="before")
     @classmethod
     def coerce_seized_by(cls, v: Any) -> Optional[str]:
-        """Same 'name + rank' drift risk as examiner_name/conducting_officer."""
         return _coerce_name_with_title(v)
 
     @field_validator("linked_defendant_name", mode="before")
     @classmethod
     def coerce_linked_defendant_name(cls, v: Any) -> Optional[str]:
-        """Same singular-name-arrives-as-list/dict drift as LabReport's."""
         return _coerce_singular_name(v)
 
 class EvidenceItem(BaseModel):
-    description: str                      # وصف العنصر المُرسَل للتحليل
-    evidence_number: Optional[str] = None # رقم الحرز المُسجَّل في محضر الضبط
+    description: str
+    evidence_number: Optional[str] = None
 
 class LabReport(BaseModel):
-    report_type:     Optional[str] = None # نوع التقرير (طبي شرعي / كيميائي / بلستي / غيره)
-    report_number:   Optional[str] = None # رقم التقرير الرسمي الصادر من المعمل
-    examination_date:Optional[str] = None # تاريخ إجراء الفحص بالمعمل
-    examiner_name:   Optional[str] = None # اسم الخبير أو الطبيب الشرعي المُجري للفحص
-    prosecutor_name: Optional[str] = None # اسم عضو النيابة الآمر بالفحص 
-    items_sent_for_analysis: list[EvidenceItem] = Field(default_factory=list) # قائمة العناصر المُرسَلة للمعمل للتحليل (أحراز، مستندات، تسجيلات)
-    result: Optional[str] = None # نتائج التحليل المختلفة (بصمات، فيديو، فحص مادي) — null لو لم تصدر نتائج بعد
-    linked_defendant_name: Optional[str] = None # اسم المتهم المرتبط بهذا التقرير لربطه بملفه في القضية
-    source_document_id: Optional[str] = None
+    report_type:          Optional[str] = None
+    report_number:        Optional[str] = None
+    examination_date:     Optional[str] = None
+    examiner_name:        Optional[str] = None
+    prosecutor_name:      Optional[str] = None
+    items_sent_for_analysis: list[EvidenceItem] = Field(default_factory=list)
+    result:               Optional[str] = None
+    linked_defendant_name: Optional[str] = None
+    source_document_id:   Optional[str] = None
 
     @field_validator("examiner_name", mode="before")
     @classmethod
     def coerce_examiner_name(cls, v: Any) -> Optional[str]:
-        """
-        Production-error fix: model returned
-        {'name': None, 'title': '...نائي المختص'} instead of a string.
-        """
         return _coerce_name_with_title(v)
 
     @field_validator("linked_defendant_name", mode="before")
     @classmethod
     def coerce_linked_defendant_name(cls, v: Any) -> Optional[str]:
-        """
-        Production-error fix: model returned
-        ['شريف محمد خل...د فرحات سعيد'] instead of a string.
-        """
         return _coerce_singular_name(v)
 
     @field_validator("items_sent_for_analysis", mode="before")
     @classmethod
     def coerce_items(cls, v: Any) -> list:
-        """
-        Normalise items_sent_for_analysis:
-          - bare string        → [{"description": string}]
-          - list of strings    → [{"description": s} for s in list]
-          - list of dicts      → ensure 'description' key is always present
-          - missing desc       → reconstruct from sibling keys or repr
-        """
         if not isinstance(v, list):
             if isinstance(v, str) and v.strip():
                 return [{"description": v}]
@@ -311,7 +480,6 @@ class LabReport(BaseModel):
                     coerced.append({"description": item})
             elif isinstance(item, dict):
                 if not item.get("description"):
-                    # Try common sibling keys before falling back to repr
                     item["description"] = (
                         item.get("name")
                         or item.get("item")
@@ -325,7 +493,6 @@ class LabReport(BaseModel):
     @field_validator("result", mode="before")
     @classmethod
     def coerce_result(cls, v: Any) -> Optional[str]:
-        """LLMs sometimes return structured dict results — serialise to string."""
         if isinstance(v, dict):
             return json.dumps(v, ensure_ascii=False)
         if isinstance(v, list):
@@ -333,16 +500,16 @@ class LabReport(BaseModel):
         return v
 
 class WitnessStatement(BaseModel):
-    witness_name:           Optional[str]       = None # اسم الشاهد
-    witness_type:           Optional[str]       = None # ['عيان','ضابط','مخبر']
-    occupation:             Optional[str]       = None # العمل
-    id_number:              Optional[str]       = None # رقم الكارنيه او البطاقه
-    relation_to_defendant:  Optional[str]       = None # علاقته بالمتهم
-    statement_date:         Optional[str]       = None # تاريخ الإدلاء بالشهادة.
-    statement_summary:      Optional[str]       = None # ملخص كل سؤال و اجابته ليتم تقييمهم لاحقا
-    was_sworn_in:           Optional[bool]      = None # إن صُرِّح بأداء اليمين.
-    presence_at_scene:      Optional[bool]      = None # إن كان حاضراً في مكان الحادث.
-    source_document_id:     Optional[str]       = None
+    witness_name:          Optional[str] = None
+    witness_type:          Optional[str] = None
+    occupation:            Optional[str] = None
+    id_number:             Optional[str] = None
+    relation_to_defendant: Optional[str] = None
+    statement_date:        Optional[str] = None
+    statement_summary:     Optional[str] = None
+    was_sworn_in:          Optional[bool] = None
+    presence_at_scene:     Optional[bool] = None
+    source_document_id:    Optional[str] = None
 
     @field_validator("statement_summary", mode="before")
     @classmethod
@@ -372,14 +539,16 @@ class WitnessStatement(BaseModel):
 
 class Confession(BaseModel):
     """اعتراف / إنكار في محضر الاستجواب"""
-    defendant_name:        Optional[str] = None  # اسم المتهم
-    text:                  Optional[str] = None  # ملخص موقف المتهم
-    confession_date:       Optional[str] = None  # تاريخ الاستجواب
-    confession_stage:      Optional[str] = None  # تحقيق / محكمة
-    legal_counsel_present: bool          = False # حضور المحامي ام لا
-    coercion_claimed:      bool          = False # تعرض لتهديد او اكراه
-    key_admissions:        List[str]     = Field(default_factory=list) # نقاط أقرّ بها المتهم حتى لو كان إنكاره جزئياً.
-    source_document_id:    Optional[str] = None
+
+    defendant_name:       Optional[str] = None
+    text:                 Optional[str] = None
+    confession_date:      Optional[str] = None
+    confession_stage:     Optional[str] = None
+    legal_counsel_present: bool = False
+    coercion_claimed:     bool = False
+    key_admissions:       List[str] = Field(default_factory=list)
+    source_document_id:   Optional[str] = None
+
     @field_validator("legal_counsel_present", "coercion_claimed", mode="before")
     @classmethod
     def coerce_bools(cls, v: Any) -> bool:
@@ -392,27 +561,60 @@ class Confession(BaseModel):
 
 class CriminalRecord(BaseModel):
     """صحيفة السوابق الجنائية لمتهم"""
-    defendant_name:     Optional[str] = None # اسم المتهم
-    record_summary:     Optional[str] = None # ملخص مختصر لمحتوى الصحيفة
-    prior_cases:        List[str]     = Field(default_factory=list)  # قضايا سابقة إن ذُكرت
+
+    defendant_name:     Optional[str] = None
+    record_summary:     Optional[str] = None
+    prior_cases:        List[str] = Field(default_factory=list)
     source_document_id: Optional[str] = None
+
     @field_validator("prior_cases", mode="before")
     @classmethod
     def coerce_prior_cases(cls, v: Any) -> List[str]:
         return _coerce_str_list(v)
 
 class CriminalProceedings(BaseModel):
-    procedure_type:      Optional[str]  = None  # ضبط / قبض / استجواب / تفتيش
-    description:         Optional[str]  = None  # الوصف
-    procedure_datetime:  Optional[str]  = None  # تاريخ ووقت تنفيذ الإجراء — null إن لم يُذكر بالمحضر
-    warrant_present:     Optional[bool] = False # false إن كان الإذن غائباً
-    conducting_officer:  Optional[str]  = None  # اسم وصفة الضابط المعني.
-    source_document_id:  Optional[str]  = None
+    model_config = ConfigDict(extra="ignore")
 
-    @field_validator("warrant_present", mode="before")
+    procedure_type:        Optional[str] = None  # ضبط / قبض / استجواب / تفتيش / معاينة / انتقال / إخطار / غيره
+    description:           Optional[str] = None  # الوصف كما ورد
+    procedure_datetime:    Optional[str] = None  # null إن لم يُذكر
+    legal_basis_present:   Optional[bool] = None  # true/false/null
+    legal_basis_type:      Optional[LegalBasisType] = None
+    legal_basis_note:      Optional[str] = None
+    conducting_officer:    Optional[str] = None
+    source_document_id:    Optional[str] = None
+
+    @field_validator("legal_basis_present", mode="before")
     @classmethod
-    def coerce_warrant_present(cls, v: Any) -> Optional[bool]:
+    def coerce_legal_basis_present(cls, v: Any) -> Optional[bool]:
         return _coerce_bool_optional(v)
+
+    @field_validator("legal_basis_type", mode="before")
+    @classmethod
+    def coerce_legal_basis_type(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+
+        raw = str(v).strip().lower()
+
+        mapping = {
+            "إذن نيابة": "explicit_warrant",
+            "إذن قضائي": "explicit_warrant",
+            "warrant": "explicit_warrant",
+            "explicit_warrant": "explicit_warrant",
+            "تلبس": "flagrancy",
+            "flagrancy": "flagrancy",
+            "في حالة تلبس": "flagrancy",
+            "incidental_to_lawful_arrest": "incidental_to_lawful_arrest",
+            "تبعي للقبض الصحيح": "incidental_to_lawful_arrest",
+            "statutory_authority": "statutory_authority",
+            "سند قانوني آخر": "statutory_authority",
+            "express_no_authority": "express_no_authority",
+            "no_authority": "express_no_authority",
+            "unknown": "unknown",
+        }
+
+        return mapping.get(raw, "unknown")
 
     @field_validator("conducting_officer", mode="before")
     @classmethod
@@ -425,30 +627,32 @@ class CriminalProceedings(BaseModel):
         """
         Same dict-shape drift as CaseIncident.incident_date. Also normalises
         an unfilled placeholder copied verbatim from a محضر (e.g. '--------')
-        down to a clean None, so 'timestamp missing' reaches the auditor as
-        an actual null rather than a string of dashes it has to interpret.
+        down to a clean None.
         """
         if isinstance(v, dict):
             date = v.get("date", "") or v.get("التاريخ", "")
             time = v.get("time", "") or v.get("الوقت", "")
             combined = " ".join(p for p in (date, time) if p).strip()
             return combined or None
+
         if isinstance(v, str):
             stripped = v.strip()
             if not stripped or set(stripped) <= {"-", "_", "."}:
                 return None
             return stripped
+
         return v
 
 class DefenseDocument(BaseModel):
-    submitted_by:          Optional[str]       = None # اسم المحامي مُقدِّم المذكرة.
-    defendant_name:        Optional[str]       = None # اسم المتهم المدافَع عنه.
-    formal_defenses:       List[str]           = Field(default_factory=list) # (تتعلق بصحة الإجراءات لا بموضوع الجريمة).
-    substantive_defenses:  List[str]           = Field(default_factory=list) # الدفوع الموضوعية (تتعلق بأركان الجريمة وعدم توافرها).
-    supporting_principles: List[str]           = Field(default_factory=list) # مبادئ محكمة النقض والمواد القانونية التي استند إليها الدفاع.
-    alibi_claimed:         bool                = False # إن ادّعى الدفاع صراحةً وجود المتهم في مكان آخر وقت الحادث.
-    alibi_description:     Optional[str]       = None  # وصف إن وُجد (المكان، الزمان، الشهود الداعمون).
-    source_document_id:    Optional[str]       = None
+    submitted_by:          Optional[str] = None
+    defendant_name:        Optional[str] = None
+    formal_defenses:       List[str] = Field(default_factory=list)
+    substantive_defenses:  List[str] = Field(default_factory=list)
+    supporting_principles: List[str] = Field(default_factory=list)
+    alibi_claimed:         bool = False
+    alibi_description:     Optional[str] = None
+    source_document_id:    Optional[str] = None
+
     @field_validator("alibi_claimed", mode="before")
     @classmethod
     def coerce_alibi_claimed(cls, v: Any) -> bool:
@@ -472,9 +676,12 @@ class DefenseDocument(BaseModel):
         time / location / supporting_witnesses keys.
         """
         if isinstance(v, dict):
-            time      = v.get("time", "")
-            location  = v.get("location", "")
+            time = v.get("time", "")
+            location = v.get("location", "")
             witnesses = "، ".join(v.get("supporting_witnesses", []))
-            parts     = filter(None, [time, location, f"شهود: {witnesses}" if witnesses else ""])
+            parts = filter(None, [time, location, f"شهود: {witnesses}" if witnesses else ""])
             return " — ".join(parts) or None
+        if isinstance(v, str):
+            s = v.strip()
+            return s or None
         return v

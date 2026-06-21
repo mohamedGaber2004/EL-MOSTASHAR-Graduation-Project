@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 # Error wrapper 
 # ─────────────────────────────────────────────────────────────────────────────
 def _safe_run(agent_key: str, agent):
-    @functools.wraps(agent.run)
     def _wrapped(state):
         try:
             result = agent.run(state)
@@ -55,15 +54,14 @@ def _safe_run(agent_key: str, agent):
 
     _wrapped.__name__ = agent_key
     _wrapped.__qualname__ = agent_key
+    _wrapped.__doc__ = agent.run.__doc__
     return _wrapped
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Conditional routing
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _route_after_procedural_audit(
-    state: AgentState,
-) -> Literal["legal_researcher", "judge"]:
+def _route_after_procedural_audit(state: AgentState) -> Literal["legal_researcher", "judge"]:
 
     audit = getattr(state, "procedural_audit", None)
 

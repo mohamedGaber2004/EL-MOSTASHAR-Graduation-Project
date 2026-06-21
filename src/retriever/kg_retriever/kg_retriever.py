@@ -10,11 +10,14 @@ from typing import Any, Dict, List, Optional
 from langchain_core.embeddings import Embeddings
 from pydantic import BaseModel, Field
 from rank_bm25 import BM25Okapi
+import unicodedata
+
 
 from src.retriever.kg_retriever.kg_retriever_enums import (
     EmbedIdProperty,
     EmbedNodeLabel,
     IndexName,
+    LR_Enums,
     SimilarityFunction,
 )
 
@@ -55,17 +58,7 @@ OPTIONS {{
 }}
 """
 
-_ANN_ARTICLES = f"""
-CALL db.index.vector.queryNodes('{IndexName.ARTICLES.value}', $k, $query_vector)
-YIELD node AS article, score
-RETURN
-    article.article_id     AS article_id,
-    article.article_number AS article_number,
-    article.law_id         AS law_id,
-    article.text           AS text,
-    score
-ORDER BY score DESC
-"""
+_ANN_ARTICLES = LR_Enums._CHARGE_ANN_QUERY.value
 
 _ANN_TABLES = f"""
 CALL db.index.vector.queryNodes('{IndexName.TABLE_CHUNKS.value}', $k, $query_vector)
@@ -126,6 +119,22 @@ RETURN
     a.text                         AS text
 """
 
+_FETCH_ALL_LAW_TITLES = """
+MATCH (l:Law)
+WHERE l.title IS NOT NULL AND l.law_id IS NOT NULL
+RETURN l.law_id AS law_id, l.title AS title
+"""
+
+_FETCH_EXACT_ARTICLE = """
+MATCH (a:Article {law_id: $law_id, article_number: $article_number})
+RETURN
+    a.article_id     AS article_id,
+    a.article_number AS article_number,
+    a.law_id         AS law_id,
+    a.text           AS text
+LIMIT 1
+"""
+
 _STORE_EMBEDDING = """
 UNWIND $rows AS row
 MATCH (n:{label} {{{id_prop}: row.id}})
@@ -133,6 +142,52 @@ SET n.embedding = row.embedding
 """
 
 _MAX_CONTEXT_CHARS = 9_000
+
+# =============================================================================
+# Exact article-number lookup helpers
+# =============================================================================
+
+# Matches "المادة 236", "مادة (86 مكرر)", "المادة236", etc.
+_ARTICLE_NUMBER_RE = re.compile(
+    r"(?:المادة|مادة)\s*\(?\s*(\d+\s*(?:مكرر)?(?:\s*[أ-ي])?)\s*\)?"
+)
+
+# Longest-name-first so e.g. a more specific law name can't be shadowed by a
+# shorter substring of another entry.
+_KNOWN_LAW_NAMES: List[str] = sorted(
+    [
+        "قانون العقوبات",
+        "قانون الإجراءات الجنائية",
+        "قانون مكافحة المخدرات",
+        "قانون مكافحة الإرهاب",
+        "قانون الأسلحة والذخائر",
+        "قانون مكافحة جرائم تقنية المعلومات",
+        "قانون مكافحة غسل الأموال",
+        "قانون الطوارئ",
+        "الدستور الجنائي",
+    ],
+    key=len,
+    reverse=True,
+)
+
+
+def _extract_article_number(question: str) -> Optional[str]:
+    """Pull a bare article number (e.g. '236', '86 مكرر') out of free text."""
+    m = _ARTICLE_NUMBER_RE.search(question)
+    return m.group(1).strip() if m else None
+
+
+def _extract_law_id_fallback(question: str) -> Optional[str]:
+    """
+    Hardcoded fallback resolver — used only if the live, DB-derived law-name
+    index (built from real :Law.title values, see LegalRetriever._build_law_name_index)
+    finds no match. Spellings here can drift from what's actually stored in
+    Neo4j, so this is a safety net, not the primary path.
+    """
+    for name in _KNOWN_LAW_NAMES:
+        if name in question:
+            return LR_Enums.law_code_to_kg_id(name)
+    return None
 
 
 # =============================================================================
@@ -142,7 +197,7 @@ class ArticleContext(BaseModel):
     """An article node enriched with its graph neighbours."""
     article_id:          str
     law_id:              str
-    law_title:           str
+    law_title:            str
     article_number:      str
     text:                str
     score:               float
@@ -359,6 +414,11 @@ class ArticleBM25Index:
 
     def search(self, query: str, k: int = 15) -> List[_Record]:
         scores = self._bm25.get_scores(_tokenize_arabic(query))
+        # Boost exact article number matches
+        article_num = _extract_article_number(query)
+        for i, rec in enumerate(self._records):
+            if article_num and rec.get("article_number") == article_num:
+                scores[i] *= 10.0  # strong boost
         ranked = sorted(zip(self._records, scores), key=lambda x: x[1], reverse=True)[:k]
         return [{**rec, "score": float(score)} for rec, score in ranked if score > 0]
 
@@ -576,7 +636,8 @@ def _budget_aware_context(
 class LegalRetriever:
     """
     Hybrid (vector + BM25 + graph expansion) retriever over the Legal
-    Knowledge Graph.
+    Knowledge Graph, with an exact article_number + law_id fast path that
+    bypasses embeddings entirely when the question names both explicitly.
 
     Parameters
     ----------
@@ -592,7 +653,7 @@ class LegalRetriever:
     ::
 
         retriever = LegalRetriever(graph, embeddings)
-        result    = retriever.retrieve("ما هي عقوبة السرقة؟")
+        result    = retriever.retrieve("ما هي عقوبة المادة 236 من قانون العقوبات؟")
         for src in result.sources:
             print(src["article_number"], src["score"])
     """
@@ -610,6 +671,7 @@ class LegalRetriever:
         self._index_mgr   = VectorIndexManager(graph.driver)
         self._embed_pipe  = EmbeddingPipeline(graph.driver, embeddings)
         self._bm25_index  = ArticleBM25Index(graph.driver)
+        self._law_name_index = self._build_law_name_index()
 
     # ── context manager ───────────────────────────────────────────────────
 
@@ -652,6 +714,70 @@ class LegalRetriever:
         self._index_mgr.create(dim)
         return self._embed_pipe.embed_all(batch_size=batch_size, max_workers=max_workers)
 
+    # ── exact lookup ─────────────────────────────────────────────────────
+
+
+    def _normalize_arabic(self,text: str) -> str:
+        """Strip diacritics, normalize unicode, collapse whitespace."""
+        # Remove Arabic diacritics (tashkeel)
+        text = re.sub(r'[\u0610-\u061A\u064B-\u065F]', '', text)
+        # Normalize unicode (NFC)
+        text = unicodedata.normalize('NFC', text)
+        # Collapse whitespace
+        text = ' '.join(text.split())
+        return text
+
+    def _build_law_name_index(self) -> List[tuple[str, str]]:
+        with self.graph.driver.session() as session:
+            rows = session.run(_FETCH_ALL_LAW_TITLES).data()
+
+        pairs = [
+            (self._normalize_arabic(r["title"]), r["law_id"])
+            for r in rows if r.get("title") and r.get("law_id")
+        ]
+        pairs.sort(key=lambda p: len(p[0]), reverse=True)
+        return pairs
+
+    def _resolve_law_id(self, question: str) -> Optional[str]:
+        normalized_q = self._normalize_arabic(question)
+        for title, law_id in self._law_name_index:
+            if title in normalized_q:
+                return law_id
+        return _extract_law_id_fallback(question)
+
+    def _exact_article_lookup(self, question: str) -> Optional[ArticleContext]:
+        """
+        Direct article_number + law_id graph lookup, bypassing vector/BM25 search.
+
+        Returns ``None`` if the question doesn't clearly name both a known law
+        and an article number, or if no matching node exists in the graph.
+        """
+        article_number = _extract_article_number(question)
+        law_id         = self._resolve_law_id(question)
+
+        logger.info("Exact lookup attempt — article=%s law_id=%s", article_number, law_id)
+
+        if not article_number or not law_id:
+            return None
+
+        with self.graph.driver.session() as session:
+            rec = session.run(
+                _FETCH_EXACT_ARTICLE,
+                law_id=law_id,
+                article_number=article_number,
+            ).single()
+
+        if not rec:
+            logger.info(
+                "Exact lookup miss — law_id=%s article_number=%s", law_id, article_number
+            )
+            return None
+
+        logger.info(
+            "Exact lookup hit — law_id=%s article_number=%s", law_id, article_number
+        )
+        return expand_article(self.graph.driver, {**rec.data(), "score": 1.0})
+
     # ── retrieval ─────────────────────────────────────────────────────────
 
     def retrieve(
@@ -665,6 +791,8 @@ class LegalRetriever:
 
         Steps
         -----
+        0. Try an exact article_number + law_id graph lookup (no embeddings
+           involved). If it hits, the article is pinned as the first result.
         1. Embed the question.
         2. ANN search over articles and table chunks.
         3. BM25 search + RRF merge for articles.
@@ -672,9 +800,11 @@ class LegalRetriever:
         5. Filter by *threshold*, deduplicate.
         6. Assemble budget-aware context string.
         """
-        top_k        = min(k or self.k, 15)
-        query_vector = self.embeddings.embed_query(question)
+        top_k = min(k or self.k, 15)
 
+        exact_match = self._exact_article_lookup(question)
+
+        query_vector = self.embeddings.embed_query(question)
         article_hits, table_hits = self._run_searches(query_vector, question, top_k)
 
         valid_articles = [c for c in article_hits if c.score >= threshold]
@@ -682,9 +812,16 @@ class LegalRetriever:
             [t for t in table_hits if t.score >= threshold], max_tables=5
         )
 
+        if exact_match:
+            # Pin the exact match first and drop any duplicate the hybrid
+            # search may have also surfaced.
+            valid_articles = [exact_match] + [
+                c for c in valid_articles if c.article_id != exact_match.article_id
+            ]
+
         logger.info(
-            "After threshold (%.2f) — articles: %d | tables: %d",
-            threshold, len(valid_articles), len(valid_tables),
+            "After threshold (%.2f) — articles: %d | tables: %d | exact_match: %s",
+            threshold, len(valid_articles), len(valid_tables), bool(exact_match),
         )
 
         if not valid_articles and not valid_tables:
