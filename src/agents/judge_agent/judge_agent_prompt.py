@@ -27,6 +27,6 @@ JUDGE_AGENT_PROMPT = """
   "total_prison_months": 0,
   "total_fine_amount": 0.0,
   "operative_text": "حكمت المحكمة حضورياً: بـ[إدانة/تبرئة] المتهم [الاسم] عن [التهم] المؤثمة بالمواد [أرقام] وعاقبته بالحبس/السجن لمدة [X] سنوات و [Y] أشهر وغرامة [Z] وألزمته بالمصاريف.",
-  "confidence_score": 0.0
+  "confidence_score": 0.0 (مهم جدا لا تتجاهله)
 }}
 """.strip()
